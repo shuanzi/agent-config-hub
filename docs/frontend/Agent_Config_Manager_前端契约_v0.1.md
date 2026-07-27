@@ -1,6 +1,6 @@
 # Agent Config Manager：前端契约 v0.1
 
-> 状态：待验收；`ARCH-GATE` 未关闭，前端实现不得开始
+> 状态：已验收（2026-07-27）；`CR-FE-001` 已确认纳入（2026-07-27）；整机技术方案已验收且 `ARCH-GATE` 已关闭（2026-07-27）
 > 更新时间：2026-07-27
 > 上位事实来源：`docs/product/Agent_Config_Manager_MVP_产品决策基线_v0.1.md`
 > 基线指纹：`sha256:0c28dade5e6f58acfc10296ea6d83437c045a68afdd9b37ba307bfc818f9a1df`
@@ -53,6 +53,12 @@ Agent Config Manager 的产品范围、UI/交互和视觉规范已经封板，�
 - 核心引擎、适配器、索引、数据库、文件监听和事务实现；
 - 栏宽记忆、搜索校准和快照配额的存储与具体参数；
 - 打包、签名、更新、性能阈值和测试工具选型。
+
+### 3.4 已接受 Change Request
+
+| 编号 | 来源 | 最小变更 | 非目标 |
+|---|---|---|---|
+| `CR-FE-001` | `ARCH-GATE` 的 IPC interface 可实现性审查 | 为无法取得可信 `PrepareResult` 的 transport/protocol failure 增加 `PrepareFailed`，并统一使用稳定原因码 `GATEWAY_UNAVAILABLE` | 不新增操作能力，不改变正常 prepare、review、confirm 或 apply 行为，不重新打开其他产品与 UI 决策 |
 
 ## 4. Canonical Vocabulary
 
@@ -122,7 +128,7 @@ Agent Config Manager 的产品范围、UI/交互和视觉规范已经封板，�
 | 操作 | 输入 | 输出 | 契约 |
 |---|---|---|---|
 | `read` | 一个 `Query` | `ReadResult<该 query 对应 Snapshot>` | 只读；成功返回本次事实及其 revision，失败返回稳定原因与恢复动作 |
-| `prepare` | 一个 `OperationIntent` 和其操作类别要求的并发事实 | 一个封闭 `PrepareResult` | 无副作用；完成校验、映射、差异、冲突识别和确认摘要 |
+| `prepare` | 一个 `OperationIntent` 和其操作类别要求的并发事实 | 一个封闭 `PrepareResult` | 无副作用；完成校验、映射、差异、冲突识别和确认摘要，无法取得可信结果时返回稳定失败 |
 | `apply` | `preparedOperationId` 和其 revision-bound `OperationConcurrencyToken` | 一个 `OperationResult` | 唯一变更入口；重读受影响事实后才执行，不匹配时不写入 |
 | `observe` | 一个 `Subscription` | `WorkspaceEvent` 流 | 只通知失效或进度已更新；消费方随后通过 `read` 取得可读事实 |
 
@@ -227,8 +233,11 @@ Agent Config Manager 的产品范围、UI/交互和视觉规范已经封板，�
 | `PreparedOperation` | 当前事实可形成可审查计划；通过 `canApply`、finding、差异和确认摘要决定能否继续 |
 | `TargetNameCollision` | 当前目标重名及 `cancel`、`rename`、`reviewAndOverwrite`；解决后必须重新 prepare |
 | `ConflictResult` | 基于当前事实形成的三方冲突审查，含基线、最新磁盘、当前草稿及保留/解决/放弃动作；解决后必须重新 prepare |
+| `PrepareFailed` | transport/protocol failure 导致无法取得可信准备结果；包含稳定 `reasonCode`、安全说明和可选恢复动作，不包含 `preparedOperationId`、并发 token、差异或可应用内容 |
 
 `ConflictResult` 只由 `prepare` 基于当前事实产生，不是 `apply` 结果，也不含可应用的 `preparedOperationId`。旧 operation 因并发事实变化失效时，`apply` 只返回 `BlockedResult(REPREPARE_REQUIRED)`；后续重新 `prepare` 才能产生新版 `PreparedOperation`、`TargetNameCollision` 或 `ConflictResult`。
+
+`PrepareFailed` 不是校验 finding，也不能伪装成 `canApply=false` 的 `PreparedOperation`。UI 保留发起前的草稿、目标设置、当前文件、文件树、检查器和展开上下文，只展示稳定失败与可选恢复动作；只有用户显式重试并取得新的 `PreparedOperation` 才能进入 review，失败结果本身永远不能进入 confirm 或 `apply`。
 
 `PreparedOperation` 必须包含：
 
@@ -333,6 +342,7 @@ Agent Config Manager 的产品范围、UI/交互和视觉规范已经封板，�
 | 事务与恢复 | `READ_FAILED`、`SNAPSHOT_REQUIRED`、`SNAPSHOT_FAILED`、`SECURE_STORAGE_UNAVAILABLE`、`DISK_FULL`、`WRITE_FAILED`、`ROLLBACK_FAILED`、`RECOVERY_TARGET_OCCUPIED` |
 | 适配器包 | `ADAPTER_SIGNATURE_INVALID`、`ADAPTER_COMPATIBILITY_MISMATCH`、`ADAPTER_REGRESSION_FAILED` |
 | 导入与导出 | `IMPORT_SOURCE_UNAVAILABLE`、`EXPORT_DESTINATION_INVALID` |
+| Gateway 可用性 | `GATEWAY_UNAVAILABLE` |
 
 `GitStatus.modified` 是风险上下文而非默认阻断原因；产品不得因此执行 Git 操作。
 
@@ -411,6 +421,8 @@ Agent Config Manager 的产品范围、UI/交互和视觉规范已经封板，�
 - `reviewAndOverwrite` 只把已有目标与替换内容纳入新版审查，不能直接 apply；
 - 任何外部 revision 变化优先进入 `reprepareRequired`，而不是自动沿用冲突前的覆盖选择。
 
+所有调用 `prepare` 的 workflow 共享同一失败自迁移：收到 `PrepareFailed` 时保持发起前的 `editing.dirty`、`draft`、`targetSelection` 或 `mapping` 上下文，不清除草稿、不改变目标、不产生 prepared operation，也不进入 review。用户只能留在当前上下文、执行契约给出的恢复动作或显式重试。
+
 ### 7.7 Frontend-local workspace state
 
 以下状态属于 UI 本地状态，不扩展 `FrontendGateway`：
@@ -446,6 +458,7 @@ Agent Config Manager 的产品范围、UI/交互和视觉规范已经封板，�
 15. workspace event 只触发失效或进度已更新；`OperationProgressSnapshot` 才是进度事实来源。
 16. 敏感片段以 revision 遮蔽；未触碰时无损保留，查看与修改分别需要显式短生命周期授权。
 17. 正常状态不常驻强调；异常、阻断和恢复动作必须可解释。
+18. transport/protocol failure 不得以异常字符串、伪造 finding 或伪造 prepared operation 穿过 `FrontendGateway`；`PrepareFailed` 保留当前上下文且不能授权写入。
 
 ## 9. Implementation Decisions
 
@@ -506,6 +519,7 @@ fixture 只能使用合成占位值，不得复制真实 Token、路径中的个
 | `FX-15 install-single-target` | 已选源资产安装到一个目标 Agent/作用域 | `installAsset` 的单源单目标、差异审查、确认和资产恢复点 | FE-05 |
 | `FX-16 asset-write-result-branches` | 原生资产写入的准备与应用结果分支 | prepare 可产生当前事实的 `ConflictResult`；apply 的 Applied、Blocked、Failed 及回滚子状态均回显 identity 与适用恢复信息 | FE-04 |
 | `FX-17 target-name-collision` | 目标已有同名原生资产 | `TARGET_NAME_CONFLICT` 只允许取消、改名或审查后覆盖；覆盖仍须确认 | FE-05 |
+| `FX-18 gateway-prepare-unavailable` | prepare 的 transport/protocol failure 无法形成可信结果 | 返回 `PrepareFailed(GATEWAY_UNAVAILABLE)`；保留草稿、目标和工作区上下文，不含异常字符串或敏感明文，不产生 prepared ID、token、差异或 `apply` | FE-04 |
 
 ### 10.3 Journey assertions
 
@@ -519,6 +533,7 @@ fixture 只能使用合成占位值，不得复制真实 Token、路径中的个
 - 确定的结果、焦点和恢复动作；
 - 外部 revision 后的 `REPREPARE_REQUIRED`、重新 prepare、审查和确认；
 - 外部事件后通过对应 `read` 重取事实，进度通过 `OperationProgressQuery` 读取；
+- `PrepareFailed` 后保留发起前上下文，只有显式重试取得新的 `PreparedOperation` 才能进入审查；
 - 无静默写入、无敏感泄露、无隐式 Git 操作。
 
 ## 11. Product Baseline Traceability Matrix
@@ -530,7 +545,7 @@ fixture 只能使用合成占位值，不得复制真实 Token、路径中的个
 | 3.2 MVP 不做 | 封闭 `Query`/`OperationIntent`；无对话、Agent 执行、云同步、市场、依赖图、凭证管理等入口 | 契约负向审查（非运行时覆盖声明） | FE-10 |
 | 4.1–4.2 原生资产与原位管理 | `AssetRef`、`NativeFileRef`、原生内容 snapshot、独立目标结果 | FX-01、FX-08、FX-09 | FE-01、FE-05、FE-06 |
 | 4.3 资产类型优先 | 四类一级状态，Agent/项目/作用域仅为 query 维度 | FX-01 | FE-01 |
-| 4.4–4.5 封闭失败与无静默损失 | `ActionAvailability`、blocking finding、封闭 `PrepareResult`/`OperationResult`、revision | FX-03、FX-05、FX-11、FX-16 | FE-02、FE-04、FE-06 |
+| 4.4–4.5 封闭失败与无静默损失 | `ActionAvailability`、blocking finding、封闭 `PrepareResult`/`OperationResult`、revision | FX-03、FX-05、FX-11、FX-16、FX-18 | FE-02、FE-04、FE-06 |
 | 5.1 原生可管理单元 | `AssetDetail`、文件树、单资产草稿与事务 | FX-01、FX-02 | FE-01、FE-02 |
 | 5.2 资产身份 | 不透明 `AssetRef`；路径不单独作为身份 | FX-01、FX-07 | FE-01、FE-07 |
 | 5.3 生效上下文 | `InspectorData`、上下文与覆盖关系 | FX-01、FX-03 | FE-02 |
@@ -555,7 +570,7 @@ fixture 只能使用合成占位值，不得复制真实 Token、路径中的个
 | 10.1–10.2 兼容范围 | `CompatibilityStatus`、只读或阻断 action availability | FX-06 | FE-02、FE-08 |
 | 10.4 macOS 首发 | UI 不声明其他平台可用；实现方式由 `ARCH-GATE` 决定 | FX-12 | FE-10 |
 | 10.5 适配器包更新 | update/rollback intents、签名/兼容/回归原因码 | FX-14 | FE-08 |
-| 11.1 统一变更流程 | `prepare`/`apply`、确认摘要、类别化结果和恢复策略 | FX-05、FX-07–10、FX-13–17 | FE-04、FE-05、FE-06、FE-07、FE-08、FE-09 |
+| 11.1 统一变更流程 | `prepare`/`apply`、确认摘要、类别化结果和恢复策略 | FX-05、FX-07–10、FX-13–18 | FE-04、FE-05、FE-06、FE-07、FE-08、FE-09 |
 | 11.2 乐观并发 | revision-bound token、`REPREPARE_REQUIRED` 与新版审查 | FX-05、FX-17 | FE-04、FE-05 |
 | 11.3 可恢复删除 | delete/recover intents、恢复目标占用结果 | FX-13 | FE-09 |
 | 11.4 Git 状态感知 | `GitStatus`，无 Git intent | FX-05、FX-13 | FE-04、FE-09 |
@@ -566,8 +581,14 @@ fixture 只能使用合成占位值，不得复制真实 Token、路径中的个
 | 12.2 私有元数据 | UI 只读取来源、历史、恢复和索引状态；存储后置 | FX-07、FX-13 | FE-07、FE-09 |
 | 13 可执行资产安全 | `EXECUTABLE_CONTENT_RISK`、只读内容、产品不执行 | FX-03、FX-13 | FE-02、FE-05、FE-09 |
 | 14 敏感信息保护 | revision-bound `SensitiveSegmentRef`、显式查看/修改授权、无损保留与 diff 遮蔽 | FX-01、FX-02、FX-04、FX-05、FX-12 | FE-01、FE-02、FE-03、FE-04、FE-10 |
-| 16 MVP 验收原则 | gateway 旅程、fixture catalog 与票据验收共同实现 | FX-01–FX-17（计划范围，非完成声明） | FE-01–FE-10 |
+| 16 MVP 验收原则 | gateway 旅程、fixture catalog 与票据验收共同实现 | FX-01–FX-18（计划范围，非完成声明） | FE-01–FE-10 |
 | 20.5 视觉与可访问性 | 语义状态、键盘焦点、对比、16 px 图标、160 ms 与减少动态效果 | FX-12 | FE-10 |
+
+### 11.1 Change Request Coverage
+
+| Change Request | 契约表达 | Fixture / journey | 前端票据 |
+|---|---|---|---|
+| `CR-FE-001` prepare transport/protocol failure | `PrepareFailed`、`GATEWAY_UNAVAILABLE`、上下文保留、自身不可进入 confirm/apply | FX-18 | FE-04 |
 
 ## 12. Out of Scope
 
@@ -589,8 +610,9 @@ fixture 只能使用合成占位值，不得复制真实 Token、路径中的个
 
 - 本契约覆盖完整 MVP，任务顺序仍以浏览、编辑、审查、应用和转换主闭环优先；
 - `.scratch/agent-config-manager-frontend/issues/` 是当前本地票据集；
-- 所有前端票据受 `ARCH-GATE` 阻塞；技术方案验收前不得开始实现；
+- `ARCH-GATE` 已关闭；FE-01 可按已冻结技术方案开始，FE-02 至 FE-10 继续按各自直接票据依赖推进；
 - 产品基线当前未提交修改仍归用户所有，本契约不会修改、提交或推送该文件；
 - 若产品基线发生后续显式变更，必须重新计算覆盖矩阵并更新基线指纹；
 - 本契约不创建重复的产品 glossary；产品术语继续以上位基线为准；
+- `CR-FE-001` 只补齐 transport/protocol failure 的封闭表达，不改变产品基线指纹或正常用户流程；
 - ADR 只在整机技术方案阶段、且满足难以逆转、缺少背景会令人意外、存在真实取舍三个条件时创建。

@@ -8,6 +8,8 @@
 
 **Primary contract fixtures:** `FX-12 sensitive-narrow-keyboard`
 
+**Accepted technical plan:** `docs/architecture/Agent_Config_Manager_MVP_技术方案_v0.1.md`（2026-07-27）
+
 - [ ] `FX-12` 通过 mock `FrontendGateway` 完成一条只读详情集成旅程；真实 adapter 全回归不在本票据内；
 - [ ] 旅程只组合已由 FE-01/02 交付的资产列表、单个文本详情、文件树、原生内容和检查器，不重新验收其他 fixture；
 - [ ] 资产列表、文件树、原生内容和检查器遵守已确认下限、上限、默认比例与栏宽记忆；
@@ -23,4 +25,15 @@
 - [ ] 敏感内容默认遮蔽，显式临时查看的 `view` grant 在到期、切换资产或 revision 变化后失效，且明文不会进入缓存、索引、日志、事件或 fixture；
 - [ ] 正常状态保持中性，当前只读旅程中的禁用原因和敏感状态在邻近位置可解释；
 - [ ] 没有新增产品范围、替代工作台、批量操作或技术方案外依赖。
-- [ ] 本票据只验证 FX-12；FX-01 至 FX-11、FX-13 至 FX-17 的主旅程，真实 adapter 全回归、构建、打包和发布负向范围检查只由 `RELEASE-GATE` 汇总验收。
+- [ ] 本票据只验证 FX-12；FX-01 至 FX-11、FX-13 至 FX-18 的主旅程，真实 adapter 全回归、构建、打包和发布负向范围检查只由 `RELEASE-GATE` 汇总验收。
+
+## 验证命令契约
+
+**状态：** `planned / unverified`
+
+- **统一入口：** `npm run verify:ticket -- FE-10`；这是实现后的计划命令，尚未运行。
+- **前置条件：** FE-02 已有 `done` 证据；bootstrap、生成 wire 类型与 `FX-12` 安全 fixture 可用；browser-mode runner 可注入 scripted mock `FrontendGateway`，不启动 Tauri 测试构建。
+- **预计层级：** L0 检查变更源码、类型、格式、lint 与 wire/schema drift；L1 检查栏宽记忆/撤销、64 px 回差、焦点布局恢复和敏感 `view` grant 失效等 session 不变量；L2 以 scripted mock `FrontendGateway` 跑唯一的 `FX-12 sensitive-narrow-keyboard`，覆盖键盘、窄窗口、减少动态效果、浮层与焦点、敏感遮蔽和可见禁用原因；无 L3，且无新增 PF。
+- **通过判据：** `FX-12` 在真实 browser event 下完成既有只读组合旅程，栏宽恢复、布局收拢/回弹、焦点和 grant 失效符合本票据；只接受 L0/L1/L2 的聚焦证据，不以测试文件、截图或 mock 调用数替代行为断言。
+- **失败证据：** 脱敏日志、WebDriver trace、截图或 DOM dump、层级与 fixture 标识写入 `.artifacts/verification/FE-10/<run-id>/`。
+- **Provenance 边界：** L2 mock PASS 不取得真实 IPC、磁盘、Keychain、Tauri lifecycle 或写入 credit；本票据刻意不运行 L3、不产生新的 PF 证据，也不接管真实 adapter 全回归、构建、打包或发布负向检查，这些仍属 `RELEASE-GATE`。

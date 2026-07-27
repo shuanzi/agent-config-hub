@@ -1,9 +1,10 @@
 # Agent Config Manager 前端本地票据集
 
-> 契约状态：pending acceptance；尚未验收，不得称为已冻结
-> 当前 tracker 状态：所有 FE 票据均为 `blocked`
+> 契约状态：accepted（2026-07-27）；`CR-FE-001` 已确认纳入；前端契约重新冻结
+> 当前 tracker 状态：FE-01 为 `ready-for-agent`；FE-02 至 FE-10 仍为 `blocked`
 > 父规格：`docs/frontend/Agent_Config_Manager_前端契约_v0.1.md`
 > 产品事实来源：`docs/product/Agent_Config_Manager_MVP_产品决策基线_v0.1.md`
+> 技术方案：`docs/architecture/Agent_Config_Manager_MVP_技术方案_v0.1.md`（已验收，`ARCH-GATE` closed，2026-07-27）
 
 ## 状态与推进规则
 
@@ -17,8 +18,10 @@
 
 ## 工作规则
 
-- `ARCH-GATE` 在契约验收前保持 `blocked`；技术方案与 `RELEASE-GATE` 也不得启动。
-- 技术方案阶段不编码。首个实现切片建立最小 bootstrap 后，才可把验证命令从“命令契约”标为“已验证可运行”。
+- `ARCH-GATE` 已关闭；当前只允许从 FE-01 开始按依赖实施。`RELEASE-GATE` 继续受 FE-01 至 FE-10 完成证据阻塞。
+- 技术方案验收本身没有生成实现或运行证据。FE-01 建立最小 bootstrap 后，才可把相应验证命令从“命令契约”标为“已验证可运行”。
+- 每张票据的正式关闭入口为 `npm run verify:ticket -- FE-XX`；当前全部为 `planned / unverified`。底层 Cargo、Vitest 或 WebdriverIO 命令只能用于定位，不能单独关闭票据。
+- 验证证据写入 `.artifacts/verification/<FE-ID>/<run-id>/` 并保持 L0–L4 provenance；mock、test harness 与 production artifact 不能互相替代。
 - 每个 FE 票据必须在一个全新上下文中完成；每个票据交付可演示用户行为，不拆横向组件、状态层或 API 封装任务。
 - 每个 fixture 只有一张主票据；其他票据可复用同一敏感或安全不变量，但不得夺取 fixture 的主归属。
 - 下位票据不能改变产品基线、前端契约或技术方案；发现冲突时提交最小 Change Request，不自行扩展范围。
@@ -59,7 +62,7 @@ flowchart LR
 | FX-01 | FE-01 |
 | FX-02、FX-03 | FE-02 |
 | FX-04 | FE-03 |
-| FX-05、FX-16 | FE-04 |
+| FX-05、FX-16、FX-18 | FE-04 |
 | FX-06、FX-14 | FE-08 |
 | FX-07 | FE-07 |
 | FX-08、FX-15、FX-17 | FE-05 |
@@ -69,4 +72,4 @@ flowchart LR
 
 ## Frontier
 
-当前无可执行前端票据。首先等待前端契约验收；验收后才可启动 `ARCH-GATE`。`ARCH-GATE` 关闭并有完成证据后，FE-01 才成为首个 frontier。
+当前唯一实现 frontier 是 FE-01。FE-02 至 FE-10 的直接 blocker 尚未完成，仍保持 `blocked`；`RELEASE-GATE` 继续保持 `blocked`。
