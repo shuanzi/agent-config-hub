@@ -126,4 +126,37 @@ describe('FX-01 只读工作台旅程', () => {
     await $('[role="option"]').waitForDisplayed();
     expect(await $('[role="option"]').getText()).toContain('Demo Skill');
   });
+
+  it('h. 分组与来源筛选：按作用域分组出现标题，来源筛选选唯一值列表不变', async () => {
+    await openWorkbench();
+    await $('[role="option"]').waitForDisplayed();
+
+    // 项目筛选：FX-01 无项目上下文 → 仅“全部”，控件仍可用
+    expect(await $$('#filter-project option')).toHaveLength(1);
+    expect(await $('#filter-project').isEnabled()).toBe(true);
+
+    // 来源筛选：选项从 snapshot 的 sourceTier 推导（“全部” + 唯一来源）
+    expect(await $$('#filter-source option')).toHaveLength(2);
+
+    // 默认不分组：无分组标题
+    expect(await $('.asset-group-heading').isExisting()).toBe(false);
+
+    // 选择“按作用域分组”→ 出现分组标题且资产仍在
+    await $('#group-by').selectByAttribute('value', 'scope');
+    const heading = await $('.asset-group-heading');
+    await heading.waitForDisplayed();
+    expect(await heading.getText()).toContain('全局');
+    await $('[role="option"]').waitForDisplayed();
+    expect(await $('[role="option"]').getText()).toContain('Demo Skill');
+
+    // 恢复“不分组”→ 标题消失
+    await $('#group-by').selectByAttribute('value', 'none');
+    await browser.waitUntil(async () => !(await $('.asset-group-heading').isExisting()));
+    await $('[role="option"]').waitForDisplayed();
+
+    // 来源筛选选唯一存在的值 → 列表不变
+    await $('#filter-source').selectByAttribute('value', 'user-global-root');
+    await $('[role="option"]').waitForDisplayed();
+    expect(await $('[role="option"]').getText()).toContain('Demo Skill');
+  });
 });

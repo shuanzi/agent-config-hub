@@ -10,6 +10,21 @@ pub mod domain;
 pub mod ipc;
 pub mod wire;
 
+/// 进程启动记点（PF-01 L3 冷启动：process start → first trusted snapshot）。
+static PROCESS_START: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+
+/// main 入口第一行调用；重复调用无副作用（只有首次记点生效）。
+pub fn note_process_start() {
+    let _ = PROCESS_START.set(std::time::Instant::now());
+}
+
+/// 距进程启动记点的 elapsed millis；未记点时返回 None。
+pub fn process_start_elapsed_millis() -> Option<u64> {
+    PROCESS_START
+        .get()
+        .map(|start| start.elapsed().as_millis() as u64)
+}
+
 pub fn run() {
     let gateway_core = core::GatewayCore::new(catalog::Catalog::from_env());
 
@@ -29,7 +44,8 @@ pub fn run() {
     #[cfg(feature = "test-harness")]
     let builder = builder.invoke_handler(tauri::generate_handler![
         ipc::frontend_gateway_read,
-        ipc::test_fx01_external_change
+        ipc::test_fx01_external_change,
+        ipc::test_fx01_cold_start_millis
     ]);
 
     builder

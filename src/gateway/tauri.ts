@@ -7,14 +7,18 @@
  *   顶层 payload tag 后转 contract 类型；任何不匹配或异常归一化为
  *   `ReadFailed(GATEWAY_UNAVAILABLE, retryRead)`，异常字符串不出本模块；
  * - observe：监听唯一 invalidation event `acm://workspace-invalidation`，
- *   核对 wireVersion 后按封闭 Subscription 过滤转发；返回 unlisten。
+ *   核对 wireVersion 后按封闭 Subscription 过滤转发。listen 注册有界重试
+ *   （递增延迟），期间 ready 保持 pending 且注册完成前的事件不投递；全部
+ *   失败后进入降级（ready 照常 resolve，事件通道本就允许丢失），并以低频
+ *   后台重建，重建成功后向 listener 补发一次 assetsInvalidated 强制重读
+ *   对账；unlisten 后注销监听并停止重建。
  *
  * wire 类型只来自 src/gateway/wire/gateway-wire.ts（Rust export-wire 生成的
  * 受管产物）；contract 类型只来自 src/contract。UI 其余部分零改动。
  */
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
-import type { FrontendGateway } from '../contract/gateway';
+import type { FrontendGateway, ObserveHandle } from '../contract/gateway';
 import type {
   AssetType,
   IndexStatus,
@@ -33,6 +37,17 @@ import {
 } from './wire/gateway-wire';
 
 const INVALIDATION_EVENT = 'acm://workspace-invalidation';
+
+/** observe 时序配置（默认值面向生产；测试可注入极小延迟以保持确定性） */
+export interface TauriGatewayOptions {
+  /** listen 注册失败后的重试延迟（递增）；重试次数 = 数组长度（共 1+length 次尝试） */
+  observeRetryDelaysMs?: readonly number[];
+  /** 降级后后台重建间隔 */
+  observeRebuildIntervalMs?: number;
+}
+
+const DEFAULT_RETRY_DELAYS_MS: readonly number[] = [100, 300];
+const DEFAULT_REBUILD_INTERVAL_MS = 2000;
 
 /** ARC-02c：统一归一化结果（固定文案，不含异常字符串）。 */
 function gatewayUnavailable<T>(): ReadResult<T> {
@@ -132,7 +147,9 @@ function normalizeEvent(raw: unknown): WorkspaceEvent | null {
   }
 }
 
-export function createTauriGateway(): FrontendGateway {
+export function createTauriGateway(options: TauriGatewayOptions = {}): FrontendGateway {
+  const retryDelaysMs = options.observeRetryDelaysMs ?? DEFAULT_RETRY_DELAYS_MS;
+  const rebuildIntervalMs = options.observeRebuildIntervalMs ?? DEFAULT_REBUILD_INTERVAL_MS;
   return {
     async read<Q extends Query>(query: Q): Promise<ReadResult<SnapshotFor<Q>>> {
       const requestId = crypto.randomUUID();
@@ -152,36 +169,105 @@ export function createTauriGateway(): FrontendGateway {
       }
     },
 
-    observe(subscription: Subscription, listener: (event: WorkspaceEvent) => void): () => void {
+    observe(subscription: Subscription, listener: (event: WorkspaceEvent) => void): ObserveHandle {
       let disposed = false;
-      let unlisten: UnlistenFn | null = null;
-      // listen 注册在 observe 返回前已发起；harness/生产事件都在 listener
-      // 建立后才可能到达（事件丢失/重复本就只造成额外 read）。
-      const pending = listen<WorkspaceEventEnvelope>(INVALIDATION_EVENT, (message) => {
-        const event = normalizeEvent(message.payload);
-        if (event === null) {
-          return;
-        }
-        if (
-          subscription.assetType !== undefined &&
-          event.kind === 'assetsInvalidated' &&
-          event.assetType !== undefined &&
-          event.assetType !== subscription.assetType
-        ) {
-          return;
-        }
-        listener(event);
+      /** 首次注册成功后才投递事件（注册完成前到达的事件一律丢弃） */
+      let registered = false;
+      let unlistenFn: UnlistenFn | null = null;
+      let failedAttempts = 0;
+      let rebuildTimer: ReturnType<typeof setInterval> | null = null;
+      let resolveReady!: () => void;
+      // ready 只 resolve、永不 reject：降级时同样 resolve（事件允许丢失，
+      // 初始 read 不依赖事件通道），消费方无需 rejection 处理。
+      const ready = new Promise<void>((resolve) => {
+        resolveReady = resolve;
       });
-      void pending.then((fn) => {
-        if (disposed) {
+
+      const stopRebuild = (): void => {
+        if (rebuildTimer !== null) {
+          clearInterval(rebuildTimer);
+          rebuildTimer = null;
+        }
+      };
+
+      const onRegistered = (fn: UnlistenFn): void => {
+        resolveReady();
+        if (disposed || registered) {
+          // 注册完成前已 unlisten，或与并发成功的重建重复：立即注销
           fn();
-        } else {
-          unlisten = fn;
+          return;
         }
-      });
-      return () => {
-        disposed = true;
-        unlisten?.();
+        unlistenFn = fn;
+        registered = true;
+        stopRebuild();
+        if (failedAttempts > 0) {
+          // 注册曾失败：失败窗口内的事件可能已丢失，补发一次失效强制重读
+          // 对账（失效语义，不携带事实）。
+          listener({ kind: 'assetsInvalidated' });
+        }
+      };
+
+      const onRegisterFailed = (attempt: number): void => {
+        if (disposed || registered) {
+          return;
+        }
+        failedAttempts += 1;
+        if (attempt < retryDelaysMs.length) {
+          // 有界重试（递增延迟），期间 ready 保持 pending
+          setTimeout(() => {
+            attemptListen(attempt + 1);
+          }, retryDelaysMs[attempt]);
+          return;
+        }
+        // 全部失败：进入降级——ready 照常 resolve，低频后台重建直到成功或 unlisten
+        resolveReady();
+        if (rebuildTimer === null) {
+          rebuildTimer = setInterval(() => {
+            attemptListen(attempt);
+          }, rebuildIntervalMs);
+        }
+      };
+
+      const attemptListen = (attempt: number): void => {
+        if (disposed || registered) {
+          return;
+        }
+        const pending = listen<WorkspaceEventEnvelope>(INVALIDATION_EVENT, (message) => {
+          if (!registered || disposed) {
+            return;
+          }
+          const event = normalizeEvent(message.payload);
+          if (event === null) {
+            return;
+          }
+          if (
+            subscription.assetType !== undefined &&
+            event.kind === 'assetsInvalidated' &&
+            event.assetType !== undefined &&
+            event.assetType !== subscription.assetType
+          ) {
+            return;
+          }
+          listener(event);
+        });
+        // rejection 在此被处理，不产生未捕获拒绝
+        void pending.then(onRegistered, () => {
+          onRegisterFailed(attempt);
+        });
+      };
+
+      attemptListen(0);
+
+      return {
+        ready,
+        unlisten: () => {
+          disposed = true;
+          registered = false;
+          stopRebuild();
+          unlistenFn?.();
+          // dispose 后 ready 不再有任何意义；settle 以免消费方悬挂
+          resolveReady();
+        },
       };
     },
   };

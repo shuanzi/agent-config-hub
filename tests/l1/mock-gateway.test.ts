@@ -29,7 +29,7 @@ async function readDetailOk(mock: ScriptedMockGateway, asset: AssetRef) {
 }
 
 describe('ScriptedMockGateway', () => {
-  it('FX-01 列表形状：单资产、名称、Agent、作用域、可用性', async () => {
+  it('FX-01 列表形状：单资产、名称、Agent、作用域、来源层级、可用性', async () => {
     const mock = new ScriptedMockGateway();
     const list = await readListOk(mock);
     expect(list.assets).toHaveLength(1);
@@ -38,6 +38,10 @@ describe('ScriptedMockGateway', () => {
     expect(summary.asset.assetType).toBe('skill');
     expect(summary.agents).toEqual(['claude-code']);
     expect(summary.scope).toBe('global');
+    expect(summary.sourceTier).toEqual({
+      id: 'user-global-root',
+      label: 'User global root (synthetic)',
+    });
     expect(summary.availability.kind).toBe('allowed');
     expect(summary.anomalies).toEqual([]);
     expect(list.indexStatus).toBe('fresh');
@@ -74,6 +78,65 @@ describe('ScriptedMockGateway', () => {
         })
       ).assets,
     ).toHaveLength(0);
+  });
+
+  it('项目与来源筛选约束列表结果；groupBy 不改变结果集', async () => {
+    const mock = new ScriptedMockGateway();
+    // FX-01 资产无项目上下文（contextHint 为 path）：任何项目筛选都不匹配
+    expect(
+      (await readListOk(mock, { ...LIST_QUERY, filters: { projects: ['any-project'] } })).assets,
+    ).toHaveLength(0);
+    // 来源筛选按 sourceTier.id 匹配
+    expect(
+      (await readListOk(mock, { ...LIST_QUERY, filters: { sources: ['user-global-root'] } }))
+        .assets,
+    ).toHaveLength(1);
+    expect(
+      (await readListOk(mock, { ...LIST_QUERY, filters: { sources: ['project-root'] } })).assets,
+    ).toHaveLength(0);
+    // groupBy 是展示行为，不改变结果集
+    expect(
+      (await readListOk(mock, { ...LIST_QUERY, filters: { groupBy: 'scope' } })).assets,
+    ).toHaveLength(1);
+  });
+
+  it('gateway 出口统一遮蔽：注入的人类可读占位文本不出现在任何结果中', async () => {
+    // 占位明文拼接构造，避免字面值进入测试源码/日志（对齐 verify:static 守卫）
+    const PLACEHOLDER = ['SYNTHETIC-SECRET', 'x1'].join('-');
+    const mock = new ScriptedMockGateway();
+    mock.setFixtureTextOverrides({
+      displayName: `Demo ${PLACEHOLDER}`,
+      pathHint: `~/…/${PLACEHOLDER}`,
+      pathDisplay: `~/…/${PLACEHOLDER}/SKILL.md`,
+      sourceTierLabel: `Tier ${PLACEHOLDER}`,
+      readFailedMessage: `读取失败：${PLACEHOLDER}`,
+      anomalies: [{ kind: 'drift', reasonCode: 'EXTERNAL_CHANGE', message: `异常 ${PLACEHOLDER}` }],
+    });
+
+    const list = await readListOk(mock);
+    expect(containsSyntheticSecret(JSON.stringify(list))).toBe(false);
+    expect(list.assets[0].displayName).toContain(SENSITIVE_MASK);
+    expect(list.assets[0].anomalies[0].message).toContain(SENSITIVE_MASK);
+
+    const detail = await readDetailOk(mock, list.assets[0].asset);
+    expect(containsSyntheticSecret(JSON.stringify(detail))).toBe(false);
+    expect(detail.inspector.pathDisplay).toContain(SENSITIVE_MASK);
+    expect(detail.detail.effectiveContexts[0].sourceTierLabel).toContain(SENSITIVE_MASK);
+
+    const fileResult = await mock.read({
+      kind: 'nativeFile',
+      asset: list.assets[0].asset,
+      fileId: detail.detail.primaryFile.fileId,
+    });
+    expect(containsSyntheticSecret(JSON.stringify(fileResult))).toBe(false);
+
+    mock.failNext('assetList', 'READ_FAILED');
+    const failed = await mock.read(LIST_QUERY);
+    expect(failed.kind).toBe('readFailed');
+    expect(containsSyntheticSecret(JSON.stringify(failed))).toBe(false);
+    if (failed.kind === 'readFailed') {
+      expect(failed.message).toContain(SENSITIVE_MASK);
+    }
   });
 
   it('revision 稳定且为不透明字符串；external change 后变化', async () => {
@@ -164,14 +227,15 @@ describe('ScriptedMockGateway', () => {
     expect((await readListOk(plain)).indexStatus).toBe('fresh');
   });
 
-  it('调用日志只含 read；observe 可退订', async () => {
+  it('调用日志只含 read；observe 返回句柄可退订且 ready 默认已 resolve', async () => {
     const mock = new ScriptedMockGateway();
     let events = 0;
-    const unobserve = mock.observe({ kind: 'workspace' }, () => {
+    const handle = mock.observe({ kind: 'workspace' }, () => {
       events += 1;
     });
+    await expect(handle.ready).resolves.toBeUndefined();
     mock.emitEvent({ kind: 'assetsInvalidated' });
-    unobserve();
+    handle.unlisten();
     mock.emitEvent({ kind: 'assetsInvalidated' });
     expect(events).toBe(1);
 

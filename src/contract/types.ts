@@ -105,6 +105,12 @@ export interface Anomaly {
 export type AssetContextHint =
   { kind: 'project'; projectName: string } | { kind: 'path'; pathHint: string };
 
+/** 来源层级（产品基线 §7.4）：id 为不透明身份，label 为用户可读展示标签 */
+export interface SourceTier {
+  id: string;
+  label: string;
+}
+
 /** 资产列表行（契约 §6.3 AssetSummary） */
 export interface AssetSummary {
   asset: AssetRef;
@@ -114,6 +120,7 @@ export interface AssetSummary {
   agents: AgentId[];
   scope: AssetScope;
   contextHint: AssetContextHint;
+  sourceTier: SourceTier;
   availability: ActionAvailability;
 }
 

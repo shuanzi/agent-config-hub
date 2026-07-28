@@ -133,6 +133,24 @@ body {
   padding: 0;
 }
 
+.asset-group {
+  margin-bottom: 8px;
+}
+
+.asset-group-heading {
+  font-size: 12px;
+  font-weight: 600;
+  color: #555;
+  margin: 8px 4px 4px;
+  text-transform: none;
+}
+
+.asset-group-items {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
 .asset-row {
   padding: 8px 10px;
   border-radius: 6px;

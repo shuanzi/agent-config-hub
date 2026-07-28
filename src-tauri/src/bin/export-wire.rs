@@ -75,6 +75,7 @@ fn declarations() -> Vec<String> {
         wire::CompatibilityChangedWire::decl(),
         wire::WorkspaceEventWire::decl(),
         wire::WorkspaceEventEnvelope::decl(),
+        wire::SourceTierWire::decl(),
     ]
 }
 

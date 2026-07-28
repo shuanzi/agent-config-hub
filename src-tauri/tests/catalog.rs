@@ -7,8 +7,11 @@ use std::path::PathBuf;
 
 use agent_config_manager_lib::catalog::{mask_synthetic_secrets, Catalog, SENSITIVE_MASK};
 use agent_config_manager_lib::domain::{
-    ActionAvailability, AssetListQuery, AssetListScope, AssetType, CompatibilityStatus,
-    IndexStatus, NativeFileContent, SensitiveDisplayState,
+    ActionAvailability, AssetListFilters, AssetListQuery, AssetListScope, AssetType,
+    CompatibilityStatus, IndexStatus, NativeFileContent, SensitiveDisplayState,
+};
+use agent_config_manager_lib::wire::{
+    AssetDetailSnapshotWire, AssetListSnapshotWire, NativeFileSnapshotWire,
 };
 
 fn fixture_root() -> PathBuf {
@@ -61,6 +64,9 @@ fn reads_fixture_facts_consistent_with_fixture_json() {
             path_hint: hint["pathHint"].as_str().unwrap().to_string(),
         }
     });
+    assert_eq!(summary.source_tier.id, fx["sourceTier"]["id"]);
+    assert_eq!(summary.source_tier.label, fx["sourceTier"]["label"]);
+    assert!(!summary.source_tier.label.is_empty());
     assert_eq!(summary.availability, ActionAvailability::Allowed);
 
     let detail = catalog
@@ -180,4 +186,89 @@ fn empty_catalog_when_native_root_unset() {
     let list = catalog.asset_list(&list_query());
     assert_eq!(list.assets.len(), 0);
     assert_eq!(list.index_status, IndexStatus::Fresh);
+}
+
+#[test]
+fn list_filters_by_projects_and_sources() {
+    let catalog = Catalog::new(Some(fixture_root()));
+    let query = |filters: AssetListFilters| AssetListQuery {
+        scope: AssetListScope::AllAssets,
+        search_text: None,
+        filters: Some(filters),
+    };
+
+    // sources：命中 source_tier.id 保留，未命中排除，空数组不筛选。
+    let hit = catalog.asset_list(&query(AssetListFilters {
+        sources: Some(vec!["user-global-root".to_string()]),
+        ..AssetListFilters::default()
+    }));
+    assert_eq!(hit.assets.len(), 1);
+    assert_eq!(hit.assets[0].source_tier.id, "user-global-root");
+
+    let miss = catalog.asset_list(&query(AssetListFilters {
+        sources: Some(vec!["project-root".to_string()]),
+        ..AssetListFilters::default()
+    }));
+    assert_eq!(miss.assets.len(), 0);
+
+    let empty = catalog.asset_list(&query(AssetListFilters {
+        sources: Some(Vec::new()),
+        ..AssetListFilters::default()
+    }));
+    assert_eq!(empty.assets.len(), 1);
+
+    // projects：FX-01 无项目事实，任一非空 projects 筛选都排除该资产；空数组不筛选。
+    let any_project = catalog.asset_list(&query(AssetListFilters {
+        projects: Some(vec!["any-project".to_string()]),
+        ..AssetListFilters::default()
+    }));
+    assert_eq!(any_project.assets.len(), 0);
+
+    let no_project = catalog.asset_list(&query(AssetListFilters {
+        projects: Some(Vec::new()),
+        ..AssetListFilters::default()
+    }));
+    assert_eq!(no_project.assets.len(), 1);
+}
+
+#[test]
+fn secret_shaped_dir_name_is_masked_at_every_exit() {
+    // 占位字面量可直接写：verify-static 的占位值守卫只针对 FX-01 的那个值。
+    let temp = tempfile::tempdir().expect("tempdir");
+    let dir = temp.path().join("skills/SYNTHETIC-SECRET-evil-1");
+    fs::create_dir_all(&dir).unwrap();
+    fs::write(
+        dir.join("SKILL.md"),
+        "# Evil\nAPI_KEY=SYNTHETIC-SECRET-evil-1\n",
+    )
+    .unwrap();
+
+    let catalog = Catalog::new(Some(temp.path().to_path_buf()));
+    let list = catalog.asset_list(&list_query());
+    assert_eq!(list.assets.len(), 1);
+    let summary = &list.assets[0];
+    // 身份可回环：遮蔽后的 assetId 仍能取到 detail / nativeFile。
+    let detail = catalog
+        .asset_detail(&summary.asset)
+        .expect("detail readable via masked id");
+    let file = catalog
+        .native_file(&summary.asset, &detail.detail.primary_file.file_id)
+        .expect("file readable via masked id");
+
+    // 整个 JSON 序列化不含任何 SYNTHETIC-SECRET- 子串，且遮蔽标记出现。
+    let serialized = [
+        serde_json::to_string(&AssetListSnapshotWire::from(list)).unwrap(),
+        serde_json::to_string(&AssetDetailSnapshotWire::from(detail)).unwrap(),
+        serde_json::to_string(&NativeFileSnapshotWire::from(file)).unwrap(),
+    ];
+    for json in &serialized {
+        assert!(
+            !json.contains("SYNTHETIC-SECRET-"),
+            "serialization leaks placeholder: {json}"
+        );
+        assert!(
+            json.contains(SENSITIVE_MASK),
+            "serialization lacks mask marker: {json}"
+        );
+    }
 }

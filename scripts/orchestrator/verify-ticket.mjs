@@ -6,10 +6,14 @@
  *   + ui(L2) + tauri(L3) + perf(PF-01)。未知 ticket id 退出 1。
  * 顺序执行；前序失败仍跑完后续独立步骤，但总体 fail。
  *
+ * 状态模型：step 退出码映射 0=pass / 2=inconclusive / 其余=fail；
+ * 整体 status 有 fail→fail，否则有 inconclusive→inconclusive，否则 pass；
+ * 进程退出码 pass=0、inconclusive=2、fail=1。manifest 每 step 记录 status。
+ *
  * evidence：.artifacts/verification/<scope>/<run-id>/
  *   manifest.json
  *   steps/<step-id>/{stdout.log,stderr.log,meta.json}
- *   performance/{samples.json,summary.json,proposed-budgets.json}
+ *   performance/{samples.json,l3-samples.json,summary.json,proposed-budgets.json}
  * 所有写入先脱敏（$HOME → <HOME>）再扫描（占位敏感值/个人路径），
  * 扫描命中 → 状态 inconclusive 并在 manifest 说明。
  */
@@ -34,8 +38,24 @@ const PROVENANCE = {
   L1: 'Vitest node-mode / cargo test；无浏览器、无 IPC',
   L2: 'mock renderer 旅程（scripted mock gateway + headless Chrome）；不取得真实 IPC/事件/磁盘 credit',
   L3: 'test harness 隔离构建（debug profile、独立 identifier、隔离临时 fixture 根）；不等同生产签名/DMG/L4',
-  PF: 'PF-01 首条 baseline 采集；预算未冻结（baseline-collected / budget-not-frozen）',
+  PF: 'PF-01 首条 baseline 采集（L2 mock renderer + L3 test-harness debug 冷启动，均非 release-like）；预算未冻结（budget-not-frozen → inconclusive）',
 };
+
+/** step 退出码 → 状态映射（ARC-06c §3.17）：0=pass，2=inconclusive，其余=fail */
+function stepStatusOf(exitCode) {
+  if (exitCode === 0) return 'pass';
+  if (exitCode === 2) return 'inconclusive';
+  return 'fail';
+}
+
+const STATUS_LABEL = { pass: 'PASS', inconclusive: 'INCONCLUSIVE', fail: 'FAIL' };
+
+/** 版本控制预算文件存在与否 → budgetState（FE-01 预期 budget-not-frozen） */
+function budgetState() {
+  return fs.existsSync(path.join(REPO_ROOT, 'performance/budgets/pf-01.budgets.json'))
+    ? 'budget-frozen（performance/budgets/pf-01.budgets.json）'
+    : 'budget-not-frozen（FE-01 不冻结数值预算）';
+}
 
 /** 封闭票据层级 registry；ticket 不能在自身实现中静默减少层级 */
 const TICKET_REGISTRY = {
@@ -87,7 +107,7 @@ const TICKET_REGISTRY = {
       layer: 'PF',
       cmd: 'node',
       args: ['scripts/orchestrator/perf.mjs', 'PF-01'],
-      timeoutMs: 1_200_000,
+      timeoutMs: 2_400_000,
     },
   ],
 };
@@ -160,6 +180,7 @@ async function main() {
       provenance: PROVENANCE[step.layer],
       command: [step.cmd, ...step.args],
       exitCode: result.exitCode,
+      status: stepStatusOf(result.exitCode),
       timedOut: result.timedOut,
       durationMs: result.durationMs,
     };
@@ -173,12 +194,11 @@ async function main() {
       },
     });
     console.log(
-      `${result.exitCode === 0 ? 'PASS' : 'FAIL'}  [${step.layer}] ${step.id}  exit ${result.exitCode} (${result.durationMs}ms)`,
+      `${STATUS_LABEL[meta.status]}  [${step.layer}] ${step.id}  exit ${result.exitCode} (${result.durationMs}ms)`,
     );
   }
 
   const endAt = new Date().toISOString();
-  const anyFailed = stepResults.some((step) => step.exitCode !== 0);
 
   // performance evidence 扫描（perf.mjs 已自行扫描其 summary/budgets；此处兜底）
   if (fs.existsSync(performanceDir)) {
@@ -192,6 +212,13 @@ async function main() {
     }
   }
 
+  // 整体 status：有 fail → fail；否则有 inconclusive（含 evidence 污染）→
+  // inconclusive；否则 pass。未知退出码已由 stepStatusOf 归为 fail。
+  const anyFailed = stepResults.some((step) => step.status === 'fail');
+  const anyInconclusive =
+    evidenceContaminated || stepResults.some((step) => step.status === 'inconclusive');
+  const overallStatus = anyFailed ? 'fail' : anyInconclusive ? 'inconclusive' : 'pass';
+
   // harness artifact identity（test:tauri 写入；production 标 N/A）
   const identityPath = path.join(ARTIFACTS_ROOT, 'test-harness/identity.json');
   const artifactIdentity = fs.existsSync(identityPath)
@@ -202,7 +229,8 @@ async function main() {
   const manifest = {
     schemaVersion: 1,
     scope: ticketId,
-    status: evidenceContaminated ? 'inconclusive' : anyFailed ? 'fail' : 'pass',
+    status: overallStatus,
+    budgetState: budgetState(),
     commit: git.commit,
     worktreeDirty: git.worktreeDirty,
     toolchain: await toolchainInfo(),
@@ -225,7 +253,8 @@ async function main() {
 
   console.log(`\nverify:ticket ${ticketId}: ${manifest.status}`);
   console.log(`manifest: ${sanitizeText(path.join(evidenceRoot, 'manifest.json'))}`);
-  process.exit(manifest.status === 'pass' ? 0 : 1);
+  // 退出码：pass=0，inconclusive=2，fail=1
+  process.exit(manifest.status === 'pass' ? 0 : manifest.status === 'inconclusive' ? 2 : 1);
 }
 
 await main();

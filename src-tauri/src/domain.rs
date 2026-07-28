@@ -141,6 +141,13 @@ pub enum AssetContextHint {
     Path { path_hint: String },
 }
 
+/// 来源层级（产品基线 §7.4）：id 为不透明身份，label 为用户可读展示标签。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SourceTier {
+    pub id: String,
+    pub label: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AssetSummary {
     pub asset: AssetRef,
@@ -149,6 +156,7 @@ pub struct AssetSummary {
     pub agents: Vec<AgentId>,
     pub scope: AssetScope,
     pub context_hint: AssetContextHint,
+    pub source_tier: SourceTier,
     pub availability: ActionAvailability,
 }
 

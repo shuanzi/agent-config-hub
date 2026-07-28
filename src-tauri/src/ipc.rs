@@ -89,8 +89,16 @@ pub async fn frontend_gateway_read(
     request: Value,
 ) -> Result<Value, Value> {
     let response = handle_read(&core, &request);
-    serde_json::to_value(&response)
-        .map_err(|_| serde_json::to_value(gateway_unavailable("")).unwrap_or(Value::Null))
+    let value = serde_json::to_value(&response)
+        .map_err(|_| serde_json::to_value(gateway_unavailable("")).unwrap_or(Value::Null))?;
+    // PF-01 L3 冷启动：首次成功完成时记录距进程启动的 elapsed millis（§3.16）。
+    #[cfg(feature = "test-harness")]
+    {
+        if let Some(elapsed) = crate::process_start_elapsed_millis() {
+            let _ = FIRST_READ_MILLIS.set(elapsed);
+        }
+    }
+    Ok(value)
 }
 
 /// 生产 adapter 的唯一 invalidation event（事件失败不改变已确定的 domain
@@ -108,6 +116,19 @@ pub fn emit_workspace_event(app: &tauri::AppHandle, event: &domain::WorkspaceEve
 // ---------------------------------------------------------------------------
 // test-harness 专用 command（只在 feature 下编译进 harness 二进制）
 // ---------------------------------------------------------------------------
+
+/// 首次 `frontend_gateway_read` 成功完成时距进程启动的 millis（PF-01 冷启动）。
+#[cfg(feature = "test-harness")]
+static FIRST_READ_MILLIS: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
+
+/// PF-01 L3 冷启动采样：返回首次 `frontend_gateway_read` 成功完成时距进程
+/// 启动的 elapsed millis；尚未完成时返回 None（调用方在首个可信 snapshot
+/// 渲染后再取，此时必有值）。
+#[cfg(feature = "test-harness")]
+#[tauri::command]
+pub async fn test_fx01_cold_start_millis() -> Option<u64> {
+    FIRST_READ_MILLIS.get().copied()
+}
 
 /// L3 测试驱动：向隔离 fixture 根的 SKILL.md 追加一行确定性的合成标记注释，
 /// 随后发送 `assetsInvalidated`。仅在 `test-harness` feature 下编译；

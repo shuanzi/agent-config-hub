@@ -37,7 +37,10 @@ export function App({ session }: { session: WorkspaceSession }) {
               <p>资产列表读取失败：{reasonCodeExplanation(loadState.reasonCode)}</p>
               <p className="reason-code">原因码：{loadState.reasonCode}</p>
               {loadState.recoveryAction?.kind === 'retryRead' && (
-                <button type="button" onClick={() => session.dispatch({ kind: 'retryFailedRead' })}>
+                <button
+                  type="button"
+                  onClick={() => session.dispatch({ kind: 'retryFailedRead', target: 'list' })}
+                >
                   重试
                 </button>
               )}

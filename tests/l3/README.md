@@ -1,7 +1,15 @@
-# L3 — Tauri 真实主路径 tracer（FE-01）
+# L3 — Tauri 真实主路径 tracer + 行为契约（FE-01）
 
-证明内容：专用 test-harness 构建上「启动 → 一次真实 read → event 失效后重读」
-的真实 command/event/隔离磁盘路径。不证明生产签名、notarization 或 DMG（L4）。
+证明内容：专用 test-harness 构建上的真实 command/event/隔离磁盘路径。
+两个互补 spec：
+
+- `fx-01.tracer.test.ts`：用户可见旅程「启动 → 一次真实 read → event 失效后
+  重读」；
+- `contract.test.ts`：共享 FrontendGatewayContract（与 L1 同一断言模块
+  `tests/contract/frontend-gateway-contract.ts`）经 `contract.html` 入口在
+  真实 webview 内对 `TauriFrontendGateway` 运行。
+
+不证明生产签名、notarization 或 DMG（L4）。
 
 ## 前置
 
@@ -19,16 +27,20 @@
 
 ```bash
 export PATH="$HOME/.nvm/versions/node/v24.18.0/bin:$HOME/.cargo/bin:$PATH"
-corepack npm run build:frontend
+corepack npm exec -- tsc -b
+corepack npm exec -- vite build --config vite.l3.config.ts
 corepack npx tauri build --debug --no-bundle \
   -c src-tauri/tauri.conf.test-harness.json \
   -- --features test-harness
 ```
 
-产物：`src-tauri/target/debug/agent-config-manager`（debug profile，含
-`tauri-plugin-wdio-webdriver` 与 `test_fx01_external_change` command；
-独立 identifier `com.agentconfigmanager.testharness`；`withGlobalTauri`
-仅供测试驱动调用 invoke；生产配置不含这些能力）。
+注意前端构建用 `vite.l3.config.ts`（在生产 `vite.config.ts` 基础上增加
+`tests/l3/contract.html` 入口）；生产 `build:frontend` 保持单入口，物理
+不含测试入口。产物：`src-tauri/target/debug/agent-config-manager`（debug
+profile，含 `tauri-plugin-wdio-webdriver` 与 `test_fx01_external_change` /
+`test_fx01_cold_start_millis` command；独立 identifier
+`com.agentconfigmanager.testharness`；`withGlobalTauri` 仅供测试驱动调用
+invoke；生产配置不含这些能力）。
 
 ## 运行 L3
 
@@ -39,6 +51,11 @@ corepack npx wdio run tests/l3/wdio.conf.ts
 `onPrepare` 会把 `fixtures/fx-01/native-root` 复制到临时目录并以
 `ACM_NATIVE_ROOT` 指向副本（harness 子进程继承 env）；仓库内 fixture 永不
 被原地修改；`onComplete` 清理临时目录。
+
+PF-01 L3 冷启动采样复用同一启动方式（`performance/wdio.l3.conf.ts`），由
+`corepack npm run perf -- PF-01` 串行驱动；embedded provider 下
+`reloadSession` 只换 WebDriver session 不重启应用进程，进程级冷启动样本
+因此按「每次 wdio run 一个新 harness 进程」取得。
 
 ## 信任边界
 

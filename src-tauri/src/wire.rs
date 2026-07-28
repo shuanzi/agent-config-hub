@@ -343,6 +343,13 @@ pub struct ReadRequestEnvelope {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SourceTierWire {
+    pub id: String,
+    pub label: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct AssetSummaryWire {
     pub asset: AssetRefWire,
     pub display_name: String,
@@ -350,6 +357,7 @@ pub struct AssetSummaryWire {
     pub agents: Vec<AgentIdWire>,
     pub scope: AssetScopeWire,
     pub context_hint: AssetContextHintWire,
+    pub source_tier: SourceTierWire,
     pub availability: ActionAvailabilityWire,
 }
 
@@ -933,6 +941,15 @@ impl From<ReadRequestPayload> for domain::Query {
     }
 }
 
+impl From<domain::SourceTier> for SourceTierWire {
+    fn from(value: domain::SourceTier) -> Self {
+        SourceTierWire {
+            id: value.id,
+            label: value.label,
+        }
+    }
+}
+
 impl From<domain::AssetSummary> for AssetSummaryWire {
     fn from(value: domain::AssetSummary) -> Self {
         AssetSummaryWire {
@@ -942,6 +959,7 @@ impl From<domain::AssetSummary> for AssetSummaryWire {
             agents: value.agents.into_iter().map(Into::into).collect(),
             scope: value.scope.into(),
             context_hint: value.context_hint.into(),
+            source_tier: value.source_tier.into(),
             availability: value.availability.into(),
         }
     }

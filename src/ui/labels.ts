@@ -4,6 +4,7 @@
  */
 import type {
   AgentId,
+  AssetGroupBy,
   AssetScope,
   AssetStatusFilter,
   AssetType,
@@ -48,6 +49,24 @@ export function statusFilterLabel(status: AssetStatusFilter): string {
       return '冲突';
     case 'drift':
       return '漂移';
+  }
+}
+
+/** 分组维度 → 控件展示文案 */
+export function groupByLabel(groupBy: AssetGroupBy): string {
+  switch (groupBy) {
+    case 'none':
+      return '不分组';
+    case 'agent':
+      return 'Agent';
+    case 'project':
+      return '项目';
+    case 'scope':
+      return '作用域';
+    case 'source':
+      return '来源';
+    case 'status':
+      return '状态';
   }
 }
 

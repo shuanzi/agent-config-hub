@@ -52,7 +52,10 @@ export function DetailPanel({
           <p>详情读取失败：{reasonCodeExplanation(detail.reasonCode)}</p>
           <p className="reason-code">原因码：{detail.reasonCode}</p>
           {detail.recoveryAction?.kind === 'retryRead' && (
-            <button type="button" onClick={() => session.dispatch({ kind: 'retryFailedRead' })}>
+            <button
+              type="button"
+              onClick={() => session.dispatch({ kind: 'retryFailedRead', target: 'detail' })}
+            >
               重试
             </button>
           )}

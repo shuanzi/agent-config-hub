@@ -38,7 +38,7 @@ export type AssetDetailQueryWire = { asset: AssetRefWire, };
 export type NativeFileQueryWire = { asset: AssetRefWire, fileId: string, };
 export type ReadRequestPayload = { "kind": "assetList" } & AssetListQueryWire | { "kind": "assetDetail" } & AssetDetailQueryWire | { "kind": "nativeFile" } & NativeFileQueryWire;
 export type ReadRequestEnvelope = { wireVersion: number, requestId: string, payload: ReadRequestPayload, };
-export type AssetSummaryWire = { asset: AssetRefWire, displayName: string, anomalies: Array<AnomalyWire>, agents: Array<AgentIdWire>, scope: AssetScopeWire, contextHint: AssetContextHintWire, availability: ActionAvailabilityWire, };
+export type AssetSummaryWire = { asset: AssetRefWire, displayName: string, anomalies: Array<AnomalyWire>, agents: Array<AgentIdWire>, scope: AssetScopeWire, contextHint: AssetContextHintWire, sourceTier: SourceTierWire, availability: ActionAvailabilityWire, };
 export type AssetListSnapshotWire = { assets: Array<AssetSummaryWire>, indexStatus: IndexStatusWire, scope: AssetListScopeWire, 
 /**
  * ISO 8601
@@ -80,3 +80,4 @@ export type IndexStatusChangedWire = { indexStatus: IndexStatusWire, };
 export type CompatibilityChangedWire = { assetId: string, };
 export type WorkspaceEventWire = { "kind": "assetsInvalidated" } & AssetsInvalidatedWire | { "kind": "assetDriftDetected" } & AssetDriftDetectedWire | { "kind": "indexStatusChanged" } & IndexStatusChangedWire | { "kind": "compatibilityChanged" } & CompatibilityChangedWire;
 export type WorkspaceEventEnvelope = { wireVersion: number, event: WorkspaceEventWire, };
+export type SourceTierWire = { id: string, label: string, };

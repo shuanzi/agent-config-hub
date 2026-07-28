@@ -194,6 +194,10 @@ export function buildPerfCatalog(profile: PerfProfile): PerfCatalog {
         scope === 'project'
           ? { kind: 'project', projectName }
           : { kind: 'path', pathHint: `~/…/pf01/${assetType}/${name}` },
+      sourceTier:
+        scope === 'project'
+          ? { id: 'project-root', label: 'Project root (synthetic)' }
+          : { id: 'user-global-root', label: 'User global root (synthetic)' },
       availability: combination.statuses.includes('incompatible')
         ? { kind: 'disabled', reasonCode: 'INCOMPATIBLE_STRUCTURE' }
         : { kind: 'allowed' },
@@ -277,8 +281,19 @@ export function matchesPerfListQuery(record: PerfAssetRecord, query: AssetListQu
   if (filters?.agents && filters.agents.length > 0) {
     if (!filters.agents.some((agent) => summary.agents.includes(agent))) return false;
   }
+  if (filters?.projects && filters.projects.length > 0) {
+    if (
+      summary.contextHint.kind !== 'project' ||
+      !filters.projects.includes(summary.contextHint.projectName)
+    ) {
+      return false;
+    }
+  }
   if (filters?.scopes && filters.scopes.length > 0) {
     if (!filters.scopes.includes(summary.scope)) return false;
+  }
+  if (filters?.sources && filters.sources.length > 0) {
+    if (!filters.sources.includes(summary.sourceTier.id)) return false;
   }
   if (filters?.statuses && filters.statuses.length > 0) {
     if (!filters.statuses.some((status) => statuses.includes(status))) return false;

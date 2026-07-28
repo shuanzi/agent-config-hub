@@ -3,7 +3,7 @@
 //! 不实现 prepare/apply，也不预留 stub command（FE-01 硬边界）。
 //! core 只使用 domain 类型，不知道 Tauri、wire DTO 或 IPC 细节。
 
-use crate::catalog::Catalog;
+use crate::catalog::{mask_synthetic_secrets, Catalog};
 use crate::domain::{Query, ReadFailure, ReadResult, ReasonCode, RecoveryAction, Snapshot};
 
 pub struct GatewayCore {
@@ -42,7 +42,8 @@ impl GatewayCore {
     fn read_failed(message: &str) -> ReadResult<Snapshot> {
         ReadResult::Failed(ReadFailure {
             reason_code: ReasonCode::ReadFailed,
-            message: message.to_string(),
+            // 人类可读 message 统一过出口遮蔽（当前为固定文案，遮蔽是恒等防御）。
+            message: mask_synthetic_secrets(message),
             recovery_action: Some(RecoveryAction::RetryRead),
         })
     }

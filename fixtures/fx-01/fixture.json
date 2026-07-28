@@ -12,6 +12,7 @@
   "agents": ["claude-code"],
   "scope": "global",
   "contextHint": { "kind": "path", "pathHint": "~/…/skills/demo-skill" },
+  "sourceTier": { "id": "user-global-root", "label": "User global root (synthetic)" },
   "availability": { "kind": "allowed" },
   "anomalies": [],
   "compatibility": "verifiedWritable",

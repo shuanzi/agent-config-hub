@@ -96,6 +96,11 @@ export async function runGatewayContract(
   assert('list.scope', summary.scope === 'global', summary.scope);
   assert('list.availability', summary.availability.kind === 'allowed', summary.availability.kind);
   assert('list.noAnomalies', summary.anomalies.length === 0, JSON.stringify(summary.anomalies));
+  assert(
+    'list.sourceTier',
+    summary.sourceTier.id === 'user-global-root' && summary.sourceTier.label.length > 0,
+    JSON.stringify(summary.sourceTier),
+  );
   passed.push('list');
 
   // --- detail snapshot -----------------------------------------------------

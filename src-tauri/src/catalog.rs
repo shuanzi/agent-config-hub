@@ -24,7 +24,7 @@ use crate::domain::{
     AssetListSnapshot, AssetRef, AssetScope, AssetStatusFilter, AssetSummary, AssetType,
     CompatibilityStatus, EffectiveContext, FileKind, IndexStatus, InspectorData,
     MaskedSourceContent, NativeFileContent, NativeFileRef, NativeFileSnapshot, NativeUnitKind,
-    ReasonCode, SensitiveDisplayState, SensitiveSegmentRef, SourceAnchor,
+    ReasonCode, SensitiveDisplayState, SensitiveSegmentRef, SourceAnchor, SourceTier,
 };
 
 /// 与 fixtures/sensitive-masking.ts 相同的固定遮蔽标记。
@@ -32,6 +32,7 @@ pub const SENSITIVE_MASK: &str = "••••••••";
 
 const SYNTHETIC_SECRET_PREFIX: &str = "SYNTHETIC-SECRET-";
 const ADAPTER_IDENTITY: &str = "claude-code@fixture";
+const SOURCE_TIER_ID: &str = "user-global-root";
 const SOURCE_TIER_LABEL: &str = "User global root (synthetic)";
 
 /// 离开 core 的 maskedText 必须已经过本函数遮蔽（票据硬边界）。
@@ -125,12 +126,19 @@ impl LoadedSkill {
         String::from_utf8_lossy(&self.raw_bytes).into_owned()
     }
 
+    /// 出口遮蔽：目录名是磁盘事实，可能含有占位明文形状（如
+    /// `SYNTHETIC-SECRET-evil-1`）；一切由它派生的输出字符串（含不透明 id）
+    /// 一律以遮蔽后的名字为底，保证任何离开 core 的序列化都不含占位明文。
+    fn safe_name(&self) -> String {
+        mask_synthetic_secrets(&self.name)
+    }
+
     fn asset_id(&self) -> String {
-        format!("asset-fx01-{}", self.name)
+        format!("asset-fx01-{}", self.safe_name())
     }
 
     fn native_unit_ref(&self) -> String {
-        format!("nunit-fx01-{}", self.name)
+        format!("nunit-fx01-{}", self.safe_name())
     }
 
     fn file_id(&self) -> String {
@@ -148,7 +156,8 @@ impl LoadedSkill {
     }
 
     fn display_name(&self) -> String {
-        self.name
+        // 先遮蔽再做命名美化：直接美化会把 '-' 折成空格，破坏占位模式使遮蔽失效。
+        self.safe_name()
             .split('-')
             .filter(|part| !part.is_empty())
             .map(|part| {
@@ -188,7 +197,8 @@ impl LoadedSkill {
         vec![EffectiveContext {
             agent: AgentId::ClaudeCode,
             scope: AssetScope::Global,
-            source_tier_label: SOURCE_TIER_LABEL.to_string(),
+            // 人类可读标签统一过出口遮蔽（当前为常量，遮蔽是恒等防御）。
+            source_tier_label: mask_synthetic_secrets(SOURCE_TIER_LABEL),
             precedence: 0,
         }]
     }
@@ -298,8 +308,13 @@ impl Catalog {
     }
 
     fn load_by_asset_id(&self, asset_id: &str) -> Option<LoadedSkill> {
-        let name = asset_id.strip_prefix("asset-fx01-")?;
-        self.load(name)
+        // assetId 由遮蔽后的目录名派生；按同一规则逐一比对以完成身份回环
+        // （正常 fixture 名不含占位模式，遮蔽是恒等，行为不变）。
+        let name = self
+            .skill_dir_names()
+            .into_iter()
+            .find(|name| format!("asset-fx01-{}", mask_synthetic_secrets(name)) == asset_id)?;
+        self.load(&name)
     }
 
     /// 派生状态维度（FX-01：verifiedWritable + allowed → editable + normal）。
@@ -331,8 +346,27 @@ impl Catalog {
                 return false;
             }
         }
+        if let Some(projects) = &filters.projects {
+            if !projects.is_empty() {
+                // projects 匹配 context_hint 的项目名；FX-01 无项目事实（path hint），
+                // 任一非空 projects 筛选都排除该资产。
+                let in_project = match &summary.context_hint {
+                    AssetContextHint::Project { project_name } => projects.contains(project_name),
+                    AssetContextHint::Path { .. } => false,
+                };
+                if !in_project {
+                    return false;
+                }
+            }
+        }
         if let Some(scopes) = &filters.scopes {
             if !scopes.is_empty() && !scopes.contains(&summary.scope) {
+                return false;
+            }
+        }
+        if let Some(sources) = &filters.sources {
+            // sources 匹配来源层级的不透明身份 source_tier.id。
+            if !sources.is_empty() && !sources.iter().any(|id| id == &summary.source_tier.id) {
                 return false;
             }
         }
@@ -344,8 +378,7 @@ impl Catalog {
                 }
             }
         }
-        // projects / sources / group_by：FX-01 无项目与多来源事实，groupBy
-        // 只影响展示分组（FE-02），不改变结果集。
+        // group_by 只影响展示分组（FE-02），不改变结果集。
         let _ = filters.group_by.unwrap_or(AssetGroupBy::None);
         true
     }
@@ -363,7 +396,12 @@ impl Catalog {
                 agents: vec![AgentId::ClaudeCode],
                 scope: AssetScope::Global,
                 context_hint: AssetContextHint::Path {
-                    path_hint: format!("~/…/skills/{}", skill.name),
+                    // 人类可读路径提示统一过出口遮蔽。
+                    path_hint: mask_synthetic_secrets(&format!("~/…/skills/{}", skill.name)),
+                },
+                source_tier: SourceTier {
+                    id: SOURCE_TIER_ID.to_string(),
+                    label: mask_synthetic_secrets(SOURCE_TIER_LABEL),
                 },
                 availability: ActionAvailability::Allowed,
             })
@@ -396,7 +434,8 @@ impl Catalog {
             scope: AssetScope::Global,
             effective_contexts: skill.effective_contexts(),
             source_anchor: SourceAnchor::UserHome,
-            path_display: format!("~/…/skills/{}/SKILL.md", skill.name),
+            // 人类可读单行路径统一过出口遮蔽。
+            path_display: mask_synthetic_secrets(&format!("~/…/skills/{}/SKILL.md", skill.name)),
             compatibility: CompatibilityStatus::VerifiedWritable,
             overrides: Vec::new(),
         };
