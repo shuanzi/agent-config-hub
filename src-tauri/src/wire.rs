@@ -1,0 +1,1182 @@
+//! ARC-06c wire DTO 层：`frontend_gateway_read` command 与
+//! `acm://workspace-invalidation` event 的唯一 wire shape 事实源。
+//!
+//! - envelope 固定为 `{ wireVersion, requestId, payload }`；
+//! - payload 均为带显式 `kind` tag 的封闭 union，全部 `deny_unknown_fields`；
+//! - 仅本文件中的 DTO derive `ts_rs::TS`，domain 类型不直接导出；
+//! - domain↔wire 转换为显式 `From` impl，集中在 `convert` 模块；
+//! - `GATEWAY_WIRE_VERSION` 由 `export-wire` bin 一并导出到 TypeScript，
+//!   TS 侧不手写第二份版本号。
+
+use serde::{Deserialize, Serialize};
+use ts_rs::TS;
+
+use crate::domain;
+
+/// 当前唯一支持的 wire 版本；不匹配在 ingress 封闭失败，不做协商或 fallback。
+pub const GATEWAY_WIRE_VERSION: u32 = 1;
+
+// ---------------------------------------------------------------------------
+// 字符串枚举 DTO
+// ---------------------------------------------------------------------------
+
+macro_rules! wire_string_enum {
+    ($name:ident, $rename:literal, $( $variant:ident ),* $(,)?) => {
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+        #[serde(rename_all = $rename)]
+        pub enum $name {
+            $( $variant ),*
+        }
+    };
+}
+
+wire_string_enum!(
+    AssetTypeWire,
+    "camelCase",
+    Skill,
+    LongTermInstruction,
+    Subagent,
+    Hook
+);
+wire_string_enum!(AssetScopeWire, "camelCase", Global, Project);
+wire_string_enum!(
+    IndexStatusWire,
+    "camelCase",
+    Fresh,
+    Stale,
+    Rebuilding,
+    Failed
+);
+wire_string_enum!(
+    CompatibilityStatusWire,
+    "camelCase",
+    VerifiedWritable,
+    RecognizedReadOnly,
+    IncompatibleBlocked
+);
+wire_string_enum!(
+    SensitiveDisplayStateWire,
+    "camelCase",
+    Masked,
+    TemporarilyRevealed,
+    ChangedMasked
+);
+wire_string_enum!(
+    AnomalyKindWire,
+    "camelCase",
+    ReadOnly,
+    Incompatible,
+    Conflict,
+    Drift
+);
+wire_string_enum!(
+    AssetStatusFilterWire,
+    "camelCase",
+    Editable,
+    ReadOnly,
+    Incompatible,
+    Normal,
+    Overridden,
+    Conflict,
+    Drift
+);
+wire_string_enum!(
+    AssetGroupByWire,
+    "camelCase",
+    None,
+    Agent,
+    Project,
+    Scope,
+    Source,
+    Status
+);
+wire_string_enum!(
+    NativeUnitKindWire,
+    "camelCase",
+    SingleFile,
+    MultiFileDirectory,
+    ConfigBlock,
+    PluginModule
+);
+wire_string_enum!(
+    OverrideRelationKindWire,
+    "camelCase",
+    Overrides,
+    OverriddenBy,
+    Shadowed
+);
+wire_string_enum!(FileKindWire, "camelCase", Text, NonText, Unknown);
+
+/// AgentId 含连字符值，不能走 rename_all。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub enum AgentIdWire {
+    #[serde(rename = "claude-code")]
+    ClaudeCode,
+    #[serde(rename = "codex")]
+    Codex,
+    #[serde(rename = "gemini-cli")]
+    GeminiCli,
+    #[serde(rename = "opencode")]
+    Opencode,
+}
+
+/// 稳定原因码全集（契约 §6.13）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum ReasonCodeWire {
+    UnknownAgentVersion,
+    IncompatibleStructure,
+    UnsupportedCapability,
+    ReadOnlyPolicy,
+    PermissionDenied,
+    OutsideManagedScope,
+    ProjectUnavailable,
+    UnknownFieldPreserved,
+    NonTextUnpreviewable,
+    ValidationFailed,
+    ExecutableContentRisk,
+    IndexStale,
+    ExternalChange,
+    ReprepareRequired,
+    MergeConflict,
+    TargetNameConflict,
+    ConversionDegraded,
+    ConversionBlocked,
+    ReadFailed,
+    SnapshotRequired,
+    SnapshotFailed,
+    SecureStorageUnavailable,
+    DiskFull,
+    WriteFailed,
+    RollbackFailed,
+    RecoveryTargetOccupied,
+    AdapterSignatureInvalid,
+    AdapterCompatibilityMismatch,
+    AdapterRegressionFailed,
+    ImportSourceUnavailable,
+    ExportDestinationInvalid,
+    GatewayUnavailable,
+}
+
+// ---------------------------------------------------------------------------
+// 可用性 / 恢复动作 / 身份
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+#[serde(deny_unknown_fields)]
+pub enum RecoveryActionWire {
+    RetryRead,
+}
+
+// 注：serde 对内部 tag 枚举的容器级 `deny_unknown_fields` 不生效（上游
+// issue #1547），因此所有带字段的 variant 一律以 newtype 包裹独立 struct，
+// 由 struct 级 `deny_unknown_fields` 在 ingress 拒绝未知字段。
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DisabledAvailabilityWire {
+    pub reason_code: ReasonCodeWire,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub recovery_action: Option<RecoveryActionWire>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+#[serde(deny_unknown_fields)]
+pub enum ActionAvailabilityWire {
+    Allowed,
+    Disabled(DisabledAvailabilityWire),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AssetRefWire {
+    pub asset_id: String,
+    pub asset_type: AssetTypeWire,
+    pub native_unit_ref: String,
+    pub adapter_identity: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AnomalyWire {
+    pub kind: AnomalyKindWire,
+    pub reason_code: ReasonCodeWire,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ProjectContextHintWire {
+    pub project_name: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PathContextHintWire {
+    pub path_hint: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+#[serde(deny_unknown_fields)]
+pub enum AssetContextHintWire {
+    Project(ProjectContextHintWire),
+    Path(PathContextHintWire),
+}
+
+// ---------------------------------------------------------------------------
+// Query DTO（request payload 封闭 union）
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CurrentAssetTypeScopeWire {
+    pub asset_type: AssetTypeWire,
+}
+
+/// 空 struct 使 `{"kind":"allAssets", …多余字段}` 在 ingress 被拒绝
+/// （unit variant 无法挂 deny_unknown_fields）。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+pub struct AllAssetsScopeWire {}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+#[serde(deny_unknown_fields)]
+pub enum AssetListScopeWire {
+    CurrentAssetType(CurrentAssetTypeScopeWire),
+    AllAssets(AllAssetsScopeWire),
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AssetListFiltersWire {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub agents: Option<Vec<AgentIdWire>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub projects: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub scopes: Option<Vec<AssetScopeWire>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub sources: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub statuses: Option<Vec<AssetStatusFilterWire>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub group_by: Option<AssetGroupByWire>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AssetListQueryWire {
+    pub scope: AssetListScopeWire,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub search_text: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub filters: Option<AssetListFiltersWire>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AssetDetailQueryWire {
+    pub asset: AssetRefWire,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct NativeFileQueryWire {
+    pub asset: AssetRefWire,
+    pub file_id: String,
+}
+
+/// request payload 封闭 union（ARC-02b：显式 tag，不用字符串 route）。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+#[serde(deny_unknown_fields)]
+pub enum ReadRequestPayload {
+    AssetList(AssetListQueryWire),
+    AssetDetail(AssetDetailQueryWire),
+    NativeFile(NativeFileQueryWire),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ReadRequestEnvelope {
+    pub wire_version: u32,
+    pub request_id: String,
+    pub payload: ReadRequestPayload,
+}
+
+// ---------------------------------------------------------------------------
+// Snapshot DTO
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AssetSummaryWire {
+    pub asset: AssetRefWire,
+    pub display_name: String,
+    pub anomalies: Vec<AnomalyWire>,
+    pub agents: Vec<AgentIdWire>,
+    pub scope: AssetScopeWire,
+    pub context_hint: AssetContextHintWire,
+    pub availability: ActionAvailabilityWire,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AssetListSnapshotWire {
+    pub assets: Vec<AssetSummaryWire>,
+    pub index_status: IndexStatusWire,
+    pub scope: AssetListScopeWire,
+    /// ISO 8601
+    pub queried_at: String,
+    /// ISO 8601
+    pub index_updated_at: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct EffectiveContextWire {
+    pub agent: AgentIdWire,
+    pub scope: AssetScopeWire,
+    pub source_tier_label: String,
+    pub precedence: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AssetCapabilitiesWire {
+    pub edit: ActionAvailabilityWire,
+    pub convert: ActionAvailabilityWire,
+    pub export: ActionAvailabilityWire,
+    pub delete: ActionAvailabilityWire,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct NativeFileRefWire {
+    pub file_id: String,
+    pub name: String,
+    pub relative_path: String,
+    pub file_kind: FileKindWire,
+    pub is_primary: bool,
+    pub can_preview: ActionAvailabilityWire,
+    pub can_edit: ActionAvailabilityWire,
+    pub has_draft_changes: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct FileTreeNodeWire {
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub file: Option<NativeFileRefWire>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub children: Option<Vec<FileTreeNodeWire>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AssetDetailWire {
+    pub asset: AssetRefWire,
+    pub display_name: String,
+    pub native_unit_kind: NativeUnitKindWire,
+    pub revision: String,
+    pub compatibility: CompatibilityStatusWire,
+    pub capabilities: AssetCapabilitiesWire,
+    pub effective_contexts: Vec<EffectiveContextWire>,
+    pub primary_file: NativeFileRefWire,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub file_tree_root: Option<FileTreeNodeWire>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct OverrideRelationWire {
+    pub kind: OverrideRelationKindWire,
+    pub other_asset_id: String,
+    pub note: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ProjectSourceAnchorWire {
+    pub project_name: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct GlobalRootSourceAnchorWire {
+    pub label: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+#[serde(deny_unknown_fields)]
+pub enum SourceAnchorWire {
+    Project(ProjectSourceAnchorWire),
+    UserHome,
+    GlobalRoot(GlobalRootSourceAnchorWire),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct InspectorDataWire {
+    pub agents: Vec<AgentIdWire>,
+    pub scope: AssetScopeWire,
+    pub effective_contexts: Vec<EffectiveContextWire>,
+    pub source_anchor: SourceAnchorWire,
+    pub path_display: String,
+    pub compatibility: CompatibilityStatusWire,
+    pub overrides: Vec<OverrideRelationWire>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AssetDetailSnapshotWire {
+    pub detail: AssetDetailWire,
+    pub inspector: InspectorDataWire,
+    pub revision: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SensitiveSegmentRefWire {
+    pub segment_id: String,
+    pub file_id: String,
+    pub revision: String,
+    pub display_state: SensitiveDisplayStateWire,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SourceContentWire {
+    pub masked_text: String,
+    pub sensitive_segments: Vec<SensitiveSegmentRefWire>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct NonTextMetadataContentWire {
+    pub file_kind_label: String,
+    /// 受 JS safe-integer 约束；FE-01 fixture 文件远小于该上限。
+    /// serde 序列化为 JSON number，TS 侧同为 number（非 bigint）。
+    #[ts(type = "number")]
+    pub size_bytes: u64,
+    pub path_display: String,
+    pub reason_code: ReasonCodeWire,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+#[serde(deny_unknown_fields)]
+pub enum NativeFileContentWire {
+    Source(SourceContentWire),
+    NonTextMetadata(NonTextMetadataContentWire),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct NativeFileSnapshotWire {
+    pub file: NativeFileRefWire,
+    pub revision: String,
+    pub asset_revision: String,
+    pub content: NativeFileContentWire,
+    pub structured_view: ActionAvailabilityWire,
+}
+
+/// 成功 snapshot 封闭 union；tag 与 request payload 一一对应。
+// wire DTO 每次请求只序列化/反序列化一次，不为 variant 大小差异引入装箱。
+#[allow(clippy::large_enum_variant)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+#[serde(deny_unknown_fields)]
+pub enum SnapshotWire {
+    AssetList(AssetListSnapshotWire),
+    AssetDetail(AssetDetailSnapshotWire),
+    NativeFile(NativeFileSnapshotWire),
+}
+
+// ---------------------------------------------------------------------------
+// Response DTO
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ReadSucceededWire {
+    pub snapshot: SnapshotWire,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ReadFailedWire {
+    pub reason_code: ReasonCodeWire,
+    pub message: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub recovery_action: Option<RecoveryActionWire>,
+}
+
+// 同上：response 每请求构造一次，不装箱。
+#[allow(clippy::large_enum_variant)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+#[serde(deny_unknown_fields)]
+pub enum ReadResponsePayload {
+    ReadSucceeded(ReadSucceededWire),
+    ReadFailed(ReadFailedWire),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ReadResponseEnvelope {
+    pub wire_version: u32,
+    pub request_id: String,
+    pub payload: ReadResponsePayload,
+}
+
+// ---------------------------------------------------------------------------
+// Event DTO（acm://workspace-invalidation，FE-01 子集）
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AssetsInvalidatedWire {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub asset_type: Option<AssetTypeWire>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AssetDriftDetectedWire {
+    pub asset_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct IndexStatusChangedWire {
+    pub index_status: IndexStatusWire,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CompatibilityChangedWire {
+    pub asset_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+#[serde(deny_unknown_fields)]
+pub enum WorkspaceEventWire {
+    AssetsInvalidated(AssetsInvalidatedWire),
+    AssetDriftDetected(AssetDriftDetectedWire),
+    IndexStatusChanged(IndexStatusChangedWire),
+    CompatibilityChanged(CompatibilityChangedWire),
+}
+
+/// 事件 envelope：wireVersion + 最小事件，不携带任何事实内容。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WorkspaceEventEnvelope {
+    pub wire_version: u32,
+    pub event: WorkspaceEventWire,
+}
+
+// ---------------------------------------------------------------------------
+// domain ↔ wire 显式转换
+// ---------------------------------------------------------------------------
+
+macro_rules! enum_convert_both {
+    ($wire:ident, $domain:ident, $( ($w:ident, $d:ident) ),* $(,)?) => {
+        impl From<domain::$domain> for $wire {
+            fn from(value: domain::$domain) -> Self {
+                match value {
+                    $( domain::$domain::$d => $wire::$w ),*
+                }
+            }
+        }
+        impl From<$wire> for domain::$domain {
+            fn from(value: $wire) -> Self {
+                match value {
+                    $( $wire::$w => domain::$domain::$d ),*
+                }
+            }
+        }
+    };
+}
+
+enum_convert_both!(
+    AssetTypeWire,
+    AssetType,
+    (Skill, Skill),
+    (LongTermInstruction, LongTermInstruction),
+    (Subagent, Subagent),
+    (Hook, Hook)
+);
+enum_convert_both!(
+    AssetScopeWire,
+    AssetScope,
+    (Global, Global),
+    (Project, Project)
+);
+enum_convert_both!(
+    IndexStatusWire,
+    IndexStatus,
+    (Fresh, Fresh),
+    (Stale, Stale),
+    (Rebuilding, Rebuilding),
+    (Failed, Failed)
+);
+enum_convert_both!(
+    CompatibilityStatusWire,
+    CompatibilityStatus,
+    (VerifiedWritable, VerifiedWritable),
+    (RecognizedReadOnly, RecognizedReadOnly),
+    (IncompatibleBlocked, IncompatibleBlocked)
+);
+enum_convert_both!(
+    SensitiveDisplayStateWire,
+    SensitiveDisplayState,
+    (Masked, Masked),
+    (TemporarilyRevealed, TemporarilyRevealed),
+    (ChangedMasked, ChangedMasked)
+);
+enum_convert_both!(
+    AnomalyKindWire,
+    AnomalyKind,
+    (ReadOnly, ReadOnly),
+    (Incompatible, Incompatible),
+    (Conflict, Conflict),
+    (Drift, Drift)
+);
+enum_convert_both!(
+    AssetStatusFilterWire,
+    AssetStatusFilter,
+    (Editable, Editable),
+    (ReadOnly, ReadOnly),
+    (Incompatible, Incompatible),
+    (Normal, Normal),
+    (Overridden, Overridden),
+    (Conflict, Conflict),
+    (Drift, Drift)
+);
+enum_convert_both!(
+    AssetGroupByWire,
+    AssetGroupBy,
+    (None, None),
+    (Agent, Agent),
+    (Project, Project),
+    (Scope, Scope),
+    (Source, Source),
+    (Status, Status)
+);
+enum_convert_both!(
+    NativeUnitKindWire,
+    NativeUnitKind,
+    (SingleFile, SingleFile),
+    (MultiFileDirectory, MultiFileDirectory),
+    (ConfigBlock, ConfigBlock),
+    (PluginModule, PluginModule)
+);
+enum_convert_both!(
+    OverrideRelationKindWire,
+    OverrideRelationKind,
+    (Overrides, Overrides),
+    (OverriddenBy, OverriddenBy),
+    (Shadowed, Shadowed)
+);
+enum_convert_both!(
+    FileKindWire,
+    FileKind,
+    (Text, Text),
+    (NonText, NonText),
+    (Unknown, Unknown)
+);
+enum_convert_both!(
+    AgentIdWire,
+    AgentId,
+    (ClaudeCode, ClaudeCode),
+    (Codex, Codex),
+    (GeminiCli, GeminiCli),
+    (Opencode, Opencode)
+);
+enum_convert_both!(
+    ReasonCodeWire,
+    ReasonCode,
+    (UnknownAgentVersion, UnknownAgentVersion),
+    (IncompatibleStructure, IncompatibleStructure),
+    (UnsupportedCapability, UnsupportedCapability),
+    (ReadOnlyPolicy, ReadOnlyPolicy),
+    (PermissionDenied, PermissionDenied),
+    (OutsideManagedScope, OutsideManagedScope),
+    (ProjectUnavailable, ProjectUnavailable),
+    (UnknownFieldPreserved, UnknownFieldPreserved),
+    (NonTextUnpreviewable, NonTextUnpreviewable),
+    (ValidationFailed, ValidationFailed),
+    (ExecutableContentRisk, ExecutableContentRisk),
+    (IndexStale, IndexStale),
+    (ExternalChange, ExternalChange),
+    (ReprepareRequired, ReprepareRequired),
+    (MergeConflict, MergeConflict),
+    (TargetNameConflict, TargetNameConflict),
+    (ConversionDegraded, ConversionDegraded),
+    (ConversionBlocked, ConversionBlocked),
+    (ReadFailed, ReadFailed),
+    (SnapshotRequired, SnapshotRequired),
+    (SnapshotFailed, SnapshotFailed),
+    (SecureStorageUnavailable, SecureStorageUnavailable),
+    (DiskFull, DiskFull),
+    (WriteFailed, WriteFailed),
+    (RollbackFailed, RollbackFailed),
+    (RecoveryTargetOccupied, RecoveryTargetOccupied),
+    (AdapterSignatureInvalid, AdapterSignatureInvalid),
+    (AdapterCompatibilityMismatch, AdapterCompatibilityMismatch),
+    (AdapterRegressionFailed, AdapterRegressionFailed),
+    (ImportSourceUnavailable, ImportSourceUnavailable),
+    (ExportDestinationInvalid, ExportDestinationInvalid),
+    (GatewayUnavailable, GatewayUnavailable)
+);
+
+impl From<domain::RecoveryAction> for RecoveryActionWire {
+    fn from(value: domain::RecoveryAction) -> Self {
+        match value {
+            domain::RecoveryAction::RetryRead => RecoveryActionWire::RetryRead,
+        }
+    }
+}
+
+impl From<domain::ActionAvailability> for ActionAvailabilityWire {
+    fn from(value: domain::ActionAvailability) -> Self {
+        match value {
+            domain::ActionAvailability::Allowed => ActionAvailabilityWire::Allowed,
+            domain::ActionAvailability::Disabled {
+                reason_code,
+                recovery_action,
+            } => ActionAvailabilityWire::Disabled(DisabledAvailabilityWire {
+                reason_code: reason_code.into(),
+                recovery_action: recovery_action.map(Into::into),
+            }),
+        }
+    }
+}
+
+impl From<domain::AssetRef> for AssetRefWire {
+    fn from(value: domain::AssetRef) -> Self {
+        AssetRefWire {
+            asset_id: value.asset_id,
+            asset_type: value.asset_type.into(),
+            native_unit_ref: value.native_unit_ref,
+            adapter_identity: value.adapter_identity,
+        }
+    }
+}
+
+impl From<AssetRefWire> for domain::AssetRef {
+    fn from(value: AssetRefWire) -> Self {
+        domain::AssetRef {
+            asset_id: value.asset_id,
+            asset_type: value.asset_type.into(),
+            native_unit_ref: value.native_unit_ref,
+            adapter_identity: value.adapter_identity,
+        }
+    }
+}
+
+impl From<domain::Anomaly> for AnomalyWire {
+    fn from(value: domain::Anomaly) -> Self {
+        AnomalyWire {
+            kind: value.kind.into(),
+            reason_code: value.reason_code.into(),
+            message: value.message,
+        }
+    }
+}
+
+impl From<domain::AssetContextHint> for AssetContextHintWire {
+    fn from(value: domain::AssetContextHint) -> Self {
+        match value {
+            domain::AssetContextHint::Project { project_name } => {
+                AssetContextHintWire::Project(ProjectContextHintWire { project_name })
+            }
+            domain::AssetContextHint::Path { path_hint } => {
+                AssetContextHintWire::Path(PathContextHintWire { path_hint })
+            }
+        }
+    }
+}
+
+impl From<domain::AssetListScope> for AssetListScopeWire {
+    fn from(value: domain::AssetListScope) -> Self {
+        match value {
+            domain::AssetListScope::CurrentAssetType { asset_type } => {
+                AssetListScopeWire::CurrentAssetType(CurrentAssetTypeScopeWire {
+                    asset_type: asset_type.into(),
+                })
+            }
+            domain::AssetListScope::AllAssets => {
+                AssetListScopeWire::AllAssets(AllAssetsScopeWire {})
+            }
+        }
+    }
+}
+
+impl From<AssetListScopeWire> for domain::AssetListScope {
+    fn from(value: AssetListScopeWire) -> Self {
+        match value {
+            AssetListScopeWire::CurrentAssetType(scope) => {
+                domain::AssetListScope::CurrentAssetType {
+                    asset_type: scope.asset_type.into(),
+                }
+            }
+            AssetListScopeWire::AllAssets(_) => domain::AssetListScope::AllAssets,
+        }
+    }
+}
+
+impl From<AssetListFiltersWire> for domain::AssetListFilters {
+    fn from(value: AssetListFiltersWire) -> Self {
+        domain::AssetListFilters {
+            agents: value
+                .agents
+                .map(|items| items.into_iter().map(Into::into).collect()),
+            projects: value.projects,
+            scopes: value
+                .scopes
+                .map(|items| items.into_iter().map(Into::into).collect()),
+            sources: value.sources,
+            statuses: value
+                .statuses
+                .map(|items| items.into_iter().map(Into::into).collect()),
+            group_by: value.group_by.map(Into::into),
+        }
+    }
+}
+
+impl From<ReadRequestPayload> for domain::Query {
+    fn from(value: ReadRequestPayload) -> Self {
+        match value {
+            ReadRequestPayload::AssetList(query) => {
+                domain::Query::AssetList(domain::AssetListQuery {
+                    scope: query.scope.into(),
+                    search_text: query.search_text,
+                    filters: query.filters.map(Into::into),
+                })
+            }
+            ReadRequestPayload::AssetDetail(query) => {
+                domain::Query::AssetDetail(domain::AssetDetailQuery {
+                    asset: query.asset.into(),
+                })
+            }
+            ReadRequestPayload::NativeFile(query) => {
+                domain::Query::NativeFile(domain::NativeFileQuery {
+                    asset: query.asset.into(),
+                    file_id: query.file_id,
+                })
+            }
+        }
+    }
+}
+
+impl From<domain::AssetSummary> for AssetSummaryWire {
+    fn from(value: domain::AssetSummary) -> Self {
+        AssetSummaryWire {
+            asset: value.asset.into(),
+            display_name: value.display_name,
+            anomalies: value.anomalies.into_iter().map(Into::into).collect(),
+            agents: value.agents.into_iter().map(Into::into).collect(),
+            scope: value.scope.into(),
+            context_hint: value.context_hint.into(),
+            availability: value.availability.into(),
+        }
+    }
+}
+
+impl From<domain::AssetListSnapshot> for AssetListSnapshotWire {
+    fn from(value: domain::AssetListSnapshot) -> Self {
+        AssetListSnapshotWire {
+            assets: value.assets.into_iter().map(Into::into).collect(),
+            index_status: value.index_status.into(),
+            scope: value.scope.into(),
+            queried_at: value.queried_at,
+            index_updated_at: value.index_updated_at,
+        }
+    }
+}
+
+impl From<domain::EffectiveContext> for EffectiveContextWire {
+    fn from(value: domain::EffectiveContext) -> Self {
+        EffectiveContextWire {
+            agent: value.agent.into(),
+            scope: value.scope.into(),
+            source_tier_label: value.source_tier_label,
+            precedence: value.precedence,
+        }
+    }
+}
+
+impl From<domain::AssetCapabilities> for AssetCapabilitiesWire {
+    fn from(value: domain::AssetCapabilities) -> Self {
+        AssetCapabilitiesWire {
+            edit: value.edit.into(),
+            convert: value.convert.into(),
+            export: value.export.into(),
+            delete: value.delete.into(),
+        }
+    }
+}
+
+impl From<domain::NativeFileRef> for NativeFileRefWire {
+    fn from(value: domain::NativeFileRef) -> Self {
+        NativeFileRefWire {
+            file_id: value.file_id,
+            name: value.name,
+            relative_path: value.relative_path,
+            file_kind: value.file_kind.into(),
+            is_primary: value.is_primary,
+            can_preview: value.can_preview.into(),
+            can_edit: value.can_edit.into(),
+            has_draft_changes: value.has_draft_changes,
+        }
+    }
+}
+
+impl From<domain::FileTreeNode> for FileTreeNodeWire {
+    fn from(value: domain::FileTreeNode) -> Self {
+        FileTreeNodeWire {
+            name: value.name,
+            file: value.file.map(Into::into),
+            children: value
+                .children
+                .map(|nodes| nodes.into_iter().map(Into::into).collect()),
+        }
+    }
+}
+
+impl From<domain::AssetDetail> for AssetDetailWire {
+    fn from(value: domain::AssetDetail) -> Self {
+        AssetDetailWire {
+            asset: value.asset.into(),
+            display_name: value.display_name,
+            native_unit_kind: value.native_unit_kind.into(),
+            revision: value.revision,
+            compatibility: value.compatibility.into(),
+            capabilities: value.capabilities.into(),
+            effective_contexts: value
+                .effective_contexts
+                .into_iter()
+                .map(Into::into)
+                .collect(),
+            primary_file: value.primary_file.into(),
+            file_tree_root: value.file_tree_root.map(Into::into),
+        }
+    }
+}
+
+impl From<domain::OverrideRelation> for OverrideRelationWire {
+    fn from(value: domain::OverrideRelation) -> Self {
+        OverrideRelationWire {
+            kind: value.kind.into(),
+            other_asset_id: value.other_asset_id,
+            note: value.note,
+        }
+    }
+}
+
+impl From<domain::SourceAnchor> for SourceAnchorWire {
+    fn from(value: domain::SourceAnchor) -> Self {
+        match value {
+            domain::SourceAnchor::Project { project_name } => {
+                SourceAnchorWire::Project(ProjectSourceAnchorWire { project_name })
+            }
+            domain::SourceAnchor::UserHome => SourceAnchorWire::UserHome,
+            domain::SourceAnchor::GlobalRoot { label } => {
+                SourceAnchorWire::GlobalRoot(GlobalRootSourceAnchorWire { label })
+            }
+        }
+    }
+}
+
+impl From<domain::InspectorData> for InspectorDataWire {
+    fn from(value: domain::InspectorData) -> Self {
+        InspectorDataWire {
+            agents: value.agents.into_iter().map(Into::into).collect(),
+            scope: value.scope.into(),
+            effective_contexts: value
+                .effective_contexts
+                .into_iter()
+                .map(Into::into)
+                .collect(),
+            source_anchor: value.source_anchor.into(),
+            path_display: value.path_display,
+            compatibility: value.compatibility.into(),
+            overrides: value.overrides.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
+impl From<domain::AssetDetailSnapshot> for AssetDetailSnapshotWire {
+    fn from(value: domain::AssetDetailSnapshot) -> Self {
+        AssetDetailSnapshotWire {
+            detail: value.detail.into(),
+            inspector: value.inspector.into(),
+            revision: value.revision,
+        }
+    }
+}
+
+impl From<domain::SensitiveSegmentRef> for SensitiveSegmentRefWire {
+    fn from(value: domain::SensitiveSegmentRef) -> Self {
+        SensitiveSegmentRefWire {
+            segment_id: value.segment_id,
+            file_id: value.file_id,
+            revision: value.revision,
+            display_state: value.display_state.into(),
+        }
+    }
+}
+
+impl From<domain::NativeFileContent> for NativeFileContentWire {
+    fn from(value: domain::NativeFileContent) -> Self {
+        match value {
+            domain::NativeFileContent::Source(content) => {
+                NativeFileContentWire::Source(SourceContentWire {
+                    masked_text: content.masked_text,
+                    sensitive_segments: content
+                        .sensitive_segments
+                        .into_iter()
+                        .map(Into::into)
+                        .collect(),
+                })
+            }
+            domain::NativeFileContent::NonTextMetadata(meta) => {
+                NativeFileContentWire::NonTextMetadata(NonTextMetadataContentWire {
+                    file_kind_label: meta.file_kind_label,
+                    size_bytes: meta.size_bytes,
+                    path_display: meta.path_display,
+                    reason_code: meta.reason_code.into(),
+                    reason: meta.reason,
+                })
+            }
+        }
+    }
+}
+
+impl From<domain::NativeFileSnapshot> for NativeFileSnapshotWire {
+    fn from(value: domain::NativeFileSnapshot) -> Self {
+        NativeFileSnapshotWire {
+            file: value.file.into(),
+            revision: value.revision,
+            asset_revision: value.asset_revision,
+            content: value.content.into(),
+            structured_view: value.structured_view.into(),
+        }
+    }
+}
+
+impl From<domain::Snapshot> for SnapshotWire {
+    fn from(value: domain::Snapshot) -> Self {
+        match value {
+            domain::Snapshot::AssetList(snapshot) => SnapshotWire::AssetList(snapshot.into()),
+            domain::Snapshot::AssetDetail(snapshot) => SnapshotWire::AssetDetail(snapshot.into()),
+            domain::Snapshot::NativeFile(snapshot) => SnapshotWire::NativeFile(snapshot.into()),
+        }
+    }
+}
+
+impl From<domain::ReadResult<domain::Snapshot>> for ReadResponsePayload {
+    fn from(value: domain::ReadResult<domain::Snapshot>) -> Self {
+        match value {
+            domain::ReadResult::Succeeded(snapshot) => {
+                ReadResponsePayload::ReadSucceeded(ReadSucceededWire {
+                    snapshot: snapshot.into(),
+                })
+            }
+            domain::ReadResult::Failed(failure) => {
+                ReadResponsePayload::ReadFailed(ReadFailedWire {
+                    reason_code: failure.reason_code.into(),
+                    message: failure.message,
+                    recovery_action: failure.recovery_action.map(Into::into),
+                })
+            }
+        }
+    }
+}
+
+impl From<domain::WorkspaceEvent> for WorkspaceEventWire {
+    fn from(value: domain::WorkspaceEvent) -> Self {
+        match value {
+            domain::WorkspaceEvent::AssetsInvalidated { asset_type } => {
+                WorkspaceEventWire::AssetsInvalidated(AssetsInvalidatedWire {
+                    asset_type: asset_type.map(Into::into),
+                })
+            }
+            domain::WorkspaceEvent::AssetDriftDetected { asset_id } => {
+                WorkspaceEventWire::AssetDriftDetected(AssetDriftDetectedWire { asset_id })
+            }
+            domain::WorkspaceEvent::IndexStatusChanged { index_status } => {
+                WorkspaceEventWire::IndexStatusChanged(IndexStatusChangedWire {
+                    index_status: index_status.into(),
+                })
+            }
+            domain::WorkspaceEvent::CompatibilityChanged { asset_id } => {
+                WorkspaceEventWire::CompatibilityChanged(CompatibilityChangedWire { asset_id })
+            }
+        }
+    }
+}

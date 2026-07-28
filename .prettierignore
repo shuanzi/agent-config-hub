@@ -1,0 +1,12 @@
+dist
+node_modules
+.artifacts
+src-tauri
+target
+docs
+.scratch
+scripts
+fixtures
+package-lock.json
+rust-toolchain.toml
+src/gateway/wire

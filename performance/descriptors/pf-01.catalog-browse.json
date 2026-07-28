@@ -1,0 +1,75 @@
+{
+  "descriptorId": "PF-01",
+  "name": "catalog-browse",
+  "schemaVersion": 1,
+  "seed": 20260727,
+  "shapeDimensions": {
+    "assetTypes": ["skill", "longTermInstruction", "subagent", "hook"],
+    "agents": ["claude-code", "codex", "gemini-cli", "opencode"],
+    "scopes": ["global", "project"],
+    "statusCombinations": [
+      "editable+normal",
+      "editable+overridden",
+      "readOnly+normal",
+      "readOnly+conflict",
+      "incompatible+drift"
+    ],
+    "displayNameLength": "pf01-<assetType>-<NNNN> 顺序编号，定长",
+    "summaryLengthChars": [24, 140],
+    "sourceLineCount": [30, 120],
+    "totalListSize": "由 profile.initialAssetCount 决定；四类资产均匀轮转分配"
+  },
+  "profiles": {
+    "representative": {
+      "initialAssetCount": 120,
+      "note": "首次校准值（FE-01 首条 baseline），非产品支持上限"
+    },
+    "stress": {
+      "initialAssetCount": 2000,
+      "note": "首次校准值；stress 只用于发现退化，不反向扩大 MVP 范围"
+    }
+  },
+  "contentRules": [
+    "全部内容由 src/gateway/perf-catalog.ts 以 descriptor seed 确定性生成（mulberry32 PRNG），同一 seed+profile 两次生成逐项相等",
+    "只生成合成路径（~/…/pf01/… 展示提示）、合成名称与不可执行占位文本，不读取用户真实 Agent 配置、项目、Token 或 Git 工作树",
+    "约 1/6 资产的合成源码含占位敏感值（SYNTHETIC-SECRET-pf01-<NNNN>），离开 gateway 前经 fixtures/sensitive-masking.ts 同一遮蔽语义处理，明文不出现在 UI/日志/evidence",
+    "状态组合按 statusCombinations 轮转，异常（anomaly）与状态派生一致"
+  ],
+  "metrics": [
+    {
+      "id": "pf01.startup.first_list_visible",
+      "surface": "冷启动与初始读取",
+      "definition": "测试入口模块求值（User Timing 起点）→ 首屏资产列表首次 ready 可见",
+      "minSamples": 5,
+      "sampling": "每次 fresh load（重新 browser.url，页面上下文重置）"
+    },
+    {
+      "id": "pf01.search.results_visible",
+      "surface": "搜索",
+      "definition": "搜索 intent（setSearchText dispatch，页内 performance.now 记点）→ 结果列表稳定为期望行数",
+      "minSamples": 20,
+      "sampling": "两个确定搜索词交替；DOM MutationObserver + rAF 稳定确认，不含 WebDriver 往返"
+    },
+    {
+      "id": "pf01.filter.results_visible",
+      "surface": "筛选",
+      "definition": "Agent 筛选变更（真实 WebDriver select 交互）→ 结果列表稳定为期望行数",
+      "minSamples": 20,
+      "sampling": "两个 Agent 交替；起点为 probe arm 时刻，含一次本地 WebDriver 往返（恒定开销）"
+    },
+    {
+      "id": "pf01.select.source_visible",
+      "surface": "选择资产",
+      "definition": "点击列表行（真实 WebDriver click）→ 详情区磁盘源码（pre.source-view）内容更新可见",
+      "minSamples": 20,
+      "sampling": "前两行交替点击；起点为 probe arm 时刻，含一次本地 WebDriver 往返（恒定开销）"
+    }
+  ],
+  "budgetStatus": "baseline-collected / budget-not-frozen",
+  "budgetNote": "FE-01 只采集首条 baseline；数值预算未冻结，建议预算写入 evidence 的 proposed-budgets.json，需用户单独授权后方可进入版本控制的 performance/budgets manifest",
+  "digest": {
+    "algorithm": "sha256",
+    "canonicalization": "将本文件 digest.value 置为空字符串后对文件原始字节求 sha256；由 scripts/orchestrator/lib.mjs 的 pfDescriptorDigest 复算",
+    "value": "9920956c73cd524f43232f6f9fe27024c7b104d4ce7ff9c91c734e9ac9cfdf2d"
+  }
+}
