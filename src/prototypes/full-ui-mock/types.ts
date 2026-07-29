@@ -41,6 +41,15 @@ export type InspectorSection = 'source' | 'compatibility' | 'recovery';
 export type SearchRange = 'current' | 'all';
 export type CatalogState = 'normal' | 'loading' | 'empty';
 export type PanelOverlay = 'library' | 'files' | 'inspector' | null;
+export type SkillAgentTargetStatus = 'recognized' | 'installable' | 'convertible' | 'blocked';
+export type SkillTargetAction = 'install' | 'convert';
+
+/** Skills 列表中每个 Agent 的识别或可准备操作状态；仅用于原型展示。 */
+export interface SkillAgentTarget {
+  agent: string;
+  status: SkillAgentTargetStatus;
+  reason?: string;
+}
 
 export interface MockAsset {
   id: string;
@@ -51,6 +60,8 @@ export interface MockAsset {
   project: string;
   status?: '只读' | '漂移' | '冲突' | '不兼容';
   description: string;
+  /** 仅 Skills 使用；它不代表跨 Agent 的新资产身份。 */
+  agentTargets?: SkillAgentTarget[];
   files: Array<{ name: string; language: string; content: string; changed?: boolean }>;
 }
 
@@ -73,6 +84,9 @@ export interface MockUiState {
   view: 'source' | 'structured';
   search: string;
   searchRange: SearchRange;
+  /** selected 原型专属：右上角全局搜索，独立于旧方案的类目内搜索。 */
+  globalSearch: string;
+  globalSearchOpen: boolean;
   agentFilter: string;
   catalogState: CatalogState;
   panelOverlay: PanelOverlay;
@@ -95,5 +109,9 @@ export interface MockUiState {
   targetAgent: string;
   targetScope: '全局' | '项目';
   recoveryAction: 'idle' | 'delete-confirm' | 'delete-result';
+  /** selected Skills 行发起的单目标准备动作；不触发即时写入。 */
+  skillTarget: { action: SkillTargetAction; agent: string } | null;
+  /** 窄窗口中在“列表 / 结构化详情”两个表面间切换。 */
+  selectedPanel: 'list' | 'detail';
   notice: string | null;
 }

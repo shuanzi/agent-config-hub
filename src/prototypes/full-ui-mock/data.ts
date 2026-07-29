@@ -1,4 +1,10 @@
-import type { AssetType, MockAsset, RecoveryPoint } from './types';
+import type {
+  AssetType,
+  MockAsset,
+  RecoveryPoint,
+  SkillAgentTarget,
+  SkillAgentTargetStatus,
+} from './types';
 
 /**
  * 合成数据构造辅助：让多文件资产内容足够真实，同时保持“明显是假数据”。
@@ -101,6 +107,26 @@ function hookConfig(event: string, checks: string[]): string {
   );
 }
 
+const skillAgentNames = ['Claude Code', 'Codex', 'Gemini CLI', 'OpenCode'] as const;
+
+/**
+ * 仅供 Skills 列表的合成目标状态使用；它不创建跨 Agent 的聚合身份。
+ */
+function skillTargets(
+  recognizedBy: string,
+  statusOverrides: Partial<Record<(typeof skillAgentNames)[number], SkillAgentTargetStatus>> = {},
+): SkillAgentTarget[] {
+  return skillAgentNames.map((agent) => {
+    const status =
+      statusOverrides[agent] ?? (agent === recognizedBy ? 'recognized' : 'installable');
+    return {
+      agent,
+      status,
+      reason: status === 'blocked' ? '目标缺少此 Skill 必需的能力。' : undefined,
+    };
+  });
+}
+
 export const mockAssets: MockAsset[] = [
   // ---------- Skills ----------
   {
@@ -111,6 +137,11 @@ export const mockAssets: MockAsset[] = [
     scope: '项目',
     project: 'acme/desktop',
     description: '提交说明与变更范围检查。',
+    agentTargets: skillTargets('Claude Code', {
+      Codex: 'installable',
+      'Gemini CLI': 'convertible',
+      OpenCode: 'blocked',
+    }),
     files: [
       {
         name: 'SKILL.md',
@@ -164,6 +195,11 @@ export const mockAssets: MockAsset[] = [
     project: '用户全局配置',
     status: '漂移',
     description: '发布前证据与回滚检查。',
+    agentTargets: skillTargets('Codex', {
+      'Claude Code': 'convertible',
+      'Gemini CLI': 'installable',
+      OpenCode: 'blocked',
+    }),
     files: [
       {
         name: 'SKILL.md',
@@ -199,6 +235,11 @@ export const mockAssets: MockAsset[] = [
     scope: '项目',
     project: 'acme/desktop',
     description: '按风险对评审意见分级。',
+    agentTargets: skillTargets('Gemini CLI', {
+      'Claude Code': 'convertible',
+      Codex: 'installable',
+      OpenCode: 'installable',
+    }),
     files: [
       {
         name: 'SKILL.md',
@@ -220,6 +261,11 @@ export const mockAssets: MockAsset[] = [
     project: 'acme/server',
     status: '冲突',
     description: '为改动定位最小验证集。',
+    agentTargets: skillTargets('OpenCode', {
+      'Claude Code': 'installable',
+      Codex: 'convertible',
+      'Gemini CLI': 'blocked',
+    }),
     files: [
       {
         name: 'SKILL.md',
@@ -249,6 +295,11 @@ export const mockAssets: MockAsset[] = [
     project: '用户全局配置',
     status: '只读',
     description: '检查文档与实现是否一致。',
+    agentTargets: skillTargets('Claude Code', {
+      Codex: 'installable',
+      'Gemini CLI': 'convertible',
+      OpenCode: 'installable',
+    }),
     files: [
       {
         name: 'SKILL.md',
@@ -269,6 +320,11 @@ export const mockAssets: MockAsset[] = [
     scope: '项目',
     project: 'acme/desktop',
     description: '扫描硬编码文案与遗漏翻译。',
+    agentTargets: skillTargets('Codex', {
+      'Claude Code': 'installable',
+      'Gemini CLI': 'convertible',
+      OpenCode: 'installable',
+    }),
     files: [
       {
         name: 'SKILL.md',
@@ -289,6 +345,11 @@ export const mockAssets: MockAsset[] = [
     scope: '全局',
     project: '用户全局配置',
     description: '记录关键路径的性能基线。',
+    agentTargets: skillTargets('Gemini CLI', {
+      'Claude Code': 'convertible',
+      Codex: 'installable',
+      OpenCode: 'blocked',
+    }),
     files: [
       {
         name: 'SKILL.md',

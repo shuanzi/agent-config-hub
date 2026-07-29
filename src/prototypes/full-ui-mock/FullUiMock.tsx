@@ -36,6 +36,8 @@ import type {
   MockScenario,
   MockUiState,
   MockVariant,
+  SkillAgentTarget,
+  SkillTargetAction,
   Stage,
   ViewPreset,
 } from './types';
@@ -152,11 +154,14 @@ export function FullUiMock(): JSX.Element {
   const [sensitiveVisible, setSensitiveVisible] = useState(false);
   const [convertTarget, setConvertTarget] = useState('Codex');
   const searchRef = useRef<HTMLInputElement>(null);
+  const globalSearchRef = useRef<HTMLInputElement>(null);
+  const globalSearchTriggerRef = useRef<HTMLButtonElement>(null);
+  const globalSearchRestoreRef = useRef<HTMLElement | null>(null);
   const restoreFocusRef = useRef<HTMLElement | null>(null);
   const previousOverlayRef = useRef<MockUiState['panelOverlay']>(null);
 
-  // 集中验收一已确认方案 C；A/B/C 仍保留为设计证据，第二阶段只验收 selected。
-  const visualVariant = state.variant === 'selected' ? 'C' : state.variant;
+  // A/B/C 是第一阶段的完整设计证据；selected 是第二阶段独立重构，不改写它们。
+  const visualVariant = state.variant;
   const storedAsset = getAsset(state.assetId);
   const asset = state.journey === 'create' ? creationAsset(state) : storedAsset;
   const activeFile = asset.files.find((file) => file.name === state.fileName) ?? asset.files[0];
@@ -187,6 +192,16 @@ export function FullUiMock(): JSX.Element {
     state.searchRange,
   ]);
 
+  const selectedAssets = useMemo(() => {
+    const currentTypeAssets = mockAssets.filter((candidate) => candidate.type === state.assetType);
+    const agentFiltered =
+      state.agentFilter === '全部 Agent'
+        ? currentTypeAssets
+        : currentTypeAssets.filter((candidate) => candidate.agent === state.agentFilter);
+    const filters = state.assetType === 'Skills' ? { ...state.filters, status: [] } : state.filters;
+    return filterAssets(agentFiltered, state.scopeFilter, filters);
+  }, [state.agentFilter, state.assetType, state.filters, state.scopeFilter]);
+
   useEffect(() => {
     syncMockQuery(state);
   }, [state.variant, state.journey, state.scenario]);
@@ -200,6 +215,11 @@ export function FullUiMock(): JSX.Element {
   useEffect(() => {
     setSensitiveVisible(false);
   }, [state.assetId, state.fileName, state.scenario]);
+
+  useEffect(() => {
+    if (!state.globalSearchOpen) return;
+    window.requestAnimationFrame(() => globalSearchRef.current?.focus());
+  }, [state.globalSearchOpen]);
 
   useEffect(() => {
     const previousOverlay = previousOverlayRef.current;
@@ -242,6 +262,11 @@ export function FullUiMock(): JSX.Element {
     const handleKeyDown = (event: globalThis.KeyboardEvent): void => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
         event.preventDefault();
+        if (state.variant === 'selected') {
+          globalSearchRestoreRef.current = document.activeElement as HTMLElement | null;
+          setState((previous) => ({ ...previous, globalSearchOpen: true }));
+          return;
+        }
         setState((previous) => ({
           ...previous,
           panelOverlay: previous.viewport === 'narrow' ? 'library' : previous.panelOverlay,
@@ -251,6 +276,15 @@ export function FullUiMock(): JSX.Element {
       }
       if (event.key === 'Escape') {
         setState((previous) => {
+          if (previous.globalSearchOpen) {
+            window.requestAnimationFrame(() => {
+              const restoreTarget = globalSearchRestoreRef.current;
+              if (restoreTarget?.isConnected) restoreTarget.focus();
+              else globalSearchTriggerRef.current?.focus();
+              globalSearchRestoreRef.current = null;
+            });
+            return { ...previous, globalSearchOpen: false, globalSearch: '' };
+          }
           if (previous.stage === 'confirm') return { ...previous, stage: 'review' };
           if (previous.stage === 'discard') return { ...previous, stage: 'editing' };
           return {
@@ -275,7 +309,7 @@ export function FullUiMock(): JSX.Element {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, []);
+  }, [state.variant]);
 
   useEffect(() => {
     if (state.stage !== 'confirm' && state.stage !== 'discard') {
@@ -298,11 +332,33 @@ export function FullUiMock(): JSX.Element {
   }, [state.stage]);
 
   const patchState = (patch: Partial<MockUiState>): void => {
-    setState((previous) => ({ ...previous, ...patch }));
+    setState((previous) => {
+      const leavesSkillTargetFlow =
+        previous.skillTarget !== null &&
+        (patch.journey === 'browse' ||
+          patch.journey === 'edit' ||
+          patch.journey === 'create' ||
+          patch.journey === 'manage' ||
+          patch.journey === 'recover' ||
+          patch.stage === 'browse' ||
+          patch.stage === 'editing' ||
+          patch.stage === 'manage' ||
+          patch.stage === 'recover');
+      return {
+        ...previous,
+        ...patch,
+        ...(leavesSkillTargetFlow ? { skillTarget: null } : {}),
+      };
+    });
   };
 
   const chooseAsset = (assetId: string): void => {
-    if (assetId === state.assetId) return;
+    if (assetId === state.assetId) {
+      if (state.variant === 'selected' && state.viewport === 'narrow') {
+        patchState({ selectedPanel: 'detail' });
+      }
+      return;
+    }
     if (state.dirty) {
       restoreFocusRef.current = document.activeElement as HTMLElement | null;
       setPendingAssetId(assetId);
@@ -321,10 +377,18 @@ export function FullUiMock(): JSX.Element {
       assetId: nextAsset.id,
       assetType: nextAsset.type,
       fileName: nextAsset.files[0].name,
+      journey: previous.skillTarget !== null ? 'browse' : previous.journey,
       stage: previous.journey === 'edit' ? 'editing' : 'browse',
       dirty: false,
       drafts: {},
+      skillTarget: null,
       panelOverlay: null,
+      globalSearchOpen: false,
+      globalSearch: '',
+      selectedPanel:
+        previous.variant === 'selected' && previous.viewport === 'narrow'
+          ? 'detail'
+          : previous.selectedPanel,
       notice: null,
     }));
   };
@@ -385,6 +449,7 @@ export function FullUiMock(): JSX.Element {
     requestTransition({
       journey: 'manage',
       stage: 'manage',
+      skillTarget: null,
       dirty: false,
       drafts: {},
       panelOverlay: null,
@@ -395,16 +460,69 @@ export function FullUiMock(): JSX.Element {
     requestTransition({
       journey: 'convert',
       stage: 'target',
+      skillTarget: null,
       dirty: false,
       drafts: {},
       panelOverlay: null,
       recoveryAction: 'idle',
     });
 
+  const startSkillTarget = (
+    assetId: string,
+    action: SkillTargetAction,
+    target: SkillAgentTarget,
+  ): void => {
+    if (target.status !== 'installable' && target.status !== 'convertible') return;
+    const targetAsset = getAsset(assetId);
+    const transition: Partial<MockUiState> = {
+      assetId: targetAsset.id,
+      assetType: targetAsset.type,
+      fileName: targetAsset.files[0].name,
+      journey: 'convert',
+      stage: 'target',
+      skillTarget: { action, agent: target.agent },
+      dirty: false,
+      drafts: {},
+      panelOverlay: null,
+      selectedPanel: 'detail',
+      recoveryAction: 'idle',
+    };
+    setConvertTarget(target.agent);
+    if (state.dirty) {
+      restoreFocusRef.current = document.activeElement as HTMLElement | null;
+      setPendingAssetId(null);
+      setPendingTransition(transition);
+      patchState({ stage: 'discard' });
+      return;
+    }
+    setState((previous) => ({ ...previous, ...transition }));
+  };
+
+  const openGlobalSearch = (): void => {
+    globalSearchRestoreRef.current = document.activeElement as HTMLElement | null;
+    patchState({ globalSearchOpen: true });
+  };
+
+  const closeGlobalSearch = (): void => {
+    patchState({ globalSearchOpen: false, globalSearch: '' });
+    window.requestAnimationFrame(() => {
+      const restoreTarget = globalSearchRestoreRef.current;
+      if (restoreTarget?.isConnected) restoreTarget.focus();
+      else globalSearchTriggerRef.current?.focus();
+      globalSearchRestoreRef.current = null;
+    });
+  };
+
+  const chooseGlobalAsset = (assetId: string): void => {
+    closeGlobalSearch();
+    chooseAsset(assetId);
+  };
+
   const startRecover = (): void =>
     requestTransition({
       journey: 'recover',
       stage: 'recover',
+      skillTarget: null,
       dirty: false,
       drafts: {},
       panelOverlay: null,
@@ -453,7 +571,10 @@ export function FullUiMock(): JSX.Element {
     asset,
     activeFile,
     visibleAssets,
+    selectedAssets,
     searchRef,
+    globalSearchRef,
+    globalSearchTriggerRef,
     sensitiveVisible,
     convertTarget,
     patchState,
@@ -462,12 +583,16 @@ export function FullUiMock(): JSX.Element {
     startCreate,
     startManage,
     startConvert,
+    startSkillTarget,
     startRecover,
     startReview,
     openConfirmation,
     applyPreparedOperation,
     setSensitiveVisible,
     setConvertTarget,
+    openGlobalSearch,
+    closeGlobalSearch,
+    chooseGlobalAsset,
   };
 
   const frameStyle = {
@@ -488,7 +613,18 @@ export function FullUiMock(): JSX.Element {
         {visualVariant === 'A' && <VariantA {...sharedProps} />}
         {visualVariant === 'B' && <VariantB {...sharedProps} />}
         {visualVariant === 'C' && <VariantC {...sharedProps} />}
+        {visualVariant === 'selected' && <SelectedLayout {...sharedProps} />}
       </section>
+
+      {state.variant === 'selected' && state.globalSearchOpen && (
+        <GlobalSearchOverlay
+          state={state}
+          searchRef={globalSearchRef}
+          onSearch={(globalSearch) => patchState({ globalSearch })}
+          onClose={closeGlobalSearch}
+          onChoose={chooseGlobalAsset}
+        />
+      )}
 
       <PrototypeController
         state={state}
@@ -522,7 +658,13 @@ export function FullUiMock(): JSX.Element {
             setPendingTransition(null);
             patchState({ journey: 'edit', stage: 'editing' });
           }}
-          secondaryLabel={pendingAssetId === null ? '放弃草稿并离开' : '放弃更改并切换'}
+          secondaryLabel={
+            pendingAssetId !== null
+              ? '放弃更改并切换'
+              : pendingTransition !== null
+                ? '放弃更改并继续'
+                : '放弃草稿并离开'
+          }
           onSecondary={() => {
             if (pendingAssetId !== null) {
               commitAssetChoice(pendingAssetId);
@@ -543,17 +685,27 @@ export function FullUiMock(): JSX.Element {
 
       {state.stage === 'confirm' && (
         <FocusedDialog
-          title="确认应用到本地文件？"
-          description="将重新校验磁盘 revision，并以单次事务写入。搜索索引和前端缓存不会参与授权。"
+          title={
+            state.skillTarget?.action === 'install'
+              ? `确认安装到 ${convertTarget}？`
+              : '确认应用到本地文件？'
+          }
+          description={
+            state.skillTarget?.action === 'install'
+              ? '将重新校验磁盘 revision，并以单次事务复制列出的原生文件到该单一目标。搜索索引和前端缓存不会参与授权。'
+              : '将重新校验磁盘 revision，并以单次事务写入。搜索索引和前端缓存不会参与授权。'
+          }
           tone={state.scenario === 'degraded' ? 'warning' : 'default'}
           details={[
             `${asset.name} · ${asset.agent}`,
-            state.journey === 'convert'
-              ? `转换到 ${convertTarget}，${state.scenario === 'degraded' ? '含 2 项降级' : '完整映射'}`
-              : `修改 ${asset.files.length} 个原生文件`,
+            state.skillTarget?.action === 'install'
+              ? `复制 ${asset.files.length} 个原生文件到 ${convertTarget}，${state.scenario === 'degraded' ? '含 2 项降级' : '安装计划完整'}`
+              : state.journey === 'convert'
+                ? `转换到 ${convertTarget}，${state.scenario === 'degraded' ? '含 2 项降级' : '完整映射'}`
+                : `修改 ${asset.files.length} 个原生文件`,
             '应用前固定恢复点；不会操作 Git',
           ]}
-          primaryLabel="确认并应用"
+          primaryLabel={state.skillTarget?.action === 'install' ? '确认安装并应用' : '确认并应用'}
           onPrimary={applyPreparedOperation}
           secondaryLabel="返回审查"
           onSecondary={() => patchState({ stage: 'review' })}
@@ -568,7 +720,10 @@ interface LayoutProps {
   asset: MockAsset;
   activeFile: MockAsset['files'][number];
   visibleAssets: MockAsset[];
+  selectedAssets: MockAsset[];
   searchRef: RefObject<HTMLInputElement>;
+  globalSearchRef: RefObject<HTMLInputElement>;
+  globalSearchTriggerRef: RefObject<HTMLButtonElement>;
   sensitiveVisible: boolean;
   convertTarget: string;
   patchState: (patch: Partial<MockUiState>) => void;
@@ -577,12 +732,16 @@ interface LayoutProps {
   startCreate: (mode: '新建' | '从本地导入') => void;
   startManage: () => void;
   startConvert: () => void;
+  startSkillTarget: (assetId: string, action: SkillTargetAction, target: SkillAgentTarget) => void;
   startRecover: () => void;
   startReview: () => void;
   openConfirmation: (source: HTMLElement) => void;
   applyPreparedOperation: () => void;
   setSensitiveVisible: (visible: boolean) => void;
   setConvertTarget: (target: string) => void;
+  openGlobalSearch: () => void;
+  closeGlobalSearch: () => void;
+  chooseGlobalAsset: (assetId: string) => void;
 }
 
 function VariantA(props: LayoutProps): JSX.Element {
@@ -651,6 +810,699 @@ function VariantC(props: LayoutProps): JSX.Element {
         <Workspace {...props} />
       </div>
     </>
+  );
+}
+
+function skillTargetsFor(asset: MockAsset): SkillAgentTarget[] {
+  return (
+    asset.agentTargets ??
+    mockAgents.map((agent) => ({
+      agent,
+      status: agent === asset.agent ? 'recognized' : 'installable',
+    }))
+  );
+}
+
+function targetShortName(agent: string): string {
+  if (agent === 'Claude Code') return 'Claude';
+  if (agent === 'Gemini CLI') return 'Gemini';
+  return agent;
+}
+
+function targetStatusLabel(status: SkillAgentTarget['status']): string {
+  const labels: Record<SkillAgentTarget['status'], string> = {
+    recognized: '已识别',
+    installable: '可安装',
+    convertible: '可转换',
+    blocked: '不可用',
+  };
+  return labels[status];
+}
+
+function SelectedLayout(props: LayoutProps): JSX.Element {
+  const { asset, state, patchState } = props;
+  const isSkill = asset.type === 'Skills';
+  const isSkillEditing = isSkill && state.stage === 'editing';
+  const isSkillBrowse = isSkill && state.stage === 'browse';
+
+  return (
+    <>
+      <SelectedHeader {...props} />
+      <div className={`selected-layout ${isSkillEditing ? 'is-skill-editing' : ''}`}>
+        <AssetTypeRail
+          state={state}
+          onChoose={props.chooseAssetType}
+          onManage={props.startManage}
+        />
+        <SelectedCatalog {...props} />
+        <section
+          className={`selected-main ${state.selectedPanel === 'list' && !isSkillEditing ? 'is-list-hidden' : ''}`}
+          aria-label="当前资产详情"
+        >
+          <button
+            className="selected-mobile-back"
+            type="button"
+            onClick={() => patchState({ selectedPanel: 'list' })}
+          >
+            返回 {state.assetType}
+          </button>
+          {isSkillBrowse ? (
+            <SelectedSkillBrowse {...props} />
+          ) : isSkillEditing ? (
+            <SelectedSkillEditor {...props} />
+          ) : (
+            <Workspace {...props} />
+          )}
+        </section>
+      </div>
+    </>
+  );
+}
+
+function SelectedHeader({
+  state,
+  startCreate,
+  startManage,
+  openGlobalSearch,
+  globalSearchTriggerRef,
+}: Pick<
+  LayoutProps,
+  'state' | 'startCreate' | 'startManage' | 'openGlobalSearch' | 'globalSearchTriggerRef'
+>): JSX.Element {
+  const hideSkillBrowseStatus = state.assetType === 'Skills' && state.stage === 'browse';
+  return (
+    <header className="selected-header">
+      <div className="traffic-lights" aria-hidden="true">
+        <span />
+        <span />
+        <span />
+      </div>
+      <div className="selected-identity">
+        <span className="app-mark" aria-hidden="true">
+          AC
+        </span>
+        <strong>Agent Config Manager</strong>
+        <span>本地资产工作台</span>
+      </div>
+      <div className="selected-header-context">
+        {!hideSkillBrowseStatus && state.scenario === 'stale' && (
+          <span className="status-dot warning">索引过期</span>
+        )}
+        {!hideSkillBrowseStatus && state.scenario === 'readonly' && (
+          <span className="status-dot neutral">只读模式</span>
+        )}
+      </div>
+      <div className="selected-header-actions">
+        <button
+          ref={globalSearchTriggerRef}
+          className="selected-search-trigger"
+          type="button"
+          onClick={openGlobalSearch}
+        >
+          <span>搜索</span>
+          <kbd>⌘K</kbd>
+        </button>
+        <button className="quiet-button" type="button" onClick={() => startCreate('新建')}>
+          ＋ 新建
+        </button>
+        <button
+          className="icon-button"
+          type="button"
+          aria-label="打开管理"
+          title="项目与 Agent 管理"
+          onClick={startManage}
+        >
+          管理
+        </button>
+      </div>
+    </header>
+  );
+}
+
+function SelectedCatalog({
+  state,
+  selectedAssets,
+  patchState,
+  chooseAsset,
+  chooseAssetType,
+  startSkillTarget,
+}: Pick<
+  LayoutProps,
+  'state' | 'selectedAssets' | 'patchState' | 'chooseAsset' | 'chooseAssetType' | 'startSkillTarget'
+>): JSX.Element {
+  const activeFilterCount =
+    (state.scopeFilter === '全部' ? 0 : 1) +
+    (state.assetType === 'Skills' ? 0 : state.filters.status.length) +
+    state.filters.agent.length +
+    (state.agentFilter === '全部 Agent' ? 0 : 1);
+  const skillAssets = mockAssets.filter((asset) => asset.type === 'Skills');
+
+  const toggleFilterValue = (kind: 'status' | 'agent', value: string): void => {
+    const current = state.filters[kind];
+    const next = current.includes(value)
+      ? current.filter((candidate) => candidate !== value)
+      : [...current, value];
+    patchState({ filters: { ...state.filters, [kind]: next } });
+  };
+
+  return (
+    <aside className="selected-catalog" aria-label={`${state.assetType} 资产库`}>
+      <header className="selected-catalog-heading">
+        <div>
+          <span className="eyebrow">资产库</span>
+          <h2>{state.assetType}</h2>
+          <p>{assetTypeHint[state.assetType]}</p>
+        </div>
+        <button
+          className={`filter-button ${activeFilterCount > 0 ? 'is-active' : ''}`}
+          type="button"
+          aria-expanded={state.filterOpen}
+          onClick={() => patchState({ filterOpen: !state.filterOpen })}
+        >
+          筛选{activeFilterCount > 0 ? ` ${activeFilterCount}` : ''}
+        </button>
+        {state.filterOpen && (
+          <div className="filter-popover" role="dialog" aria-label="筛选当前资产类型">
+            <div className="filter-popover-header">
+              <strong>筛选 {state.assetType}</strong>
+              <button
+                type="button"
+                onClick={() =>
+                  patchState({
+                    scopeFilter: '全部',
+                    agentFilter: '全部 Agent',
+                    filters: { status: [], agent: [] },
+                  })
+                }
+              >
+                清除
+              </button>
+            </div>
+            <fieldset>
+              <legend>作用域</legend>
+              <div className="choice-row">
+                {(['全部', '全局', '项目'] as const).map((scope) => (
+                  <button
+                    key={scope}
+                    className={state.scopeFilter === scope ? 'is-selected' : ''}
+                    type="button"
+                    onClick={() => patchState({ scopeFilter: scope })}
+                  >
+                    {scope}
+                  </button>
+                ))}
+              </div>
+            </fieldset>
+            <fieldset>
+              <legend>来源 Agent</legend>
+              {mockAgents.map((agent) => (
+                <label key={agent}>
+                  <input
+                    type="checkbox"
+                    checked={state.filters.agent.includes(agent)}
+                    onChange={() => toggleFilterValue('agent', agent)}
+                  />
+                  {agent}
+                </label>
+              ))}
+            </fieldset>
+            {state.assetType !== 'Skills' && (
+              <fieldset>
+                <legend>状态</legend>
+                {statusFilters.map((status) => (
+                  <label key={status}>
+                    <input
+                      type="checkbox"
+                      checked={state.filters.status.includes(status)}
+                      onChange={() => toggleFilterValue('status', status)}
+                    />
+                    {status}
+                  </label>
+                ))}
+              </fieldset>
+            )}
+          </div>
+        )}
+      </header>
+
+      {state.assetType === 'Skills' && (
+        <div className="skill-catalog-summary" aria-label="Skills Agent 识别摘要">
+          <span className="skill-summary-total">已安装 {skillAssets.length}</span>
+          {mockAgents.map((agent) => (
+            <span key={agent}>
+              {targetShortName(agent)} ·{' '}
+              {
+                skillAssets.filter((asset) =>
+                  skillTargetsFor(asset).some(
+                    (target) => target.agent === agent && target.status === 'recognized',
+                  ),
+                ).length
+              }
+            </span>
+          ))}
+        </div>
+      )}
+
+      <div className="selected-catalog-list" aria-live="polite">
+        {state.scenario === 'stale' && (
+          <InlineNotice tone="warning" title="索引可能过期">
+            当前类型仍可浏览；重新索引前不会据此授权写入。
+            <button type="button" onClick={() => patchState({ notice: '正在模拟重建索引…' })}>
+              重建
+            </button>
+          </InlineNotice>
+        )}
+        {state.catalogState === 'loading' && <LibraryLoading />}
+        {state.catalogState === 'empty' && (
+          <EmptyState
+            title={`${state.assetType} 还没有资产`}
+            description="调整当前类型的筛选条件。"
+          />
+        )}
+        {state.catalogState === 'normal' && selectedAssets.length === 0 && (
+          <EmptyState title="没有匹配结果" description="尝试清除当前类型的筛选。" />
+        )}
+        {state.catalogState === 'normal' && selectedAssets.length > 0 && (
+          <ul className={`selected-asset-list ${state.assetType === 'Skills' ? 'is-skills' : ''}`}>
+            {selectedAssets.map((candidate) =>
+              candidate.type === 'Skills' ? (
+                <SelectedSkillRow
+                  key={candidate.id}
+                  asset={candidate}
+                  selected={candidate.id === state.assetId}
+                  onChoose={() => chooseAsset(candidate.id)}
+                  onTargetAction={startSkillTarget}
+                />
+              ) : (
+                <li key={candidate.id}>
+                  <button
+                    className={`asset-row ${candidate.id === state.assetId ? 'is-selected' : ''}`}
+                    type="button"
+                    aria-current={candidate.id === state.assetId ? 'true' : undefined}
+                    onClick={() => chooseAsset(candidate.id)}
+                  >
+                    <span className="asset-row-primary">
+                      <strong>{candidate.name}</strong>
+                      {candidate.status !== undefined && (
+                        <span className={`mini-badge ${badgeTone(candidate.status)}`}>
+                          {candidate.status}
+                        </span>
+                      )}
+                    </span>
+                    <span className="asset-row-secondary">
+                      <span>{candidate.agent}</span>
+                      <span>{candidate.scope}</span>
+                      <span className="truncate">{candidate.project}</span>
+                    </span>
+                  </button>
+                </li>
+              ),
+            )}
+          </ul>
+        )}
+      </div>
+      <footer className="selected-catalog-footer">
+        <span>{state.catalogState === 'normal' ? `${selectedAssets.length} 项` : '—'}</span>
+        <span>当前类型 · 本地索引</span>
+      </footer>
+      <nav className="selected-mobile-type-switch" aria-label="窄窗口资产类型">
+        {assetTypes.map((type) => (
+          <button
+            key={type}
+            className={state.assetType === type ? 'is-selected' : ''}
+            type="button"
+            onClick={() => chooseAssetType(type)}
+          >
+            {type === '长期指令' ? '指令' : type}
+          </button>
+        ))}
+      </nav>
+    </aside>
+  );
+}
+
+function SelectedSkillRow({
+  asset,
+  selected,
+  onChoose,
+  onTargetAction,
+}: {
+  asset: MockAsset;
+  selected: boolean;
+  onChoose: () => void;
+  onTargetAction: (assetId: string, action: SkillTargetAction, target: SkillAgentTarget) => void;
+}): JSX.Element {
+  return (
+    <li className={`skill-row ${selected ? 'is-selected' : ''}`}>
+      <button
+        className="skill-row-summary"
+        type="button"
+        aria-current={selected ? 'true' : undefined}
+        onClick={onChoose}
+      >
+        <span className="skill-row-name">
+          <strong>{asset.name}</strong>
+          <small>{asset.scope === '全局' ? '本地' : '项目'}</small>
+        </span>
+        <span className="skill-row-description">{asset.description}</span>
+      </button>
+      <div className="skill-targets" aria-label={`${asset.name} 的 Agent 目标状态`}>
+        {skillTargetsFor(asset).map((target) => {
+          const enabled = target.status === 'installable' || target.status === 'convertible';
+          const action: SkillTargetAction = target.status === 'convertible' ? 'convert' : 'install';
+          const label = `${targetShortName(target.agent)}：${targetStatusLabel(target.status)}`;
+          return enabled ? (
+            <button
+              key={target.agent}
+              className={`skill-target is-${target.status}`}
+              type="button"
+              title={`${label}；打开单目标${action === 'install' ? '安装' : '转换'}准备`}
+              onClick={() => onTargetAction(asset.id, action, target)}
+            >
+              <span>{targetShortName(target.agent)}</span>
+              <b>{targetStatusLabel(target.status)}</b>
+            </button>
+          ) : (
+            <span
+              key={target.agent}
+              className={`skill-target is-${target.status}`}
+              title={target.reason ?? label}
+            >
+              <span>{targetShortName(target.agent)}</span>
+              <b>{targetStatusLabel(target.status)}</b>
+            </span>
+          );
+        })}
+      </div>
+    </li>
+  );
+}
+
+function SelectedSkillBrowse({
+  state,
+  asset,
+  patchState,
+  startSkillTarget,
+}: Pick<LayoutProps, 'state' | 'asset' | 'patchState' | 'startSkillTarget'>): JSX.Element {
+  const readOnly =
+    state.scenario === 'readonly' || asset.status === '只读' || asset.status === '不兼容';
+  return (
+    <section className="selected-skill-detail" aria-label="Skill 结构化详情">
+      <header className="selected-detail-header">
+        <div>
+          <div className="asset-breadcrumb">
+            <span>Skills</span>
+            <span>/</span>
+            <span>结构化信息</span>
+          </div>
+          <h1>{asset.name}</h1>
+          <p>{asset.description}</p>
+        </div>
+        <div className="asset-actions">
+          <button
+            className="primary-button"
+            type="button"
+            disabled={readOnly}
+            onClick={() =>
+              patchState({
+                journey: 'edit',
+                stage: 'editing',
+                skillTarget: null,
+                selectedPanel: 'detail',
+                drafts:
+                  state.drafts[asset.files[0].name] === undefined
+                    ? { ...state.drafts, [asset.files[0].name]: asset.files[0].content }
+                    : state.drafts,
+              })
+            }
+          >
+            编辑源码
+          </button>
+        </div>
+      </header>
+      <div className="skill-structured-sheet">
+        <section>
+          <span className="eyebrow">定义</span>
+          <dl>
+            <div>
+              <dt>名称</dt>
+              <dd>{asset.name}</dd>
+            </div>
+            <div>
+              <dt>描述</dt>
+              <dd>{asset.description}</dd>
+            </div>
+            <div>
+              <dt>来源</dt>
+              <dd>{asset.scope === '全局' ? '本地全局配置' : asset.project}</dd>
+            </div>
+            <div>
+              <dt>生效范围</dt>
+              <dd>{asset.scope}</dd>
+            </div>
+            <div>
+              <dt>版本</dt>
+              <dd>0.3.0-mock</dd>
+            </div>
+          </dl>
+        </section>
+        <section className="skill-structured-targets">
+          <span className="eyebrow">Agent 目标</span>
+          <p>原生 Skill 保持单一身份；以下状态只说明各 Agent 的识别或可准备操作。</p>
+          {skillTargetsFor(asset).map((target) => {
+            const enabled = target.status === 'installable' || target.status === 'convertible';
+            const action: SkillTargetAction =
+              target.status === 'convertible' ? 'convert' : 'install';
+            return (
+              <div key={target.agent} className="structured-target-row">
+                <div>
+                  <strong>{targetShortName(target.agent)}</strong>
+                  <span>{targetStatusLabel(target.status)}</span>
+                </div>
+                {enabled ? (
+                  <button
+                    className="quiet-button"
+                    type="button"
+                    onClick={() => startSkillTarget(asset.id, action, target)}
+                  >
+                    {action === 'install' ? '准备安装' : '查看映射'}
+                  </button>
+                ) : (
+                  <small>{target.reason ?? '不需要额外操作'}</small>
+                )}
+              </div>
+            );
+          })}
+        </section>
+      </div>
+    </section>
+  );
+}
+
+function SelectedSkillEditor({
+  state,
+  asset,
+  activeFile,
+  patchState,
+  startReview,
+}: Pick<
+  LayoutProps,
+  'state' | 'asset' | 'activeFile' | 'patchState' | 'startReview'
+>): JSX.Element {
+  const isBinary = activeFile.language === 'binary';
+  return (
+    <section className="selected-skill-editor" aria-label="Skill 源码编辑">
+      <header className="selected-editor-header">
+        <div>
+          <div className="asset-breadcrumb">
+            <span>Skills</span>
+            <span>/</span>
+            <span>编辑源码</span>
+          </div>
+          <h1>{asset.name}</h1>
+          <p>本地草稿仅保存在原型内存中，尚未写入文件。</p>
+        </div>
+        <button
+          className="quiet-button"
+          type="button"
+          onClick={() =>
+            patchState(state.dirty ? { stage: 'discard' } : { journey: 'browse', stage: 'browse' })
+          }
+        >
+          返回结构化详情
+        </button>
+      </header>
+      <ScenarioBanner scenario={state.scenario} stage={state.stage} />
+      <div className="selected-editor-body">
+        {asset.files.length > 1 && (
+          <FileTree
+            asset={asset}
+            activeFileName={activeFile.name}
+            onChoose={(fileName) => patchState({ fileName })}
+            overlayOpen={state.panelOverlay === 'files'}
+            onClose={() => patchState({ panelOverlay: null })}
+          />
+        )}
+        <section className="native-document" aria-label="原生 Skill 源码">
+          <div className="document-toolbar">
+            <div className="file-identity">
+              <span className="file-icon">{isBinary ? '非文本' : '文件'}</span>
+              <strong>{activeFile.name}</strong>
+              {state.dirty && <span className="dirty-indicator">● 未应用</span>}
+            </div>
+            {asset.files.length > 1 && (
+              <button
+                className="file-tree-trigger"
+                type="button"
+                onClick={() => patchState({ panelOverlay: 'files' })}
+              >
+                文件 {asset.files.length}
+              </button>
+            )}
+          </div>
+          {isBinary ? (
+            <NonTextPreview />
+          ) : (
+            <div className="editor-shell">
+              <textarea
+                aria-label={`${activeFile.name} 本地草稿`}
+                spellCheck={false}
+                value={state.drafts[activeFile.name] ?? activeFile.content}
+                onChange={(event) => {
+                  const drafts = { ...state.drafts, [activeFile.name]: event.currentTarget.value };
+                  const dirty = Object.entries(drafts).some(([name, content]) => {
+                    const original = asset.files.find((file) => file.name === name);
+                    return original === undefined || original.content !== content;
+                  });
+                  patchState({ drafts, dirty });
+                }}
+              />
+              <footer className="editor-footer">
+                <span>源码编辑 · 未写入磁盘</span>
+                <button
+                  className="primary-button"
+                  type="button"
+                  disabled={!state.dirty && state.scenario !== 'dirty'}
+                  onClick={startReview}
+                >
+                  审查更改
+                </button>
+              </footer>
+            </div>
+          )}
+        </section>
+        {state.panelOverlay === 'files' && (
+          <button
+            className="panel-scrim"
+            type="button"
+            aria-label="关闭文件树"
+            onClick={() => patchState({ panelOverlay: null })}
+          />
+        )}
+      </div>
+    </section>
+  );
+}
+
+function GlobalSearchOverlay({
+  state,
+  searchRef,
+  onSearch,
+  onClose,
+  onChoose,
+}: {
+  state: MockUiState;
+  searchRef: RefObject<HTMLInputElement>;
+  onSearch: (value: string) => void;
+  onClose: () => void;
+  onChoose: (assetId: string) => void;
+}): JSX.Element {
+  const dialogRef = useRef<HTMLElement>(null);
+  const normalized = state.globalSearch.trim().toLowerCase();
+  const results = mockAssets.filter((asset) => {
+    if (normalized.length === 0) return true;
+    return `${asset.name} ${asset.type} ${asset.agent} ${asset.scope} ${asset.project} ${asset.description}`
+      .toLowerCase()
+      .includes(normalized);
+  });
+  const trapFocus = (event: ReactKeyboardEvent<HTMLElement>): void => {
+    if (event.key !== 'Tab') return;
+    const focusable = Array.from(
+      dialogRef.current?.querySelectorAll<HTMLElement>(
+        'input:not(:disabled), button:not(:disabled)',
+      ) ?? [],
+    );
+    if (focusable.length === 0) return;
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  };
+
+  return (
+    <div className="global-search-layer" role="presentation">
+      <button
+        className="global-search-scrim"
+        type="button"
+        aria-label="关闭全局搜索"
+        onClick={onClose}
+      />
+      <section
+        ref={dialogRef}
+        className="global-search-dialog"
+        role="dialog"
+        aria-modal="true"
+        aria-label="全局搜索资产"
+        onKeyDown={trapFocus}
+      >
+        <header>
+          <label className="global-search-field">
+            <input
+              ref={searchRef}
+              type="search"
+              value={state.globalSearch}
+              placeholder="搜索全部资产、Agent、项目或描述"
+              aria-label="搜索全部资产"
+              onChange={(event) => onSearch(event.currentTarget.value)}
+            />
+            <kbd>Esc</kbd>
+          </label>
+          <button className="quiet-button" type="button" onClick={onClose}>
+            关闭
+          </button>
+        </header>
+        <div className="global-search-results">
+          {results.length === 0 ? (
+            <EmptyState title="没有匹配的资产" description="尝试名称、Agent、项目或资产类型。" />
+          ) : (
+            assetTypes.map((type) => {
+              const grouped = results.filter((asset) => asset.type === type);
+              if (grouped.length === 0) return null;
+              return (
+                <section key={type}>
+                  <h2>{type}</h2>
+                  {grouped.map((asset) => (
+                    <button key={asset.id} type="button" onClick={() => onChoose(asset.id)}>
+                      <span>
+                        <strong>{asset.name}</strong>
+                        <small>{asset.description}</small>
+                      </span>
+                      <span>{asset.agent}</span>
+                      <span>{asset.scope}</span>
+                    </button>
+                  ))}
+                </section>
+              );
+            })
+          )}
+        </div>
+      </section>
+    </div>
   );
 }
 
@@ -1664,21 +2516,29 @@ function TargetSetup({
   'state' | 'asset' | 'convertTarget' | 'patchState' | 'setConvertTarget'
 >): JSX.Element {
   const isConvert = state.journey === 'convert';
+  const skillTargetAction = state.skillTarget?.action;
+  const isSkillInstall = skillTargetAction === 'install';
+  const lockedSkillTargetAgent = state.skillTarget?.agent;
+  const lockedSkillTarget = lockedSkillTargetAgent !== undefined;
   return (
     <div className="flow-surface target-surface">
       <FlowHeader
-        eyebrow={isConvert ? '跨 Agent 转换' : state.createMode}
+        eyebrow={isSkillInstall ? '安装到 Agent' : isConvert ? '跨 Agent 转换' : state.createMode}
         title={
-          isConvert
-            ? `转换 ${asset.name}`
-            : state.createMode === '新建'
-              ? '创建原生资产'
-              : '从本地导入'
+          isSkillInstall
+            ? `安装 ${asset.name} 到 ${convertTarget}`
+            : isConvert
+              ? `转换 ${asset.name}`
+              : state.createMode === '新建'
+                ? '创建原生资产'
+                : '从本地导入'
         }
         description={
-          isConvert
-            ? '先选择单一目标；下一步只生成能力映射报告，不写入文件。'
-            : '设置一个目标 Agent 与作用域，随后在主工作区准备本地草稿。'
+          isSkillInstall
+            ? '先准备一个单一目标的安装计划；下一步只生成映射与审查材料，不写入文件。'
+            : isConvert
+              ? '先选择单一目标；下一步只生成能力映射报告，不写入文件。'
+              : '设置一个目标 Agent 与作用域，随后在主工作区准备本地草稿。'
         }
         step={1}
         total={isConvert ? 4 : 4}
@@ -1737,6 +2597,7 @@ function TargetSetup({
             <span>目标 Agent</span>
             <select
               value={isConvert ? convertTarget : state.targetAgent}
+              disabled={lockedSkillTarget}
               onChange={(event) => {
                 if (isConvert) {
                   setConvertTarget(event.currentTarget.value);
@@ -1745,12 +2606,14 @@ function TargetSetup({
                 }
               }}
             >
-              {mockAgents
-                .filter((agent) => !isConvert || agent !== asset.agent)
-                .map((agent) => (
-                  <option key={agent}>{agent}</option>
-                ))}
+              {(lockedSkillTarget
+                ? [lockedSkillTargetAgent]
+                : mockAgents.filter((agent) => !isConvert || agent !== asset.agent)
+              ).map((agent) => (
+                <option key={agent}>{agent}</option>
+              ))}
             </select>
+            {lockedSkillTarget && <small>由当前 Skill 的目标状态锁定</small>}
           </label>
           <label>
             <span>作用域</span>
@@ -1781,7 +2644,7 @@ function TargetSetup({
       <FlowFooter
         secondaryLabel="取消"
         onSecondary={() => patchState({ journey: 'browse', stage: 'browse', dirty: false })}
-        primaryLabel={isConvert ? '生成能力映射' : '创建本地草稿'}
+        primaryLabel={isSkillInstall ? '生成安装计划' : isConvert ? '生成能力映射' : '创建本地草稿'}
         disabled={state.scenario === 'blocked' && !isConvert}
         onPrimary={() =>
           patchState({
@@ -1807,44 +2670,94 @@ function MappingSurface({
 }: Pick<LayoutProps, 'state' | 'asset' | 'convertTarget' | 'patchState'>): JSX.Element {
   const blocked = state.scenario === 'blocked';
   const degraded = state.scenario === 'degraded';
+  const isSkillInstall = state.skillTarget?.action === 'install';
+  const mappingRows: Array<[string, string, string]> = isSkillInstall
+    ? blocked
+      ? [
+          ['原生 Skill 正文', '目标拒绝创建安装副本', '阻断'],
+          ['多文件 examples/', '不会复制', '阻断'],
+          ['元数据与未知字段', '不会写入目标', '阻断'],
+          ['Agent 目标记录', '保持当前状态', '阻断'],
+        ]
+      : [
+          ['原生 Skill 正文', `${convertTarget} 的原生 Skill 目录`, '完整'],
+          ['多文件 examples/', '保留相对目录并复制', '完整'],
+          [
+            '元数据与未知字段',
+            degraded ? '原文复制，2 项可选能力待确认' : '按原文复制，不重写',
+            degraded ? '降级' : '完整',
+          ],
+          ['Agent 目标记录', '安装后重新识别', '完整'],
+        ]
+    : [
+        ['原生说明正文', 'AGENTS.md 正文', '完整'],
+        ['多文件 examples/', '同目录保留', '完整'],
+        [
+          '自动触发提示',
+          blocked ? '目标无等价能力' : degraded ? '改为手动说明' : 'frontmatter trigger',
+          blocked ? '阻断' : degraded ? '降级' : '完整',
+        ],
+        ['未知字段 version', degraded ? '保留为注释' : '原样字段', degraded ? '降级' : '完整'],
+      ];
   return (
     <div className="flow-surface mapping-surface">
       <FlowHeader
-        eyebrow="跨 Agent 转换"
-        title={`${asset.agent} → ${convertTarget}`}
-        description="能力映射是审查材料，不会修改源资产或创建目标文件。"
+        eyebrow={isSkillInstall ? '安装计划' : '跨 Agent 转换'}
+        title={
+          isSkillInstall
+            ? `安装 ${asset.name} 到 ${convertTarget}`
+            : `${asset.agent} → ${convertTarget}`
+        }
+        description={
+          isSkillInstall
+            ? '安装计划只复制列出的原生文件到单一目标；此页面不会写入文件。'
+            : '能力映射是审查材料，不会修改源资产或创建目标文件。'
+        }
         step={2}
         total={4}
       />
       <div className={`mapping-summary ${blocked ? 'danger' : degraded ? 'warning' : 'positive'}`}>
         <span className="mapping-symbol">{blocked ? '×' : degraded ? '!' : '✓'}</span>
         <div>
-          <h2>{blocked ? '无法转换' : degraded ? '可降级转换' : '完整映射'}</h2>
-          <p>
+          <h2>
             {blocked
-              ? '目标不支持必需的触发能力；阻断状态停留在报告。'
+              ? isSkillInstall
+                ? '无法安装'
+                : '无法转换'
               : degraded
-                ? '主体内容可保留，但 2 项目标能力需要改写或省略。'
-                : '原生内容、文件结构与声明能力均有明确目标表示。'}
+                ? isSkillInstall
+                  ? '可降级安装'
+                  : '可降级转换'
+                : isSkillInstall
+                  ? '安装计划已就绪'
+                  : '完整映射'}
+          </h2>
+          <p>
+            {isSkillInstall
+              ? blocked
+                ? '目标 Agent 当前不能接收此原生 Skill；阻断状态停留在计划报告。'
+                : degraded
+                  ? '原生内容会复制，但 2 项可选能力需要人工确认。'
+                  : '原生内容、文件结构与未知字段将按原样复制到单一目标。'
+              : blocked
+                ? '目标不支持必需的触发能力；阻断状态停留在报告。'
+                : degraded
+                  ? '主体内容可保留，但 2 项目标能力需要改写或省略。'
+                  : '原生内容、文件结构与声明能力均有明确目标表示。'}
           </p>
         </div>
       </div>
-      <div className="mapping-table" role="table" aria-label="能力映射">
+      <div
+        className="mapping-table"
+        role="table"
+        aria-label={isSkillInstall ? '安装计划' : '能力映射'}
+      >
         <div role="row" className="mapping-head">
           <span role="columnheader">源能力</span>
           <span role="columnheader">目标表示</span>
           <span role="columnheader">结论</span>
         </div>
-        {[
-          ['原生说明正文', 'AGENTS.md 正文', '完整'],
-          ['多文件 examples/', '同目录保留', '完整'],
-          [
-            '自动触发提示',
-            blocked ? '目标无等价能力' : degraded ? '改为手动说明' : 'frontmatter trigger',
-            blocked ? '阻断' : degraded ? '降级' : '完整',
-          ],
-          ['未知字段 version', degraded ? '保留为注释' : '原样字段', degraded ? '降级' : '完整'],
-        ].map(([source, target, conclusion]) => (
+        {mappingRows.map(([source, target, conclusion]) => (
           <div role="row" key={source}>
             <span role="cell">{source}</span>
             <span role="cell" className="mono">
@@ -1863,7 +2776,9 @@ function MappingSurface({
       <FlowFooter
         secondaryLabel="返回目标设置"
         onSecondary={() => patchState({ stage: 'target' })}
-        primaryLabel={blocked ? '阻断：不能继续' : '继续审查差异'}
+        primaryLabel={
+          blocked ? '阻断：不能继续' : isSkillInstall ? '继续审查安装计划' : '继续审查差异'
+        }
         disabled={blocked}
         onPrimary={() => patchState({ stage: 'review', dirty: false })}
       />
@@ -1884,10 +2799,13 @@ function ReviewSurface({
 >): JSX.Element {
   const isConvert = state.journey === 'convert';
   const isCreate = state.journey === 'create';
+  const isSkillInstall = state.skillTarget?.action === 'install';
   const originalContent = isConvert || isCreate ? '' : activeFile.content;
-  const proposedContent = isConvert
-    ? `# Converted for ${convertTarget}\n\n${activeFile.content}`
-    : (state.drafts[activeFile.name] ?? activeFile.content);
+  const proposedContent = isSkillInstall
+    ? activeFile.content
+    : isConvert
+      ? `# Converted for ${convertTarget}\n\n${activeFile.content}`
+      : (state.drafts[activeFile.name] ?? activeFile.content);
   const originalLines = originalContent.length === 0 ? [] : originalContent.split('\n');
   const proposedLines = proposedContent.split('\n');
   let commonLineCount = 0;
@@ -1910,8 +2828,22 @@ function ReviewSurface({
   return (
     <div className="flow-surface review-surface">
       <FlowHeader
-        eyebrow={isConvert ? '转换审查' : isCreate ? `${state.createMode} · 审查` : '应用前审查'}
-        title={isConvert ? `审查 ${convertTarget} 的目标文件` : `审查 ${asset.name} 的更改`}
+        eyebrow={
+          isSkillInstall
+            ? '安装审查'
+            : isConvert
+              ? '转换审查'
+              : isCreate
+                ? `${state.createMode} · 审查`
+                : '应用前审查'
+        }
+        title={
+          isSkillInstall
+            ? `审查安装到 ${convertTarget} 的目标文件`
+            : isConvert
+              ? `审查 ${convertTarget} 的目标文件`
+              : `审查 ${asset.name} 的更改`
+        }
         description="prepare 阶段只生成校验、风险与统一差异；此页面尚未写入任何文件。"
         step={isConvert ? 3 : 3}
         total={4}
@@ -1929,7 +2861,13 @@ function ReviewSurface({
         <section className="diff-panel">
           <header>
             <div>
-              <strong>{isConvert ? `${convertTarget}/${activeFile.name}` : activeFile.name}</strong>
+              <strong>
+                {isSkillInstall
+                  ? `${convertTarget}/${activeFile.name} · 原生复制`
+                  : isConvert
+                    ? `${convertTarget}/${activeFile.name}`
+                    : activeFile.name}
+              </strong>
               <span>
                 +{addedLines.length} −{removedLines.length}
               </span>
@@ -1981,9 +2919,11 @@ function ReviewSurface({
           <section>
             <span className="check-symbol success">✓</span>
             <div>
-              <strong>原生格式有效</strong>
+              <strong>{isSkillInstall ? '原生文件可直接复制' : '原生格式有效'}</strong>
               <p>
-                {changedFileCount} 个文件有更改；当前审查 {activeFile.name}，未知字段将保留。
+                {isSkillInstall
+                  ? `${changedFileCount} 个原生文件将复制到 ${convertTarget}；当前审查 ${activeFile.name}。`
+                  : `${changedFileCount} 个文件有更改；当前审查 ${activeFile.name}，未知字段将保留。`}
               </p>
             </div>
           </section>
@@ -1994,7 +2934,7 @@ function ReviewSurface({
               <p>应用不会暂存、提交或还原 Git 变更。</p>
             </div>
           </section>
-          {isConvert && state.scenario === 'degraded' && (
+          {isConvert && !isSkillInstall && state.scenario === 'degraded' && (
             <section>
               <span className="check-symbol warning">!</span>
               <div>

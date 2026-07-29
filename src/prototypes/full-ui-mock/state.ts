@@ -47,6 +47,8 @@ export function initialMockState(): MockUiState {
     view: 'source',
     search: '',
     searchRange: 'current',
+    globalSearch: '',
+    globalSearchOpen: false,
     agentFilter: '全部 Agent',
     catalogState: 'normal',
     panelOverlay: null,
@@ -72,6 +74,8 @@ export function initialMockState(): MockUiState {
     targetAgent: 'Codex',
     targetScope: '项目',
     recoveryAction: 'idle',
+    skillTarget: null,
+    selectedPanel: 'list',
     notice: null,
   };
 }
@@ -91,6 +95,8 @@ export function resetForJourney(
     drafts: journey === 'edit' || journey === 'browse' ? previous.drafts : {},
     search: '',
     searchRange: 'current',
+    globalSearch: '',
+    globalSearchOpen: false,
     agentFilter: '全部 Agent',
     catalogState: 'normal',
     panelOverlay: null,
@@ -98,6 +104,8 @@ export function resetForJourney(
     filters: { status: [], agent: [] },
     filterOpen: false,
     recoveryAction: 'idle',
+    skillTarget: null,
+    selectedPanel: 'list',
     notice: null,
     inspectorOpen: null,
   };
