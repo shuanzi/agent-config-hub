@@ -21,7 +21,7 @@
     "test:tauri": "node scripts/orchestrator/test-tauri.mjs",
     "perf": "node scripts/orchestrator/perf.mjs",
     "build:frontend": "tsc -b && vite build",
-    "mock:ui": "vite --host 127.0.0.1 --port 1421 --strictPort --open '/?prototype=full-ui&variant=A&journey=browse&scenario=ready'",
+    "mock:ui": "vite --host 127.0.0.1 --port 1421 --strictPort --open '/?prototype=full-ui&variant=selected&journey=browse&scenario=ready'",
     "build:app": "node scripts/orchestrator/not-established.mjs build:app",
     "package:macos": "node scripts/orchestrator/not-established.mjs package:macos",
     "verify:ticket": "node scripts/orchestrator/verify-ticket.mjs",

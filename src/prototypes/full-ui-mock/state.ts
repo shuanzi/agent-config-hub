@@ -31,7 +31,7 @@ export function initialMockState(): MockUiState {
   const queryVariant = query.get('variant');
   const queryJourney = query.get('journey');
   const queryScenario = query.get('scenario');
-  const variant: MockVariant = isOneOf(queryVariant, variants) ? queryVariant : 'A';
+  const variant: MockVariant = isOneOf(queryVariant, variants) ? queryVariant : 'selected';
   const journey: MockJourney = isOneOf(queryJourney, journeys) ? queryJourney : 'browse';
   const scenario: MockScenario = isOneOf(queryScenario, scenarios) ? queryScenario : 'ready';
   const asset = getAsset('commit-guide');

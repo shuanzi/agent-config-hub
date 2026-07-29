@@ -45,7 +45,7 @@ const variantNames: Record<MockVariant, string> = {
   A: 'Native Workbench',
   B: 'Unified Command Strip',
   C: 'Asset Type Rail',
-  selected: 'Selected · 待验收',
+  selected: 'Selected · Asset Type Rail',
 };
 
 const journeyNames: Record<MockJourney, string> = {
@@ -155,8 +155,8 @@ export function FullUiMock(): JSX.Element {
   const restoreFocusRef = useRef<HTMLElement | null>(null);
   const previousOverlayRef = useRef<MockUiState['panelOverlay']>(null);
 
-  // `selected` 仅是第二阶段占位；集中验收一尚未发生，不在原型中静默选定方案。
-  const visualVariant = state.variant === 'selected' ? 'A' : state.variant;
+  // 集中验收一已确认方案 C；A/B/C 仍保留为设计证据，第二阶段只验收 selected。
+  const visualVariant = state.variant === 'selected' ? 'C' : state.variant;
   const storedAsset = getAsset(state.assetId);
   const asset = state.journey === 'create' ? creationAsset(state) : storedAsset;
   const activeFile = asset.files.find((file) => file.name === state.fileName) ?? asset.files[0];
