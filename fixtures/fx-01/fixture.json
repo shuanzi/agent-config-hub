@@ -1,0 +1,62 @@
+{
+  "fixtureId": "FX-01",
+  "name": "single-skill-ready",
+  "description": "单文件 Skill、已验证可写；合成敏感源码变体用于默认遮蔽断言。所有值均为合成占位值。",
+  "asset": {
+    "assetId": "asset-fx01-demo-skill",
+    "assetType": "skill",
+    "nativeUnitRef": "nunit-fx01-demo-skill",
+    "adapterIdentity": "claude-code@fixture"
+  },
+  "displayName": "Demo Skill",
+  "agents": ["claude-code"],
+  "scope": "global",
+  "contextHint": { "kind": "path", "pathHint": "~/…/skills/demo-skill" },
+  "sourceTier": { "id": "user-global-root", "label": "User global root (synthetic)" },
+  "availability": { "kind": "allowed" },
+  "anomalies": [],
+  "compatibility": "verifiedWritable",
+  "capabilities": {
+    "edit": { "kind": "allowed" },
+    "convert": { "kind": "allowed" },
+    "export": { "kind": "allowed" },
+    "delete": { "kind": "allowed" }
+  },
+  "effectiveContexts": [
+    {
+      "agent": "claude-code",
+      "scope": "global",
+      "sourceTierLabel": "User global root (synthetic)",
+      "precedence": 0
+    }
+  ],
+  "sourceAnchor": { "kind": "userHome" },
+  "pathDisplay": "~/…/skills/demo-skill/SKILL.md",
+  "primaryFile": {
+    "fileId": "file-fx01-skill-md",
+    "name": "SKILL.md",
+    "relativePath": "SKILL.md",
+    "fileKind": "text",
+    "isPrimary": true,
+    "canPreview": { "kind": "allowed" },
+    "canEdit": { "kind": "allowed" },
+    "hasDraftChanges": false
+  },
+  "nativeUnitKind": "singleFile",
+  "structuredView": {
+    "kind": "disabled",
+    "reasonCode": "UNKNOWN_FIELD_PRESERVED"
+  },
+  "overrides": [],
+  "revision": "rev-fx01-0001",
+  "fileRevision": "rev-fx01-0001",
+  "indexStatus": "fresh",
+  "sensitiveSegments": [
+    {
+      "segmentId": "seg-fx01-api-key",
+      "fileId": "file-fx01-skill-md",
+      "displayState": "masked",
+      "rawValue": "SYNTHETIC-SECRET-demo-skill-0001"
+    }
+  ]
+}
