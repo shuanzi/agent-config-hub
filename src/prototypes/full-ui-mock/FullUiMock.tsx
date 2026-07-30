@@ -36,6 +36,7 @@ import type {
   MockScenario,
   MockUiState,
   MockVariant,
+  CreateMode,
   SkillAgentTarget,
   SkillTargetAction,
   Stage,
@@ -117,21 +118,30 @@ function badgeTone(status: string | undefined): string {
 }
 
 function creationAsset(state: MockUiState): MockAsset {
+  const isProjectSkillImport = state.createMode === '导入项目 Skill';
   const name =
-    state.createName.trim() || (state.createMode === '新建' ? 'new-skill' : 'imported-skill');
+    state.createName.trim() || (isProjectSkillImport ? 'commit-message-guide' : 'imported-skill');
   const mainContent =
     state.createMode === '新建'
       ? `---\nname: ${name}\ndescription: 新建的合成原生资产\n---\n\n# ${name}\n\n这是尚未写入磁盘的原生草稿。`
-      : `---\nname: ${name}\ndescription: 从 examples/skill 模拟导入\n---\n\n# ${name}\n\n导入内容仅来自内存中的合成 fixture。`;
+      : `---\nname: ${name}\ndescription: 从 ${isProjectSkillImport ? state.importProject : 'examples/skill'} 模拟导入\n---\n\n# ${name}\n\n导入内容仅来自内存中的合成 fixture。`;
   return {
     id: `draft:${name}`,
-    type: state.targetAssetType,
+    type: isProjectSkillImport ? 'Skills' : state.targetAssetType,
     name,
     agent: state.targetAgent,
-    scope: state.targetScope,
-    project: state.targetScope === '项目' ? 'acme/desktop' : '用户全局配置',
+    scope: isProjectSkillImport ? '项目' : state.targetScope,
+    project: isProjectSkillImport
+      ? state.importProject
+      : state.targetScope === '项目'
+        ? 'acme/desktop'
+        : '用户全局配置',
     description:
-      state.createMode === '新建' ? '尚未应用的新建原生资产。' : '尚未应用的本地导入资产。',
+      state.createMode === '新建'
+        ? '尚未应用的新建原生资产。'
+        : isProjectSkillImport
+          ? '尚未应用的项目内 Skill 导入草稿。'
+          : '尚未应用的本地导入资产。',
     files:
       state.createMode === '新建'
         ? [{ name: 'SKILL.md', language: 'markdown', changed: true, content: mainContent }]
@@ -145,6 +155,24 @@ function creationAsset(state: MockUiState): MockAsset {
             },
           ],
   };
+}
+
+function skillTargetKey(assetId: string, agent: string): string {
+  return `${assetId}:${agent}`;
+}
+
+function isSkillTargetEnabled(
+  state: MockUiState,
+  asset: MockAsset,
+  target: SkillAgentTarget,
+): boolean {
+  const configured = state.skillAgentEnabled[skillTargetKey(asset.id, target.agent)];
+  return configured ?? target.status === 'recognized';
+}
+
+function targetToggleLabel(target: SkillAgentTarget, enabled: boolean): string {
+  if (target.status === 'blocked') return '不可用';
+  return enabled ? '已启用' : '未启用';
 }
 
 export function FullUiMock(): JSX.Element {
@@ -194,12 +222,23 @@ export function FullUiMock(): JSX.Element {
 
   const selectedAssets = useMemo(() => {
     const currentTypeAssets = mockAssets.filter((candidate) => candidate.type === state.assetType);
+    if (state.assetType === 'Skills') {
+      const filtered = filterAssets(currentTypeAssets, state.scopeFilter, {
+        status: [],
+        agent: [],
+      });
+      // “全部”范围下固定把全局 Skill 放在项目 Skill 前；同一范围内保持 fixture 顺序。
+      return state.scopeFilter === '全部'
+        ? filtered
+            .slice()
+            .sort((left, right) => Number(left.scope === '项目') - Number(right.scope === '项目'))
+        : filtered;
+    }
     const agentFiltered =
       state.agentFilter === '全部 Agent'
         ? currentTypeAssets
         : currentTypeAssets.filter((candidate) => candidate.agent === state.agentFilter);
-    const filters = state.assetType === 'Skills' ? { ...state.filters, status: [] } : state.filters;
-    return filterAssets(agentFiltered, state.scopeFilter, filters);
+    return filterAssets(agentFiltered, state.scopeFilter, state.filters);
   }, [state.agentFilter, state.assetType, state.filters, state.scopeFilter]);
 
   useEffect(() => {
@@ -300,10 +339,23 @@ export function FullUiMock(): JSX.Element {
         if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
           event.preventDefault();
           const direction = event.key === 'ArrowLeft' ? -1 : 1;
-          setState((previous) => ({
-            ...previous,
-            variant: nextVariant(previous.variant, direction),
-          }));
+          setState((previous) => {
+            const variant = nextVariant(previous.variant, direction);
+            return {
+              ...previous,
+              variant,
+              ...(previous.journey === 'create' &&
+              previous.variant === 'selected' &&
+              variant !== 'selected'
+                ? {
+                    createMode: '新建' as const,
+                    createName: 'new-skill',
+                    targetAssetType: previous.assetType,
+                    targetScope: '项目' as const,
+                  }
+                : {}),
+            };
+          });
         }
       }
     };
@@ -354,7 +406,7 @@ export function FullUiMock(): JSX.Element {
 
   const chooseAsset = (assetId: string): void => {
     if (assetId === state.assetId) {
-      if (state.variant === 'selected' && state.viewport === 'narrow') {
+      if (state.variant === 'selected' && getAsset(assetId).type === 'Skills') {
         patchState({ selectedPanel: 'detail' });
       }
       return;
@@ -386,7 +438,7 @@ export function FullUiMock(): JSX.Element {
       globalSearchOpen: false,
       globalSearch: '',
       selectedPanel:
-        previous.variant === 'selected' && previous.viewport === 'narrow'
+        previous.variant === 'selected' && nextAsset.type === 'Skills'
           ? 'detail'
           : previous.selectedPanel,
       notice: null,
@@ -404,6 +456,9 @@ export function FullUiMock(): JSX.Element {
       return;
     }
     commitAssetChoice(firstAsset.id);
+    if (state.variant === 'selected' && assetType === 'Skills') {
+      patchState({ selectedPanel: 'list' });
+    }
   };
 
   const chooseJourney = (journey: MockJourney): void => {
@@ -432,12 +487,18 @@ export function FullUiMock(): JSX.Element {
     setState((previous) => ({ ...previous, ...transition }));
   };
 
-  const startCreate = (mode: '新建' | '从本地导入'): void => {
+  const startCreate = (mode: CreateMode): void => {
     const transition: MockUiState = {
       ...resetForJourney(state, 'create', 'ready'),
       createMode: mode,
-      createName: mode === '新建' ? 'new-skill' : 'imported-skill',
-      targetAssetType: state.assetType,
+      createName:
+        mode === '新建'
+          ? 'new-skill'
+          : mode === '导入项目 Skill'
+            ? 'commit-message-guide'
+            : 'imported-skill',
+      importProject: 'acme/desktop',
+      targetAssetType: mode === '导入项目 Skill' ? 'Skills' : state.assetType,
       targetAgent: 'Codex',
       targetScope: '项目',
       stage: 'target',
@@ -519,15 +580,29 @@ export function FullUiMock(): JSX.Element {
   };
 
   const startRecover = (): void =>
-    requestTransition({
-      journey: 'recover',
-      stage: 'recover',
-      skillTarget: null,
-      dirty: false,
-      drafts: {},
-      panelOverlay: null,
-      recoveryAction: 'idle',
+    state.variant === 'selected'
+      ? requestTransition({ journey: 'browse', stage: 'browse', selectedPanel: 'list' })
+      : requestTransition({
+          journey: 'recover',
+          stage: 'recover',
+          skillTarget: null,
+          dirty: false,
+          drafts: {},
+          panelOverlay: null,
+          recoveryAction: 'idle',
+        });
+
+  const toggleSkillTarget = (assetId: string, target: SkillAgentTarget): void => {
+    if (target.status === 'blocked') return;
+    const targetAsset = getAsset(assetId);
+    const currentEnabled = isSkillTargetEnabled(state, targetAsset, target);
+    patchState({
+      skillAgentEnabled: {
+        ...state.skillAgentEnabled,
+        [skillTargetKey(assetId, target.agent)]: !currentEnabled,
+      },
     });
+  };
 
   const startReview = (): void => {
     patchState({ stage: 'review', dirty: true, notice: null });
@@ -562,7 +637,10 @@ export function FullUiMock(): JSX.Element {
       stage: 'result',
       dirty: false,
       drafts: {},
-      notice: '已完成模拟应用，并固定恢复点 RP-20260729-1042。',
+      notice:
+        state.variant === 'selected'
+          ? '已完成模拟应用；当前文件状态已更新。'
+          : '已完成模拟应用，并固定恢复点 RP-20260729-1042。',
     });
   };
 
@@ -584,6 +662,7 @@ export function FullUiMock(): JSX.Element {
     startManage,
     startConvert,
     startSkillTarget,
+    toggleSkillTarget,
     startRecover,
     startReview,
     openConfirmation,
@@ -628,7 +707,35 @@ export function FullUiMock(): JSX.Element {
 
       <PrototypeController
         state={state}
-        onVariant={(variant) => patchState({ variant })}
+        onVariant={(variant) =>
+          patchState({
+            variant,
+            ...(variant === 'selected' && state.journey === 'recover'
+              ? {
+                  journey: 'browse' as const,
+                  stage: 'browse' as const,
+                  selectedPanel: 'list' as const,
+                }
+              : {}),
+            ...(state.journey === 'create' && variant === 'selected'
+              ? {
+                  createMode: '导入项目 Skill' as const,
+                  createName: 'commit-message-guide',
+                  importProject: 'acme/desktop',
+                  targetAssetType: 'Skills' as const,
+                  targetScope: '项目' as const,
+                }
+              : {}),
+            ...(state.journey === 'create' && state.variant === 'selected' && variant !== 'selected'
+              ? {
+                  createMode: '新建' as const,
+                  createName: 'new-skill',
+                  targetAssetType: state.assetType,
+                  targetScope: '项目' as const,
+                }
+              : {}),
+          })
+        }
         onJourney={chooseJourney}
         onScenario={chooseScenario}
         onCatalogState={(catalogState) => patchState({ catalogState })}
@@ -703,7 +810,7 @@ export function FullUiMock(): JSX.Element {
               : state.journey === 'convert'
                 ? `转换到 ${convertTarget}，${state.scenario === 'degraded' ? '含 2 项降级' : '完整映射'}`
                 : `修改 ${asset.files.length} 个原生文件`,
-            '应用前固定恢复点；不会操作 Git',
+            state.variant === 'selected' ? '不会操作 Git' : '应用前固定恢复点；不会操作 Git',
           ]}
           primaryLabel={state.skillTarget?.action === 'install' ? '确认安装并应用' : '确认并应用'}
           onPrimary={applyPreparedOperation}
@@ -729,10 +836,11 @@ interface LayoutProps {
   patchState: (patch: Partial<MockUiState>) => void;
   chooseAsset: (assetId: string) => void;
   chooseAssetType: (assetType: AssetType) => void;
-  startCreate: (mode: '新建' | '从本地导入') => void;
+  startCreate: (mode: CreateMode) => void;
   startManage: () => void;
   startConvert: () => void;
   startSkillTarget: (assetId: string, action: SkillTargetAction, target: SkillAgentTarget) => void;
+  toggleSkillTarget: (assetId: string, target: SkillAgentTarget) => void;
   startRecover: () => void;
   startReview: () => void;
   openConfirmation: (source: HTMLElement) => void;
@@ -829,51 +937,49 @@ function targetShortName(agent: string): string {
   return agent;
 }
 
-function targetStatusLabel(status: SkillAgentTarget['status']): string {
-  const labels: Record<SkillAgentTarget['status'], string> = {
-    recognized: '已识别',
-    installable: '可安装',
-    convertible: '可转换',
-    blocked: '不可用',
-  };
-  return labels[status];
-}
-
 function SelectedLayout(props: LayoutProps): JSX.Element {
   const { asset, state, patchState } = props;
   const isSkill = asset.type === 'Skills';
   const isSkillEditing = isSkill && state.stage === 'editing';
   const isSkillBrowse = isSkill && state.stage === 'browse';
+  const isSkillList = isSkillBrowse && state.selectedPanel === 'list';
+  const isSkillDetail = isSkillBrowse && state.selectedPanel === 'detail';
+  const isSecondaryFlow = (
+    ['target', 'mapping', 'review', 'confirm', 'result', 'conflict', 'manage', 'recover'] as Stage[]
+  ).includes(state.stage);
 
   return (
     <>
       <SelectedHeader {...props} />
-      <div className={`selected-layout ${isSkillEditing ? 'is-skill-editing' : ''}`}>
+      <div
+        className={`selected-layout ${isSkillEditing ? 'is-skill-editing' : ''} ${
+          isSkillList ? 'is-skill-list' : ''
+        } ${isSkillDetail ? 'is-skill-detail' : ''} ${isSecondaryFlow ? 'is-secondary-flow' : ''}`}
+      >
         <AssetTypeRail
           state={state}
           onChoose={props.chooseAssetType}
           onManage={props.startManage}
         />
-        <SelectedCatalog {...props} />
-        <section
-          className={`selected-main ${state.selectedPanel === 'list' && !isSkillEditing ? 'is-list-hidden' : ''}`}
-          aria-label="当前资产详情"
-        >
-          <button
-            className="selected-mobile-back"
-            type="button"
-            onClick={() => patchState({ selectedPanel: 'list' })}
-          >
-            返回 {state.assetType}
-          </button>
-          {isSkillBrowse ? (
-            <SelectedSkillBrowse {...props} />
-          ) : isSkillEditing ? (
-            <SelectedSkillEditor {...props} />
-          ) : (
-            <Workspace {...props} />
-          )}
-        </section>
+        {!isSkillDetail && !isSkillEditing && !isSecondaryFlow && <SelectedCatalog {...props} />}
+        {!isSkillList && (
+          <section className="selected-main" aria-label="当前资产详情">
+            <button
+              className="selected-mobile-back"
+              type="button"
+              onClick={() => patchState({ selectedPanel: 'list' })}
+            >
+              返回 {state.assetType}
+            </button>
+            {isSkillDetail ? (
+              <SelectedSkillBrowse {...props} />
+            ) : isSkillEditing ? (
+              <SelectedSkillEditor {...props} />
+            ) : (
+              <Workspace {...props} />
+            )}
+          </section>
+        )}
       </div>
     </>
   );
@@ -922,8 +1028,12 @@ function SelectedHeader({
           <span>搜索</span>
           <kbd>⌘K</kbd>
         </button>
-        <button className="quiet-button" type="button" onClick={() => startCreate('新建')}>
-          ＋ 新建
+        <button
+          className="quiet-button"
+          type="button"
+          onClick={() => startCreate('导入项目 Skill')}
+        >
+          导入项目 Skill
         </button>
         <button
           className="icon-button"
@@ -945,14 +1055,20 @@ function SelectedCatalog({
   patchState,
   chooseAsset,
   chooseAssetType,
-  startSkillTarget,
+  toggleSkillTarget,
 }: Pick<
   LayoutProps,
-  'state' | 'selectedAssets' | 'patchState' | 'chooseAsset' | 'chooseAssetType' | 'startSkillTarget'
+  | 'state'
+  | 'selectedAssets'
+  | 'patchState'
+  | 'chooseAsset'
+  | 'chooseAssetType'
+  | 'toggleSkillTarget'
 >): JSX.Element {
+  const isSkills = state.assetType === 'Skills';
   const activeFilterCount =
     (state.scopeFilter === '全部' ? 0 : 1) +
-    (state.assetType === 'Skills' ? 0 : state.filters.status.length) +
+    (isSkills ? 0 : state.filters.status.length) +
     state.filters.agent.length +
     (state.agentFilter === '全部 Agent' ? 0 : 1);
   const skillAssets = mockAssets.filter((asset) => asset.type === 'Skills');
@@ -973,15 +1089,17 @@ function SelectedCatalog({
           <h2>{state.assetType}</h2>
           <p>{assetTypeHint[state.assetType]}</p>
         </div>
-        <button
-          className={`filter-button ${activeFilterCount > 0 ? 'is-active' : ''}`}
-          type="button"
-          aria-expanded={state.filterOpen}
-          onClick={() => patchState({ filterOpen: !state.filterOpen })}
-        >
-          筛选{activeFilterCount > 0 ? ` ${activeFilterCount}` : ''}
-        </button>
-        {state.filterOpen && (
+        {!isSkills && (
+          <button
+            className={`filter-button ${activeFilterCount > 0 ? 'is-active' : ''}`}
+            type="button"
+            aria-expanded={state.filterOpen}
+            onClick={() => patchState({ filterOpen: !state.filterOpen })}
+          >
+            筛选{activeFilterCount > 0 ? ` ${activeFilterCount}` : ''}
+          </button>
+        )}
+        {!isSkills && state.filterOpen && (
           <div className="filter-popover" role="dialog" aria-label="筛选当前资产类型">
             <div className="filter-popover-header">
               <strong>筛选 {state.assetType}</strong>
@@ -1045,7 +1163,48 @@ function SelectedCatalog({
         )}
       </header>
 
-      {state.assetType === 'Skills' && (
+      {isSkills && (
+        <nav className="selected-scope-tabs" aria-label="Skills 作用域筛选" role="tablist">
+          {(['全部', '全局', '项目'] as const).map((scope) => (
+            <button
+              key={scope}
+              className={state.scopeFilter === scope ? 'is-selected' : ''}
+              type="button"
+              role="tab"
+              aria-selected={state.scopeFilter === scope}
+              aria-controls="selected-skill-list"
+              tabIndex={state.scopeFilter === scope ? 0 : -1}
+              onClick={() => patchState({ scopeFilter: scope })}
+              onKeyDown={(event) => {
+                const scopes = ['全部', '全局', '项目'] as const;
+                const currentIndex = scopes.indexOf(scope);
+                const nextIndex =
+                  event.key === 'ArrowRight'
+                    ? (currentIndex + 1) % scopes.length
+                    : event.key === 'ArrowLeft'
+                      ? (currentIndex - 1 + scopes.length) % scopes.length
+                      : event.key === 'Home'
+                        ? 0
+                        : event.key === 'End'
+                          ? scopes.length - 1
+                          : -1;
+                if (nextIndex < 0) return;
+                event.preventDefault();
+                patchState({ scopeFilter: scopes[nextIndex] });
+                const tabs =
+                  event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>(
+                    '[role="tab"]',
+                  );
+                window.requestAnimationFrame(() => tabs?.[nextIndex]?.focus());
+              }}
+            >
+              {scope}
+            </button>
+          ))}
+        </nav>
+      )}
+
+      {isSkills && (
         <div className="skill-catalog-summary" aria-label="Skills Agent 识别摘要">
           <span className="skill-summary-total">已安装 {skillAssets.length}</span>
           {mockAgents.map((agent) => (
@@ -1054,7 +1213,10 @@ function SelectedCatalog({
               {
                 skillAssets.filter((asset) =>
                   skillTargetsFor(asset).some(
-                    (target) => target.agent === agent && target.status === 'recognized',
+                    (target) =>
+                      target.agent === agent &&
+                      target.status !== 'blocked' &&
+                      isSkillTargetEnabled(state, asset, target),
                   ),
                 ).length
               }
@@ -1063,7 +1225,12 @@ function SelectedCatalog({
         </div>
       )}
 
-      <div className="selected-catalog-list" aria-live="polite">
+      <div
+        id={isSkills ? 'selected-skill-list' : undefined}
+        className="selected-catalog-list"
+        role={isSkills ? 'tabpanel' : undefined}
+        aria-live="polite"
+      >
         {state.scenario === 'stale' && (
           <InlineNotice tone="warning" title="索引可能过期">
             当前类型仍可浏览；重新索引前不会据此授权写入。
@@ -1083,15 +1250,16 @@ function SelectedCatalog({
           <EmptyState title="没有匹配结果" description="尝试清除当前类型的筛选。" />
         )}
         {state.catalogState === 'normal' && selectedAssets.length > 0 && (
-          <ul className={`selected-asset-list ${state.assetType === 'Skills' ? 'is-skills' : ''}`}>
+          <ul className={`selected-asset-list ${isSkills ? 'is-skills' : ''}`}>
             {selectedAssets.map((candidate) =>
               candidate.type === 'Skills' ? (
                 <SelectedSkillRow
                   key={candidate.id}
                   asset={candidate}
                   selected={candidate.id === state.assetId}
+                  enabledTargets={state.skillAgentEnabled}
                   onChoose={() => chooseAsset(candidate.id)}
-                  onTargetAction={startSkillTarget}
+                  onToggleTarget={(target) => toggleSkillTarget(candidate.id, target)}
                 />
               ) : (
                 <li key={candidate.id}>
@@ -1144,13 +1312,15 @@ function SelectedCatalog({
 function SelectedSkillRow({
   asset,
   selected,
+  enabledTargets,
   onChoose,
-  onTargetAction,
+  onToggleTarget,
 }: {
   asset: MockAsset;
   selected: boolean;
+  enabledTargets: MockUiState['skillAgentEnabled'];
   onChoose: () => void;
-  onTargetAction: (assetId: string, action: SkillTargetAction, target: SkillAgentTarget) => void;
+  onToggleTarget: (target: SkillAgentTarget) => void;
 }): JSX.Element {
   return (
     <li className={`skill-row ${selected ? 'is-selected' : ''}`}>
@@ -1162,35 +1332,40 @@ function SelectedSkillRow({
       >
         <span className="skill-row-name">
           <strong>{asset.name}</strong>
-          <small>{asset.scope === '全局' ? '本地' : '项目'}</small>
+          <small>{asset.scope === '全局' ? '全局' : asset.project}</small>
         </span>
         <span className="skill-row-description">{asset.description}</span>
       </button>
       <div className="skill-targets" aria-label={`${asset.name} 的 Agent 目标状态`}>
         {skillTargetsFor(asset).map((target) => {
-          const enabled = target.status === 'installable' || target.status === 'convertible';
-          const action: SkillTargetAction = target.status === 'convertible' ? 'convert' : 'install';
-          const label = `${targetShortName(target.agent)}：${targetStatusLabel(target.status)}`;
-          return enabled ? (
+          const configured = enabledTargets[skillTargetKey(asset.id, target.agent)];
+          const enabled = configured ?? target.status === 'recognized';
+          const label = `${targetShortName(target.agent)}：${targetToggleLabel(target, enabled)}`;
+          return target.status !== 'blocked' ? (
+            <button
+              key={target.agent}
+              className={`skill-target is-${target.status} ${enabled ? 'is-enabled' : 'is-disabled'}`}
+              type="button"
+              aria-pressed={enabled}
+              aria-label={`${label}；点击${enabled ? '停用' : '启用'}`}
+              title={`${label}；点击${enabled ? '停用' : '启用'}`}
+              onClick={() => onToggleTarget(target)}
+            >
+              <span>{targetShortName(target.agent)}</span>
+              <b>{targetToggleLabel(target, enabled)}</b>
+            </button>
+          ) : (
             <button
               key={target.agent}
               className={`skill-target is-${target.status}`}
               type="button"
-              title={`${label}；打开单目标${action === 'install' ? '安装' : '转换'}准备`}
-              onClick={() => onTargetAction(asset.id, action, target)}
+              disabled
+              aria-label={`${targetShortName(target.agent)}：不可用。${target.reason ?? ''}`}
+              title={target.reason ?? '当前环境不可用'}
             >
               <span>{targetShortName(target.agent)}</span>
-              <b>{targetStatusLabel(target.status)}</b>
+              <b>不可用</b>
             </button>
-          ) : (
-            <span
-              key={target.agent}
-              className={`skill-target is-${target.status}`}
-              title={target.reason ?? label}
-            >
-              <span>{targetShortName(target.agent)}</span>
-              <b>{targetStatusLabel(target.status)}</b>
-            </span>
           );
         })}
       </div>
@@ -1202,8 +1377,8 @@ function SelectedSkillBrowse({
   state,
   asset,
   patchState,
-  startSkillTarget,
-}: Pick<LayoutProps, 'state' | 'asset' | 'patchState' | 'startSkillTarget'>): JSX.Element {
+  toggleSkillTarget,
+}: Pick<LayoutProps, 'state' | 'asset' | 'patchState' | 'toggleSkillTarget'>): JSX.Element {
   const readOnly =
     state.scenario === 'readonly' || asset.status === '只读' || asset.status === '不兼容';
   return (
@@ -1219,6 +1394,13 @@ function SelectedSkillBrowse({
           <p>{asset.description}</p>
         </div>
         <div className="asset-actions">
+          <button
+            className="quiet-button"
+            type="button"
+            onClick={() => patchState({ selectedPanel: 'list' })}
+          >
+            返回列表
+          </button>
           <button
             className="primary-button"
             type="button"
@@ -1270,25 +1452,26 @@ function SelectedSkillBrowse({
           <span className="eyebrow">Agent 目标</span>
           <p>原生 Skill 保持单一身份；以下状态只说明各 Agent 的识别或可准备操作。</p>
           {skillTargetsFor(asset).map((target) => {
-            const enabled = target.status === 'installable' || target.status === 'convertible';
-            const action: SkillTargetAction =
-              target.status === 'convertible' ? 'convert' : 'install';
+            const enabled = isSkillTargetEnabled(state, asset, target);
+            const isBlocked = target.status === 'blocked';
             return (
               <div key={target.agent} className="structured-target-row">
                 <div>
                   <strong>{targetShortName(target.agent)}</strong>
-                  <span>{targetStatusLabel(target.status)}</span>
+                  <span>{targetToggleLabel(target, enabled)}</span>
                 </div>
-                {enabled ? (
+                {!isBlocked ? (
                   <button
                     className="quiet-button"
                     type="button"
-                    onClick={() => startSkillTarget(asset.id, action, target)}
+                    aria-pressed={enabled}
+                    aria-label={`${targetShortName(target.agent)}：${targetToggleLabel(target, enabled)}；点击${enabled ? '停用' : '启用'}`}
+                    onClick={() => toggleSkillTarget(asset.id, target)}
                   >
-                    {action === 'install' ? '准备安装' : '查看映射'}
+                    {enabled ? '停用' : '启用'}
                   </button>
                 ) : (
-                  <small>{target.reason ?? '不需要额外操作'}</small>
+                  <small>{target.reason ?? '当前环境不可用'}</small>
                 )}
               </div>
             );
@@ -1332,7 +1515,7 @@ function SelectedSkillEditor({
           返回结构化详情
         </button>
       </header>
-      <ScenarioBanner scenario={state.scenario} stage={state.stage} />
+      <ScenarioBanner variant={state.variant} scenario={state.scenario} stage={state.stage} />
       <div className="selected-editor-body">
         {asset.files.length > 1 && (
           <FileTree
@@ -2015,6 +2198,7 @@ function AssetSurface({
   const isBinary = activeFile.language === 'binary';
   const readOnly =
     state.scenario === 'readonly' || asset.status === '只读' || asset.status === '不兼容';
+  const hideHistory = state.variant === 'selected';
 
   return (
     <div className="asset-workspace">
@@ -2052,21 +2236,25 @@ function AssetSurface({
           >
             {isEditing ? '正在编辑' : '编辑'}
           </button>
-          <button
-            className="icon-button"
-            type="button"
-            aria-label="更多资产操作"
-            onClick={startRecover}
-          >
-            •••
-          </button>
+          {!hideHistory && (
+            <button
+              className="icon-button"
+              type="button"
+              aria-label="更多资产操作"
+              onClick={startRecover}
+            >
+              •••
+            </button>
+          )}
         </div>
       </header>
 
-      <ScenarioBanner scenario={state.scenario} stage={state.stage} />
+      <ScenarioBanner variant={state.variant} scenario={state.scenario} stage={state.stage} />
       {state.scenario !== 'readonly' && (asset.status === '只读' || asset.status === '不兼容') && (
         <InlineNotice tone="neutral" title="该资产当前只读">
-          可浏览与导出原生文件；编辑、转换、恢复和删除不可用。
+          {hideHistory
+            ? '可浏览原生文件；编辑和转换暂不可用。'
+            : '可浏览与导出原生文件；编辑、转换、恢复和删除不可用。'}
         </InlineNotice>
       )}
 
@@ -2344,6 +2532,7 @@ function Inspector({
   onClose: () => void;
   onToggleSensitive: () => void;
 }): JSX.Element {
+  const hideHistory = state.variant === 'selected';
   return (
     <aside className="inspector" aria-label="检查器">
       <header>
@@ -2419,43 +2608,47 @@ function Inspector({
           </div>
         </dl>
       </details>
-      <details>
-        <summary>更改与恢复</summary>
-        <dl>
-          <div>
-            <dt>Git</dt>
-            <dd className="warning-text">工作树有 2 项修改</dd>
-          </div>
-          <div>
-            <dt>最近恢复点</dt>
-            <dd>7 月 28 日 21:33</dd>
-          </div>
-          <div>
-            <dt>敏感值</dt>
-            <dd>
-              <span className="mono secret-value">
-                {sensitiveVisible ? 'mock-token-8F3A' : '•••••••••••••••'}
-              </span>
-              <button className="text-button" type="button" onClick={onToggleSensitive}>
-                {sensitiveVisible ? '立即遮蔽' : '临时查看'}
-              </button>
-            </dd>
-          </div>
-        </dl>
-        {sensitiveVisible && (
-          <p className="sensitive-note" role="status">
-            8 秒后自动遮蔽；不会进入搜索、日志或事件。
-          </p>
-        )}
-      </details>
+      {!hideHistory && (
+        <details>
+          <summary>更改与恢复</summary>
+          <dl>
+            <div>
+              <dt>Git</dt>
+              <dd className="warning-text">工作树有 2 项修改</dd>
+            </div>
+            <div>
+              <dt>最近恢复点</dt>
+              <dd>7 月 28 日 21:33</dd>
+            </div>
+            <div>
+              <dt>敏感值</dt>
+              <dd>
+                <span className="mono secret-value">
+                  {sensitiveVisible ? 'mock-token-8F3A' : '•••••••••••••••'}
+                </span>
+                <button className="text-button" type="button" onClick={onToggleSensitive}>
+                  {sensitiveVisible ? '立即遮蔽' : '临时查看'}
+                </button>
+              </dd>
+            </div>
+          </dl>
+          {sensitiveVisible && (
+            <p className="sensitive-note" role="status">
+              8 秒后自动遮蔽；不会进入搜索、日志或事件。
+            </p>
+          )}
+        </details>
+      )}
     </aside>
   );
 }
 
 function ScenarioBanner({
+  variant,
   scenario,
   stage,
 }: {
+  variant: MockVariant;
   scenario: MockScenario;
   stage: Stage;
 }): JSX.Element | null {
@@ -2484,7 +2677,9 @@ function ScenarioBanner({
   if (scenario === 'blocked') {
     return (
       <InlineNotice tone="danger" title="当前操作被阻断">
-        查看能力映射或授权范围后选择恢复动作。
+        {variant === 'selected'
+          ? '查看能力映射或授权范围后再重试。'
+          : '查看能力映射或授权范围后选择恢复动作。'}
       </InlineNotice>
     );
   }
@@ -2516,10 +2711,93 @@ function TargetSetup({
   'state' | 'asset' | 'convertTarget' | 'patchState' | 'setConvertTarget'
 >): JSX.Element {
   const isConvert = state.journey === 'convert';
+  const isSelectedProjectImport = state.variant === 'selected' && state.journey === 'create';
   const skillTargetAction = state.skillTarget?.action;
   const isSkillInstall = skillTargetAction === 'install';
   const lockedSkillTargetAgent = state.skillTarget?.agent;
   const lockedSkillTarget = lockedSkillTargetAgent !== undefined;
+  const managedProjects = ['acme/desktop', 'acme/server'];
+  const importCandidates = mockAssets.filter(
+    (candidate) =>
+      candidate.type === 'Skills' &&
+      candidate.scope === '项目' &&
+      candidate.project === state.importProject,
+  );
+
+  if (isSelectedProjectImport) {
+    return (
+      <div className="flow-surface target-surface selected-project-import">
+        <FlowHeader
+          eyebrow="导入项目 Skill"
+          title="从已管理项目导入 Skill"
+          description="选择已经纳入管理的项目和其中已有的 Skill；原型不会读取真实目录。"
+          step={1}
+          total={3}
+        />
+        <div className="form-sheet">
+          <div className="import-project-note">
+            <strong>仅导入项目内已有 Skill</strong>
+            <span>不提供新建模板或任意本地文件导入。</span>
+          </div>
+          <div className="field-grid">
+            <label>
+              <span>已管理项目</span>
+              <select
+                value={state.importProject}
+                onChange={(event) => {
+                  const importProject = event.currentTarget.value;
+                  const firstCandidate = mockAssets.find(
+                    (candidate) =>
+                      candidate.type === 'Skills' &&
+                      candidate.scope === '项目' &&
+                      candidate.project === importProject,
+                  );
+                  patchState({
+                    importProject,
+                    createName: firstCandidate?.name ?? 'project-skill',
+                  });
+                }}
+              >
+                {managedProjects.map((project) => (
+                  <option key={project}>{project}</option>
+                ))}
+              </select>
+            </label>
+            <label>
+              <span>项目中的 Skill</span>
+              <select
+                value={state.createName}
+                onChange={(event) => patchState({ createName: event.currentTarget.value })}
+              >
+                {importCandidates.map((candidate) => (
+                  <option key={candidate.id} value={candidate.name}>
+                    {candidate.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+        </div>
+        <FlowFooter
+          secondaryLabel="取消"
+          onSecondary={() => patchState({ journey: 'browse', stage: 'browse', dirty: false })}
+          primaryLabel="导入为本地草稿"
+          disabled={importCandidates.length === 0}
+          onPrimary={() =>
+            patchState({
+              stage: 'editing',
+              dirty: true,
+              assetType: 'Skills',
+              targetScope: '项目',
+              fileName: asset.files[0].name,
+              drafts: Object.fromEntries(asset.files.map((file) => [file.name, file.content])),
+            })
+          }
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="flow-surface target-surface">
       <FlowHeader
@@ -2800,6 +3078,7 @@ function ReviewSurface({
   const isConvert = state.journey === 'convert';
   const isCreate = state.journey === 'create';
   const isSkillInstall = state.skillTarget?.action === 'install';
+  const hideHistory = state.variant === 'selected';
   const originalContent = isConvert || isCreate ? '' : activeFile.content;
   const proposedContent = isSkillInstall
     ? activeFile.content
@@ -2943,13 +3222,15 @@ function ReviewSurface({
               </div>
             </section>
           )}
-          <section>
-            <span className="check-symbol success">↶</span>
-            <div>
-              <strong>将固定恢复点</strong>
-              <p>应用前保留当前原生文件，可从结果页恢复。</p>
-            </div>
-          </section>
+          {!hideHistory && (
+            <section>
+              <span className="check-symbol success">↶</span>
+              <div>
+                <strong>将固定恢复点</strong>
+                <p>应用前保留当前原生文件，可从结果页恢复。</p>
+              </div>
+            </section>
+          )}
         </aside>
       </div>
       <FlowFooter
@@ -2969,7 +3250,8 @@ function OutcomeSurface({
   asset,
   patchState,
 }: Pick<LayoutProps, 'state' | 'asset' | 'patchState'>): JSX.Element {
-  const rolledBack = state.journey === 'recover' && state.stage === 'result';
+  const hideHistory = state.variant === 'selected';
+  const rolledBack = !hideHistory && state.journey === 'recover' && state.stage === 'result';
   const rollbackFailed = rolledBack && state.scenario === 'failed';
   const prepareConflict = state.stage === 'conflict';
   const reprepareRequired = state.scenario === 'conflict' && state.stage === 'result';
@@ -3033,30 +3315,36 @@ function OutcomeSurface({
             <dt>写入</dt>
             <dd>{tone === 'positive' ? `${asset.files.length} 个原生文件` : '0 个文件'}</dd>
           </div>
-          <div>
-            <dt>恢复点</dt>
-            <dd className="mono">
-              {rolledBack
-                ? 'RP-20260729-ROLLBACK · 已固定'
-                : tone === 'positive'
-                  ? 'RP-20260729-1042 · 已固定'
-                  : '沿用原恢复点'}
-            </dd>
-          </div>
+          {!hideHistory && (
+            <div>
+              <dt>恢复点</dt>
+              <dd className="mono">
+                {rolledBack
+                  ? 'RP-20260729-ROLLBACK · 已固定'
+                  : tone === 'positive'
+                    ? 'RP-20260729-1042 · 已固定'
+                    : '沿用原恢复点'}
+              </dd>
+            </div>
+          )}
           <div>
             <dt>Git</dt>
             <dd>未执行任何 Git 操作</dd>
           </div>
-          <div>
-            <dt>回滚</dt>
-            <dd className="mono">
-              {rollbackFailed ? 'failed' : rolledBack ? 'succeeded' : 'notNeeded'}
-            </dd>
-          </div>
-          <div>
-            <dt>恢复动作</dt>
-            <dd>{rollbackFailed ? '重试回滚 / 返回恢复点' : '可从恢复点再次审查'}</dd>
-          </div>
+          {!hideHistory && (
+            <>
+              <div>
+                <dt>回滚</dt>
+                <dd className="mono">
+                  {rollbackFailed ? 'failed' : rolledBack ? 'succeeded' : 'notNeeded'}
+                </dd>
+              </div>
+              <div>
+                <dt>恢复动作</dt>
+                <dd>{rollbackFailed ? '重试回滚 / 返回恢复点' : '可从恢复点再次审查'}</dd>
+              </div>
+            </>
+          )}
         </dl>
       </div>
       <div className="outcome-actions">
@@ -3100,19 +3388,21 @@ function OutcomeSurface({
                 patchState({ stage: state.journey === 'convert' ? 'mapping' : 'review' })
               }
             >
-              查看恢复动作
+              {hideHistory ? '返回审查' : '查看恢复动作'}
             </button>
           </>
         )}
         {tone === 'positive' && (
           <>
-            <button
-              className="quiet-button"
-              type="button"
-              onClick={() => patchState({ journey: 'recover', stage: 'recover' })}
-            >
-              查看恢复点
-            </button>
+            {!hideHistory && (
+              <button
+                className="quiet-button"
+                type="button"
+                onClick={() => patchState({ journey: 'recover', stage: 'recover' })}
+              >
+                查看恢复点
+              </button>
+            )}
             <button
               className="primary-button"
               type="button"
@@ -3136,6 +3426,19 @@ function ManagementSurface({
   state: MockUiState;
   patchState: (patch: Partial<MockUiState>) => void;
 }): JSX.Element {
+  const hideHistory = state.variant === 'selected';
+  const activeManagementTab =
+    hideHistory && state.managementTab === 'recovery' ? 'projects' : state.managementTab;
+  const managementTabs: Array<[MockUiState['managementTab'], string]> = hideHistory
+    ? [
+        ['projects', '项目与索引'],
+        ['agents', 'Agent 与适配器'],
+      ]
+    : [
+        ['projects', '项目与索引'],
+        ['agents', 'Agent 与适配器'],
+        ['recovery', '恢复点'],
+      ];
   return (
     <div className="management-surface">
       <FlowHeader
@@ -3146,14 +3449,10 @@ function ManagementSurface({
         total={1}
       />
       <nav className="management-tabs" aria-label="管理区域">
-        {[
-          ['projects', '项目与索引'],
-          ['agents', 'Agent 与适配器'],
-          ['recovery', '恢复点'],
-        ].map(([key, label]) => (
+        {managementTabs.map(([key, label]) => (
           <button
             key={key}
-            className={state.managementTab === key ? 'is-selected' : ''}
+            className={activeManagementTab === key ? 'is-selected' : ''}
             type="button"
             onClick={() =>
               patchState({ managementTab: key as MockUiState['managementTab'], notice: null })
@@ -3163,7 +3462,7 @@ function ManagementSurface({
           </button>
         ))}
       </nav>
-      {state.managementTab === 'projects' && (
+      {activeManagementTab === 'projects' && (
         <div className="management-list">
           <ManagementRow
             title="acme/desktop"
@@ -3183,7 +3482,7 @@ function ManagementSurface({
           />
         </div>
       )}
-      {state.managementTab === 'agents' && (
+      {activeManagementTab === 'agents' && (
         <div className="management-list">
           <ManagementRow
             title="Codex"
@@ -3198,12 +3497,20 @@ function ManagementSurface({
             meta="v0.3.1 · 适配器更新可用"
             status={state.scenario === 'failed' ? '更新失败 · 保持 1.2.0' : '可更新'}
             tone={state.scenario === 'failed' ? 'danger' : 'warning'}
-            action={state.scenario === 'failed' ? '回滚上一版本' : '更新适配器'}
+            action={
+              state.scenario === 'failed'
+                ? hideHistory
+                  ? '重试更新'
+                  : '回滚上一版本'
+                : '更新适配器'
+            }
             onAction={() =>
               patchState({
                 notice:
                   state.scenario === 'failed'
-                    ? '已模拟回滚；现有只读能力保持可用。'
+                    ? hideHistory
+                      ? '更新失败；现有只读能力保持可用。'
+                      : '已模拟回滚；现有只读能力保持可用。'
                     : '已模拟更新适配器。',
               })
             }
@@ -3218,7 +3525,7 @@ function ManagementSurface({
           />
         </div>
       )}
-      {state.managementTab === 'recovery' && (
+      {!hideHistory && activeManagementTab === 'recovery' && (
         <div className="recovery-table">
           {mockRecoveryPoints.map((point) => (
             <div key={point.id}>
@@ -3684,6 +3991,8 @@ function PrototypeController({
   onViewport: (viewport: ViewPreset) => void;
   onReset: () => void;
 }): JSX.Element {
+  const availableJourneys =
+    state.variant === 'selected' ? journeys.filter((journey) => journey !== 'recover') : journeys;
   return (
     <aside className="prototype-controller" aria-label="原型控制器">
       <div className="variant-switcher">
@@ -3722,9 +4031,11 @@ function PrototypeController({
             value={state.journey}
             onChange={(event) => onJourney(event.currentTarget.value as MockJourney)}
           >
-            {journeys.map((journey) => (
+            {availableJourneys.map((journey) => (
               <option key={journey} value={journey}>
-                {journeyNames[journey]}
+                {state.variant === 'selected' && journey === 'create'
+                  ? '导入项目 Skill'
+                  : journeyNames[journey]}
               </option>
             ))}
           </select>

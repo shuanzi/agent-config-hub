@@ -1,59 +1,78 @@
-# Agent Config Manager `selected` UI Mock：设计 QA
+# Agent Config Manager `selected` UI Mock：第二轮设计 QA
 
 ## 验收对象
 
-- 参考界面：`/Users/xiquandai/.codex/visualizations/2026/07/29/019fabb3-6d67-76c3-a8c7-22427a9ff413/cc-switch-reference-current.png`
-- 实现截图（窄窗列表）：`/Users/xiquandai/.codex/visualizations/2026/07/29/019fabb3-6d67-76c3-a8c7-22427a9ff413/selected-skills-narrow-768x840-list.png`
-- 实现截图（宽窗工作台）：`/Users/xiquandai/.codex/visualizations/2026/07/29/019fabb3-6d67-76c3-a8c7-22427a9ff413/selected-skills-wide-final.png`
-- 同屏对比：`/Users/xiquandai/.codex/visualizations/2026/07/29/019fabb3-6d67-76c3-a8c7-22427a9ff413/cc-switch-vs-selected-skills.png`
+- 视觉参考：`/Users/xiquandai/.codex/visualizations/2026/07/29/019fabb3-6d67-76c3-a8c7-22427a9ff413/cc-switch-reference-current.png`
+- 本轮调整前：`/Users/xiquandai/.codex/visualizations/2026/07/29/019fabb3-6d67-76c3-a8c7-22427a9ff413/annotations-round2-browse-before.png`
+- 本轮一级列表：`/Users/xiquandai/.codex/visualizations/2026/07/29/019fabb3-6d67-76c3-a8c7-22427a9ff413/annotations-round2-browse-after.png`
+- 本轮二级详情：`/Users/xiquandai/.codex/visualizations/2026/07/29/019fabb3-6d67-76c3-a8c7-22427a9ff413/annotations-round2-detail-after.png`
+- 本轮窄窗列表：`/Users/xiquandai/.codex/visualizations/2026/07/29/019fabb3-6d67-76c3-a8c7-22427a9ff413/annotations-round2-narrow-after.png`
+- 本轮项目导入：`/Users/xiquandai/.codex/visualizations/2026/07/29/019fabb3-6d67-76c3-a8c7-22427a9ff413/annotations-round2-create-after.png`
+- 本轮管理页：`/Users/xiquandai/.codex/visualizations/2026/07/29/019fabb3-6d67-76c3-a8c7-22427a9ff413/annotations-round2-manage-after.png`
+- 参考／调整前／调整后同屏：`/Users/xiquandai/.codex/visualizations/2026/07/29/019fabb3-6d67-76c3-a8c7-22427a9ff413/annotations-round2-comparison.png`
 - 原型状态：`variant=selected / journey=browse / scenario=ready`
 
-参考图是 CC Switch 的 Skills 列表管理页，并非 Agent Config Manager 的同一产品状态。本轮只将其作为列表密度、两行信息结构和 Agent 状态列的视觉依据；资产类型导航、结构化详情和 Mock 控制条属于已选 C 方案，不能按参考图逐像素复制。
+CC Switch 只作为 Skills 长列表密度、两行信息和 Agent 位置交互的视觉参考；资产类型 Rail、全局搜索、项目管理和原型控制条仍沿用 Agent Config Manager 已选方向。
 
-## 视口与对比口径
+## 视口与比较口径
 
-| 对象                      | 视口/像素                          | 用途                       |
-| ------------------------- | ---------------------------------- | -------------------------- |
-| CC Switch 参考            | 768 × 840 px                       | 列表密度与 Agent 状态表达  |
-| Agent Config Manager 窄窗 | CSS 768 × 840；截图 736 × 730 px   | 同类列表结构与窄窗收拢     |
-| Agent Config Manager 宽窗 | CSS 1440 × 900；截图 1248 × 900 px | C 方案完整工作台层级       |
-| 同屏对比                  | 1536 × 840 px                      | 统一画布上的整体与聚焦判断 |
+| 对象           | 视口／像素                        | 用途                               |
+| -------------- | --------------------------------- | ---------------------------------- |
+| CC Switch 参考 | 768 × 840 px                      | 列表密度与 Agent 状态位置          |
+| 调整前         | 1063 × 964 px                     | 原一级页双栏与筛选按钮             |
+| 调整后         | 1063 × 964 px                     | 一级页纯列表、范围 Tabs 与行内启停 |
+| 窄窗预设       | Mock 内部窄窗；截图 1063 × 964 px | 无横向溢出的单表面列表             |
+| 同屏对比       | 3008 × 964 px                     | 参考、调整前、调整后三方视觉判断   |
 
-截图后端会扣除部分浏览器可视区域，因此像素宽度与 CSS 视口不完全一致。本轮按结构占比、行高、信息层级和阅读节奏判断，不把浏览器外框差异计为实现偏差。
+调整前后使用相同浏览器视口和同一 `browse / ready` 状态。窄窗通过原型控制器切换内部预设，并额外检查列表容器 `scrollWidth === clientWidth`。
 
 ## 对比结论
 
 ### 已达成
 
-- Skills 列表采用“名称与描述 + Agent 状态列”的稳定横向结构，扫描路径与参考界面一致。
-- 当前资产类型直接呈现资产，不再出现“当前类型 / 全部”二级 Tab。
-- 宽窗列表已由首轮约 300 px 扩大到约 619 px，名称、描述和四列 Agent 状态均可读。
-- 白色与浅灰底色、细分隔线、轻量蓝色选中态和紧凑系统字体形成连续的信息密度。
-- Skills 浏览态只显示结构化信息；源码、文件树和编辑能力只在显式进入编辑后出现。
-- 检查器不再占用 Skills 浏览层级；兼容性、漂移、更改与恢复均未显示。
-- 窄窗收拢为单一列表/详情表面，返回列表后可以再次打开当前资产。
-- 全局搜索、编辑、安装、转换、脏草稿保护和关键键盘焦点路径均可交互。
+- Skills 一级页只保留全宽列表；右侧结构化详情不再与列表并列。
+- 点击任一 Skill 行进入独立二级详情；详情仅展示结构化信息，并保留明确的“返回列表”和“编辑源码”入口。
+- Skills 的筛选按钮已移除，改为始终可见的“全部／全局／项目”范围 Tabs；默认“全部”。
+- “全部”中全局 Skill 稳定排在项目 Skill 前；项目 Skill 直接显示 `acme/desktop`、`acme/server` 等项目名。
+- 四个 Agent 位置直接表达“已启用／未启用／不可用”；可用项可点击切换，不可用项置灰且为原生 disabled 控件。
+- Agent 汇总数字随行内启停同步变化；所有状态只存在于 Mock 内存。
+- 顶部只提供“导入项目 Skill”；导入面只允许从已管理项目和该项目已有 Skill 中选择，不提供新建模板或任意本地文件导入。
+- `selected` 的管理区域不再出现恢复点 Tab，旅程控制器不再出现恢复旅程，恢复直链会归一化到浏览列表。
+- 项目导入、管理、审查和结果等次级流程使用完整二级页面，不再被一级列表挤压。
+- 源码编辑仍能从二级详情进入，文件与编辑控件只在编辑层级出现。
+- 窄窗列表没有横向溢出；Tabs、项目名和四个 Agent 状态仍可读。
 
-### 有意保留的差异
+### 有意保留的边界
 
-- 参考图以品牌图标表达 Agent；Mock 使用明确的文字状态，避免复制无来源品牌资产，也更符合当前“可识别 / 可安装 / 可转换 / 不可用”的信息契约。
-- Mock 行高略大于参考图，因为每个 Agent 同时显示名称与状态，优先保证状态可理解性。
-- 宽窗右侧保留结构化详情，这是已选 C 工作台方向，而不是 CC Switch 的单列表管理页。
-- 顶部仅保留全局搜索入口，没有引入参考图中的备份恢复、ZIP 安装、发现技能或检查更新等未确认能力。
+- A／B／C 仍保留原有创建、恢复和回滚界面，作为第一阶段设计证据；本轮只调整 `selected`。
+- Agent 行内启停是纯内存交互，不调用 gateway、Tauri、网络、磁盘或真实 Agent 配置。
+- “移除恢复／历史／回滚”只改变 `selected` 的可见 UI，不在本轮删除正式契约或内部事务安全语义。
+- CC Switch 的品牌图标和额外安装入口没有复制；Mock 继续使用文字状态，避免引入无来源资产和未确认能力。
+
+## 交互与运行复核
+
+- 作用域 Tabs：全局与项目结果互斥，返回全部后全局优先。
+- Agent 启停：按钮的 `aria-pressed` 与汇总数字同步；不可用按钮带 `disabled`。
+- 页面层级：列表 → 二级详情 → 源码编辑成立；二级详情不显示文件树。
+- 项目导入：默认 `acme/desktop / commit-message-guide`；切换 `acme/server` 后联动到 `test-scout`，并能进入本地草稿。
+- 状态隔离：A/B/C 与 `selected` 互相切换时，各自恢复对应的“新建”或“项目导入”状态；取消后重新导入也会重置为一致的项目和 Skill。
+- 管理区域：只保留“项目与索引”“Agent 与适配器”。
+- 兼容证据：方案 A 的恢复与新建旅程仍可打开，证明早期方案未被改写。
+- 新开的干净验收页没有 console error。
+- 构建、前端测试、静态校验和格式检查通过。
 
 ## 迭代记录
 
-1. 首轮对比发现 Skills 列表仅约 300 px，名称、描述和 Agent 列被过度压缩，判定为 P1。
-2. 将宽窗列表调整到 `clamp(580px, 43vw, 640px)`，中窗调整到 `clamp(520px, 46vw, 560px)`，并重新校准文字层级和四列状态。
-3. 修正结构化详情与编辑器 Grid 行分配，消除详情/编辑区域下方的大面积空白。
-4. 复核窄窗回退、全局搜索焦点循环、安装与转换内容隔离、目标 Agent 锁定，以及离开流程时临时状态清理。
-5. 最终宽窗截图与同屏对比未发现新的 P0、P1 或 P2 视觉问题。
-
-## 剩余低风险观察
-
-- Mock 的行高仍比 CC Switch 稍宽；这是当前显式 Agent 状态表达带来的 P3 密度差异，可在最终 UI 定稿时再决定是否继续压缩。
-- 结构化详情故意保持克制；后续只应根据已确认字段补充，不应为了填满空间新增信息。
+1. 根据 6 条浏览器批注，将 Skills 一级双栏调整为一级列表与二级详情。
+2. 将筛选弹层改为范围 Tabs，并补充全局优先排序和项目名。
+3. 将 Agent 的“安装／转换入口”改为纯内存启停，并让不可用状态不可点击。
+4. 将 `selected` 创建旅程收敛为项目内 Skill 导入。
+5. 移除 `selected` 的恢复、历史和回滚可见入口，同时保留 A／B／C 证据。
+6. 修复项目导入默认值与显示值不一致、隐藏 Agent 筛选残留和窄窗横向溢出。
+7. 根据独立审查修复方案切换状态串扰、导入重入不一致、阻断文案和 Tabs 方向键行为。
+8. 将项目导入与管理等次级流程收拢为完整二级页面，消除窄主区文字换行和控件重叠。
+9. 使用同视口三方对比复核列表密度、信息层级和主任务聚焦。
 
 ## 最终结果
 
-`passed`
+final result: passed

@@ -32,7 +32,10 @@ export function initialMockState(): MockUiState {
   const queryJourney = query.get('journey');
   const queryScenario = query.get('scenario');
   const variant: MockVariant = isOneOf(queryVariant, variants) ? queryVariant : 'selected';
-  const journey: MockJourney = isOneOf(queryJourney, journeys) ? queryJourney : 'browse';
+  const requestedJourney: MockJourney = isOneOf(queryJourney, journeys) ? queryJourney : 'browse';
+  // selected 不提供恢复表面；直链也回到浏览态，保留 A/B/C 的恢复证据。
+  const journey: MockJourney =
+    variant === 'selected' && requestedJourney === 'recover' ? 'browse' : requestedJourney;
   const scenario: MockScenario = isOneOf(queryScenario, scenarios) ? queryScenario : 'ready';
   const asset = getAsset('commit-guide');
 
@@ -68,13 +71,15 @@ export function initialMockState(): MockUiState {
     libraryWidth: 294,
     inspectorWidth: 244,
     managementTab: 'projects',
-    createMode: '新建',
-    createName: 'new-skill',
+    createMode: variant === 'selected' ? '导入项目 Skill' : '新建',
+    createName: variant === 'selected' ? 'commit-message-guide' : 'new-skill',
+    importProject: 'acme/desktop',
     targetAssetType: asset.type,
     targetAgent: 'Codex',
     targetScope: '项目',
     recoveryAction: 'idle',
     skillTarget: null,
+    skillAgentEnabled: {},
     selectedPanel: 'list',
     notice: null,
   };
@@ -85,14 +90,16 @@ export function resetForJourney(
   journey: MockJourney,
   scenario: MockScenario = previous.scenario,
 ): MockUiState {
+  const normalizedJourney: MockJourney =
+    previous.variant === 'selected' && journey === 'recover' ? 'browse' : journey;
   return {
     ...previous,
-    journey,
+    journey: normalizedJourney,
     scenario,
-    stage: stageFor(journey, scenario),
+    stage: stageFor(normalizedJourney, scenario),
     dirty: scenario === 'dirty',
     // 草稿生命周期覆盖 browse ↔ edit 闭环；跳到其他旅程时清除
-    drafts: journey === 'edit' || journey === 'browse' ? previous.drafts : {},
+    drafts: normalizedJourney === 'edit' || normalizedJourney === 'browse' ? previous.drafts : {},
     search: '',
     searchRange: 'current',
     globalSearch: '',
@@ -106,6 +113,15 @@ export function resetForJourney(
     recoveryAction: 'idle',
     skillTarget: null,
     selectedPanel: 'list',
+    ...(normalizedJourney === 'create' && previous.variant === 'selected'
+      ? {
+          createMode: '导入项目 Skill' as const,
+          createName: 'commit-message-guide',
+          importProject: 'acme/desktop',
+          targetAssetType: 'Skills' as const,
+          targetScope: '项目' as const,
+        }
+      : {}),
     notice: null,
     inspectorOpen: null,
   };

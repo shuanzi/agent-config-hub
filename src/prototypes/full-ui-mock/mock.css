@@ -2875,6 +2875,19 @@ button:disabled {
   background: var(--surface);
 }
 
+/* Skills 一级页只承担扫描；详情是从行进入的独立二级表面。 */
+.variant-selected .selected-layout.is-skill-list,
+.variant-selected .selected-layout.is-skill-detail,
+.variant-selected .selected-layout.is-secondary-flow {
+  grid-template-columns: 76px minmax(0, 1fr);
+}
+
+.selected-layout.is-skill-list .selected-catalog,
+.selected-layout.is-skill-detail .selected-main,
+.selected-layout.is-secondary-flow .selected-main {
+  grid-column: 2;
+}
+
 .selected-layout .asset-type-rail {
   gap: 5px;
   padding: 9px 7px;
@@ -2917,6 +2930,10 @@ button:disabled {
   grid-template-rows: auto minmax(0, 1fr) 29px auto;
 }
 
+.selected-catalog:has(.selected-scope-tabs) {
+  grid-template-rows: auto auto auto minmax(0, 1fr) 29px auto;
+}
+
 .selected-catalog-heading {
   position: relative;
   display: flex;
@@ -2955,6 +2972,36 @@ button:disabled {
 .selected-catalog-heading .filter-popover {
   top: 47px;
   right: 8px;
+}
+
+.selected-scope-tabs {
+  display: flex;
+  gap: 3px;
+  padding: 7px 12px;
+  border-bottom: 1px solid var(--line);
+  background: #fafbfc;
+}
+
+.selected-scope-tabs button {
+  min-height: 25px;
+  padding: 3px 9px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  color: var(--ink-soft);
+  background: transparent;
+  font-size: 9px;
+  cursor: pointer;
+}
+
+.selected-scope-tabs button:hover {
+  background: #f0f3f7;
+}
+
+.selected-scope-tabs button.is-selected {
+  border-color: #c8d7ef;
+  color: #245a9d;
+  background: #eef4fe;
+  font-weight: 680;
 }
 
 .skill-catalog-summary {
@@ -3167,6 +3214,21 @@ button.skill-target:hover {
 .skill-target.is-blocked {
   color: #a1a7ae;
   background: #fafafa;
+}
+
+button.skill-target.is-enabled {
+  color: #167346;
+  background: #f2faf5;
+}
+
+button.skill-target.is-disabled {
+  color: #7f8790;
+  background: transparent;
+}
+
+button.skill-target:disabled {
+  opacity: 0.52;
+  cursor: not-allowed;
 }
 
 .selected-catalog-footer {
@@ -3561,6 +3623,12 @@ button.skill-target:hover {
   grid-template-columns: 70px clamp(520px, 46vw, 560px) minmax(0, 1fr);
 }
 
+.mock-frame[data-viewport='medium'].variant-selected .selected-layout.is-skill-list,
+.mock-frame[data-viewport='medium'].variant-selected .selected-layout.is-skill-detail,
+.mock-frame[data-viewport='medium'].variant-selected .selected-layout.is-secondary-flow {
+  grid-template-columns: 70px minmax(0, 1fr);
+}
+
 .mock-frame[data-viewport='medium'].variant-selected .skill-targets {
   min-width: 224px;
 }
@@ -3630,6 +3698,10 @@ button.skill-target:hover {
   border-right: 0;
 }
 
+.mock-frame[data-viewport='narrow'].variant-selected .selected-catalog:has(.selected-scope-tabs) {
+  grid-template-rows: auto auto auto minmax(0, 1fr) 29px auto;
+}
+
 .mock-frame[data-viewport='narrow'].variant-selected
   .selected-catalog:not(:has(.skill-catalog-summary)) {
   grid-template-rows: auto minmax(0, 1fr) 29px auto;
@@ -3668,10 +3740,11 @@ button.skill-target:hover {
 }
 
 .mock-frame[data-viewport='narrow'].variant-selected .skill-row {
-  grid-template-columns: minmax(0, 1fr) 208px;
+  grid-template-columns: minmax(0, 1fr) 200px;
 }
 
 .mock-frame[data-viewport='narrow'].variant-selected .skill-targets {
+  grid-template-columns: repeat(4, minmax(48px, 1fr));
   min-width: 0;
 }
 

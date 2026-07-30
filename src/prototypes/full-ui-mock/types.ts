@@ -43,6 +43,7 @@ export type CatalogState = 'normal' | 'loading' | 'empty';
 export type PanelOverlay = 'library' | 'files' | 'inspector' | null;
 export type SkillAgentTargetStatus = 'recognized' | 'installable' | 'convertible' | 'blocked';
 export type SkillTargetAction = 'install' | 'convert';
+export type CreateMode = '新建' | '从本地导入' | '导入项目 Skill';
 
 /** Skills 列表中每个 Agent 的识别或可准备操作状态；仅用于原型展示。 */
 export interface SkillAgentTarget {
@@ -103,14 +104,18 @@ export interface MockUiState {
   libraryWidth: number;
   inspectorWidth: number;
   managementTab: 'projects' | 'agents' | 'recovery';
-  createMode: '新建' | '从本地导入';
+  createMode: CreateMode;
   createName: string;
+  /** selected 原型的项目内 Skill 导入来源；仅用于内存交互。 */
+  importProject: string;
   targetAssetType: AssetType;
   targetAgent: string;
   targetScope: '全局' | '项目';
   recoveryAction: 'idle' | 'delete-confirm' | 'delete-result';
   /** selected Skills 行发起的单目标准备动作；不触发即时写入。 */
   skillTarget: { action: SkillTargetAction; agent: string } | null;
+  /** selected Skills 的行内启用状态；key 为 `${assetId}:${agent}`，不代表真实写入。 */
+  skillAgentEnabled: Record<string, boolean>;
   /** 窄窗口中在“列表 / 结构化详情”两个表面间切换。 */
   selectedPanel: 'list' | 'detail';
   notice: string | null;
