@@ -1,0 +1,32 @@
+# Full UI Mock（throwaway）
+
+这是用于整体 UI 评审的 throwaway React 原型，不是正式产品实现。
+
+- 状态和合成数据只存在于内存，不读取或写入浏览器存储、文件、网络、Tauri、真实 Agent 配置、`FrontendGateway` 或 `WorkspaceSession`。
+- 运行：`npm run mock:ui`；服务固定在 `http://127.0.0.1:1421/`。
+- 默认入口：`/?prototype=full-ui&variant=selected&journey=browse&scenario=ready`。
+
+URL 参数：
+
+- `variant=A|B|C|selected`
+- `journey=browse|edit|create|convert|manage|recover`
+- `scenario=ready|stale|readonly|dirty|conflict|degraded|blocked|failed`
+
+刷新会依据 URL 重建旅程起点；草稿、面板状态和所有模拟结果都不会保存。
+
+## `selected` 状态
+
+集中验收一于 2026-07-29 明确选择方案 C（Asset Type Rail），因此 `selected` 固化为 C，并作为第二阶段完整旅程验收入口。
+
+- 已选择：C，以窄垂直资产类型导航轨建立稳定的“资产类型 → 资产库 → 原生内容工作台”空间关系。
+- 保留锚点：四类一级导航、双栏工作台、两行资产列表、原生内容主导以及辅助检查器。
+- 未选择：A、B 仍保留在 throwaway 分支作为设计证据；用户没有给出更细的否决理由，原型不自行推断。
+- 范围：该选择只确认 UI 编排方向，不修改产品能力、前端契约、技术方案或 FE-01～FE-10 依赖关系。
+
+## 当前候选迭代
+
+方案 C 仍是已选的整体结构方向。当前正对 `selected` 原型进行一轮较大的 Skills 信息架构与交互调整，重点包括：当前类型资产库、右上角全局搜索、Skills 富列表、结构化浏览和聚焦源码编辑。
+
+最新一批标注还提出一级列表进入二级详情、范围 Tab 与全局优先排序、项目名显示、Agent 行内启停、仅导入项目内已有 Skill，以及移除恢复／历史可见 UI。这些要求与现有候选及正式安全边界存在待决冲突，均只记录为 `pending`，不得根据 Mock 直接改写产品能力或事务语义。
+
+这些内容尚未经过最终 UI 验收，不构成新的产品事实，也不改写既有正式文档。候选变化、与此前产物的潜在影响，以及最终验收后才需要执行的回写清单，见 [UI_CHANGE_IMPACT.md](./UI_CHANGE_IMPACT.md)。
