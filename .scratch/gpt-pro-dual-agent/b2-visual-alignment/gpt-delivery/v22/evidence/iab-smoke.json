@@ -1,0 +1,50 @@
+{
+  "browser_surface": "Codex in-app browser",
+  "url": "http://127.0.0.1:1421/?prototype=full-ui&variant=selected&journey=browse&scenario=ready&controls=0",
+  "viewport": {
+    "width": 1075,
+    "height": 964,
+    "device_pixel_ratio": 2,
+    "responsive_mode": "narrow"
+  },
+  "assertions": {
+    "selected_frame_present": true,
+    "prototype_controller_absent": true,
+    "horizontal_document_overflow": false,
+    "captured_agent_chips_fit": true,
+    "skills_list_reached": true,
+    "structured_detail_reached": true,
+    "source_editor_reached": true,
+    "source_textarea_focused": true,
+    "editor_files": [
+      "SKILL.md",
+      "references/usage.md"
+    ],
+    "console_error_count": 0,
+    "console_warning_count": 0
+  },
+  "console_notes": [
+    "Vite development client connected.",
+    "React development-mode DevTools suggestion was informational."
+  ],
+  "network_boundary": "No external request was observed in browser logs. The page remained on 127.0.0.1; no HAR was captured.",
+  "evidence": {
+    "context_screenshot": {
+      "path": "iab-1075x964-context.png",
+      "sha256": "7a9c7596153620f77338e615fece63365f99c29648c011dad003d1ce475caa5d"
+    },
+    "skills_list_screenshot": {
+      "path": "iab-1075x964-skill-list.png",
+      "sha256": "bfc702ca7c39c5de53a2b43dce5dd187e0a6f84e1b48f862e22b5e166665d73c"
+    },
+    "qualitative_comparison": {
+      "path": "iab-reference-vs-list-1075.png",
+      "sha256": "7981c3c2341231a5ea065a9eb91b900a60edfb9cbefbe7aca623c951eb6f2877"
+    }
+  },
+  "limitations": [
+    "The current in-app browser CSS viewport is 1075x964, so the selected UI intentionally used the narrow single-surface stack.",
+    "The combined reference/current image is qualitative only: it does not satisfy the planned same-state 1586x992 overlay acceptance check.",
+    "This smoke is local Mock evidence, not production runtime or deployment evidence."
+  ]
+}

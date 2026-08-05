@@ -1,78 +1,65 @@
-# Agent Config Manager `selected` UI Mock：第二轮设计 QA
+# Agent Config Manager selected B2 v2：设计 QA
+
+> 2026-08-03 注：本文是本轮产品调整前的 v22 收尾证据。后续 selected 候选已在 `src/prototypes/full-ui-mock/UI_CHANGE_IMPACT.md` 登记：Hooks 暂从 selected 移除，Skill 收敛为结构化查看与会话内多 Agent 启停预览，并新增项目自有／全局适用 A、B、C 三种布局。下列旧检查点仅作历史证据；`final result: blocked` 不变。
 
 ## 验收对象
 
-- 视觉参考：`/Users/xiquandai/.codex/visualizations/2026/07/29/019fabb3-6d67-76c3-a8c7-22427a9ff413/cc-switch-reference-current.png`
-- 本轮调整前：`/Users/xiquandai/.codex/visualizations/2026/07/29/019fabb3-6d67-76c3-a8c7-22427a9ff413/annotations-round2-browse-before.png`
-- 本轮一级列表：`/Users/xiquandai/.codex/visualizations/2026/07/29/019fabb3-6d67-76c3-a8c7-22427a9ff413/annotations-round2-browse-after.png`
-- 本轮二级详情：`/Users/xiquandai/.codex/visualizations/2026/07/29/019fabb3-6d67-76c3-a8c7-22427a9ff413/annotations-round2-detail-after.png`
-- 本轮窄窗列表：`/Users/xiquandai/.codex/visualizations/2026/07/29/019fabb3-6d67-76c3-a8c7-22427a9ff413/annotations-round2-narrow-after.png`
-- 本轮项目导入：`/Users/xiquandai/.codex/visualizations/2026/07/29/019fabb3-6d67-76c3-a8c7-22427a9ff413/annotations-round2-create-after.png`
-- 本轮管理页：`/Users/xiquandai/.codex/visualizations/2026/07/29/019fabb3-6d67-76c3-a8c7-22427a9ff413/annotations-round2-manage-after.png`
-- 参考／调整前／调整后同屏：`/Users/xiquandai/.codex/visualizations/2026/07/29/019fabb3-6d67-76c3-a8c7-22427a9ff413/annotations-round2-comparison.png`
-- 原型状态：`variant=selected / journey=browse / scenario=ready`
+- 派生基线：`6c6a6bf85dd84e3dfec2201478d9fff5d2f5be5d + local_overlay_sha256 b1c36114bb83676998f37949ed695b89332fb664a8866fc27ab0a0bd98489a69`
+- 原型入口：`/?prototype=full-ui&variant=selected&journey=browse&scenario=ready&controls=0`
+- 视觉参考：`reference-b2.png`，SHA-256
+  `7dc497be34dca44d4f29c1cf0b11adab9c36cd6322a9ac549ecf5b797766a4ff`
+- v1 验收输入：`browser-qa-v1.md`、`gate-log.md`、三张拒绝证据截图及
+  `reviewer-state-responsive.md`
+- 实现范围：只重构 `selected`；A、B、C 继续作为历史方案证据。
 
-CC Switch 只作为 Skills 长列表密度、两行信息和 Agent 位置交互的视觉参考；资产类型 Rail、全局搜索、项目管理和原型控制条仍沿用 Agent Config Manager 已选方向。
+## v2 修正检查点
 
-## 视口与比较口径
+1. selected 图标固定使用 `lucide-react@1.28.0`；不存在 `b2-icons.tsx` 或其引用。
+2. 一级上下文栏只保留“全局配置”“项目配置”及项目列表；管理入口留在顶栏。
+3. Skill 浏览详情只显示结构化信息；文件、文件树和源码只在 Edit 中出现。
+4. 真实窄窗口使用“上下文 → 类型 → 列表 → 详情／旅程”单一主表面。
+5. dirty guard 只暂存目标转换；继续编辑保持原上下文、原资产和 selected 编辑器。
+6. dirty + 全局搜索切换会先关闭搜索，再显示唯一的放弃确认；继续编辑恢复 textarea 焦点。
+7. 成功 Apply 会把已确认草稿写回当前会话的 Mock 内存资产快照；刷新按 URL 起点重置。
+8. 多文件 Review 自动聚焦首个真实变更文件，并提供带 changed 标记的文件导航。
+9. Review、Focused Confirm 与 Outcome 共用同一实际变更文件计数。
+10. Convert 的 conflict／failed 返回 capability mapping／review，保持 `dirty=false` 且不制造源码草稿。
+11. selected Outcome 使用正常内容流中的紧凑网格，不再继承旧的全高居中表面。
+12. Browse、Detail、Edit、Create／Import、Convert、Review、Confirm、Outcome 与 Manage
+    使用轻量、薄分隔、低圆角、无重阴影的 B2 语言。
+13. `controls=0` 保持干净模式，`controls=1` 显示开发控制条；selected 不暴露 Recovery。
+14. 所有数据和操作仍是内存合成 Mock，不访问 Gateway、Tauri、网络、真实磁盘或用户数据。
 
-| 对象           | 视口／像素                        | 用途                               |
-| -------------- | --------------------------------- | ---------------------------------- |
-| CC Switch 参考 | 768 × 840 px                      | 列表密度与 Agent 状态位置          |
-| 调整前         | 1063 × 964 px                     | 原一级页双栏与筛选按钮             |
-| 调整后         | 1063 × 964 px                     | 一级页纯列表、范围 Tabs 与行内启停 |
-| 窄窗预设       | Mock 内部窄窗；截图 1063 × 964 px | 无横向溢出的单表面列表             |
-| 同屏对比       | 3008 × 964 px                     | 参考、调整前、调整后三方视觉判断   |
+## 本环境实际执行结果
 
-调整前后使用相同浏览器视口和同一 `browse / ready` 状态。窄窗通过原型控制器切换内部预设，并额外检查列表容器 `scrollWidth === clientWidth`。
+### 通过的补充检查
 
-## 对比结论
+- TypeScript 语法解析：8 个相关 TypeScript／TSX 文件全部通过，退出码 0。
+- 全局 TypeScript 5.8.3 + 临时声明补充检查：退出码 0；启用了
+  `--noUnusedLocals --noUnusedParameters`。该检查不替代仓库固定依赖下的 `tsc -b`。
+- 源码／契约 smoke：退出码 0，输出 `v2 source smoke assertions passed`。
+- 可执行模型 smoke：先把 `types.ts`、`b2-data.ts`、`b2-model.ts` 编译到临时目录，
+  再验证 changed-file、首个变更文件、内存快照写回、20／50 分页模型和 controls 解析；
+  编译与执行均为退出码 0。
 
-### 已达成
+### 未通过或受环境阻断的固定门禁
 
-- Skills 一级页只保留全宽列表；右侧结构化详情不再与列表并列。
-- 点击任一 Skill 行进入独立二级详情；详情仅展示结构化信息，并保留明确的“返回列表”和“编辑源码”入口。
-- Skills 的筛选按钮已移除，改为始终可见的“全部／全局／项目”范围 Tabs；默认“全部”。
-- “全部”中全局 Skill 稳定排在项目 Skill 前；项目 Skill 直接显示 `acme/desktop`、`acme/server` 等项目名。
-- 四个 Agent 位置直接表达“已启用／未启用／不可用”；可用项可点击切换，不可用项置灰且为原生 disabled 控件。
-- Agent 汇总数字随行内启停同步变化；所有状态只存在于 Mock 内存。
-- 顶部只提供“导入项目 Skill”；导入面只允许从已管理项目和该项目已有 Skill 中选择，不提供新建模板或任意本地文件导入。
-- `selected` 的管理区域不再出现恢复点 Tab，旅程控制器不再出现恢复旅程，恢复直链会归一化到浏览列表。
-- 项目导入、管理、审查和结果等次级流程使用完整二级页面，不再被一级列表挤压。
-- 源码编辑仍能从二级详情进入，文件与编辑控件只在编辑层级出现。
-- 窄窗列表没有横向溢出；Tabs、项目名和四个 Agent 状态仍可读。
+- `npm run verify:toolchain`：退出码 1，2/10 项通过。当前环境为 Node `v22.16.0`、
+  npm `10.9.2`、Linux x86_64，且没有 Rust、Xcode 或 Chrome；锁文件结构检查通过。
+- `npm run verify:static`：退出码 1，2/9 项通过。以离线模式执行，Corepack 无法取得固定
+  npm `11.16.0`，Rust 命令不存在；禁止依赖与敏感占位值守卫通过。未得到真实的
+  Prettier、ESLint 或项目 `tsc -b` 结论。
+- `npm run test:frontend`：退出码 127，`vitest: not found`。
+- 聚焦测试命令：退出码 127，`vitest: not found`。
+- `npm run build:frontend`：退出码 1，缺少 `vite/client` 和 `node` 类型定义。
 
-### 有意保留的边界
+## 证据边界
 
-- A／B／C 仍保留原有创建、恢复和回滚界面，作为第一阶段设计证据；本轮只调整 `selected`。
-- Agent 行内启停是纯内存交互，不调用 gateway、Tauri、网络、磁盘或真实 Agent 配置。
-- “移除恢复／历史／回滚”只改变 `selected` 的可见 UI，不在本轮删除正式契约或内部事务安全语义。
-- CC Switch 的品牌图标和额外安装入口没有复制；Mock 继续使用文字状态，避免引入无来源资产和未确认能力。
+- v1 截图和只读审查只用于定位拒绝项，不能证明 v2 已通过。
+- 当前环境未启动 Vite，未执行 v2 的 Browser／IAB 宽、中、窄画面、控制台或交互验证。
+- 静态 smoke、临时声明 typecheck 和模型执行不能替代固定工具链或真实浏览器 QA。
+- Codex 第二轮验收仍需验证全局搜索、分页、详情／编辑、dirty guard、焦点、变更计数、
+  Outcome、管理表面、A／B／C 隔离及参考图一致性。
+- 本次没有执行 commit、push、创建 PR 或部署。
 
-## 交互与运行复核
-
-- 作用域 Tabs：全局与项目结果互斥，返回全部后全局优先。
-- Agent 启停：按钮的 `aria-pressed` 与汇总数字同步；不可用按钮带 `disabled`。
-- 页面层级：列表 → 二级详情 → 源码编辑成立；二级详情不显示文件树。
-- 项目导入：默认 `acme/desktop / commit-message-guide`；切换 `acme/server` 后联动到 `test-scout`，并能进入本地草稿。
-- 状态隔离：A/B/C 与 `selected` 互相切换时，各自恢复对应的“新建”或“项目导入”状态；取消后重新导入也会重置为一致的项目和 Skill。
-- 管理区域：只保留“项目与索引”“Agent 与适配器”。
-- 兼容证据：方案 A 的恢复与新建旅程仍可打开，证明早期方案未被改写。
-- 新开的干净验收页没有 console error。
-- 构建、前端测试、静态校验和格式检查通过。
-
-## 迭代记录
-
-1. 根据 6 条浏览器批注，将 Skills 一级双栏调整为一级列表与二级详情。
-2. 将筛选弹层改为范围 Tabs，并补充全局优先排序和项目名。
-3. 将 Agent 的“安装／转换入口”改为纯内存启停，并让不可用状态不可点击。
-4. 将 `selected` 创建旅程收敛为项目内 Skill 导入。
-5. 移除 `selected` 的恢复、历史和回滚可见入口，同时保留 A／B／C 证据。
-6. 修复项目导入默认值与显示值不一致、隐藏 Agent 筛选残留和窄窗横向溢出。
-7. 根据独立审查修复方案切换状态串扰、导入重入不一致、阻断文案和 Tabs 方向键行为。
-8. 将项目导入与管理等次级流程收拢为完整二级页面，消除窄主区文字换行和控件重叠。
-9. 使用同视口三方对比复核列表密度、信息层级和主任务聚焦。
-
-## 最终结果
-
-final result: passed
+final result: blocked

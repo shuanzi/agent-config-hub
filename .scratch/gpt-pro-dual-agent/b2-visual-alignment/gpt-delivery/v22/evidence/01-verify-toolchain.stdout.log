@@ -1,0 +1,15 @@
+
+> agent-config-manager@0.1.0 verify:toolchain
+> node scripts/orchestrator/verify-toolchain.mjs
+
+PASS  node==24.18.0  actual v24.18.0
+PASS  npm==11.16.0  actual 11.16.0
+PASS  rustc==1.97.1  actual rustc 1.97.1 (8bab26f4f 2026-07-14)
+PASS  rust-target aarch64-apple-darwin  aarch64-apple-darwin
+PASS  macOS>=15  actual 26.6
+PASS  arch==arm64  actual arm64
+PASS  xcode CLT  /Applications/Xcode.app/Contents/Developer
+PASS  package-lock.json 与 package.json 一致  lockfileVersion 3
+PASS  Cargo.lock 与 Cargo.toml 一致  8 个直接依赖均有满足 req 的锁定版本
+PASS  Chrome 存在（L2 前置）  /Applications/Google Chrome.app/Contents/MacOS/Google Chrome
+verify:toolchain OK（10 项）

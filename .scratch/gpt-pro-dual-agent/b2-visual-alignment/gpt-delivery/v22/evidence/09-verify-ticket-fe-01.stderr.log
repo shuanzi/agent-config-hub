@@ -1,0 +1,496 @@
+    Checking agent-config-manager v0.1.0 (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/src-tauri)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 2.49s
+    Checking agent-config-manager v0.1.0 (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/src-tauri)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 2.12s
+   Compiling getrandom v0.4.3
+   Compiling errno v0.3.14
+   Compiling fastrand v2.5.0
+   Compiling rustix v1.1.4
+   Compiling uuid v1.24.0
+   Compiling cfb v0.7.3
+   Compiling schemars v0.8.22
+   Compiling infer v0.19.0
+   Compiling tempfile v3.27.0
+   Compiling tauri-utils v2.9.3
+   Compiling tauri-build v2.6.3
+   Compiling tauri-codegen v2.6.3
+   Compiling tauri v2.11.5
+   Compiling agent-config-manager v0.1.0 (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/src-tauri)
+   Compiling tauri-macros v2.6.3
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 34.14s
+     Running unittests src/lib.rs (target/debug/deps/agent_config_manager_lib-488e97a7dc00494b)
+     Running unittests src/main.rs (target/debug/deps/agent_config_manager-301fccc03cf998f3)
+     Running unittests src/bin/export-wire.rs (target/debug/deps/export_wire-a64e82ea8169de90)
+     Running tests/catalog.rs (target/debug/deps/catalog-83fb51d6cec22e4e)
+     Running tests/core_read.rs (target/debug/deps/core_read-0d880141e68ca6da)
+     Running tests/export_wire.rs (target/debug/deps/export_wire-48065cd66e4f16e1)
+     Running tests/masking.rs (target/debug/deps/masking-544c9131005acd4b)
+     Running tests/wire_vectors.rs (target/debug/deps/wire_vectors-3897ae8a6f08e67e)
+   Doc-tests agent_config_manager_lib
+   Compiling serde_core v1.0.229
+   Compiling phf_macros v0.13.1
+   Compiling zerofrom v0.1.8
+   Compiling thiserror v2.0.19
+   Compiling parking_lot_core v0.9.12
+   Compiling thiserror v1.0.69
+   Compiling uuid v1.24.0
+   Compiling swift-rs v1.0.7
+   Compiling smallvec v1.15.2
+   Compiling jsonptr v0.6.3
+   Compiling yoke v0.8.3
+   Compiling cargo_metadata v0.19.2
+   Compiling zerovec v0.11.6
+   Compiling zerotrie v0.2.4
+   Compiling parking_lot v0.12.5
+   Compiling string_cache v0.9.0
+   Compiling cfb v0.7.3
+   Compiling json-patch v3.0.1
+   Compiling plist v1.10.0
+   Compiling phf v0.13.1
+   Compiling tinystr v0.8.3
+   Compiling potential_utf v0.1.5
+   Compiling icu_locale_core v2.2.0
+   Compiling icu_collections v2.2.0
+   Compiling web_atoms v0.2.5
+   Compiling cssparser v0.36.0
+   Compiling infer v0.19.0
+   Compiling serde_with v3.21.0
+   Compiling form_urlencoded v1.2.2
+   Compiling futures-core v0.3.33
+   Compiling cargo_toml v0.22.3
+   Compiling socket2 v0.6.5
+   Compiling markup5ever v0.38.0
+   Compiling selectors v0.36.1
+   Compiling mio v1.2.2
+   Compiling html5ever v0.38.0
+   Compiling icu_provider v2.2.0
+   Compiling icu_properties v2.2.0
+   Compiling bitflags v2.13.1
+   Compiling serde v1.0.229
+   Compiling icu_normalizer v2.2.0
+   Compiling objc2-core-foundation v0.3.2
+   Compiling dom_query v0.27.0
+   Compiling serde_json v1.0.151
+   Compiling dpi v0.1.2
+   Compiling serde_spanned v1.1.1
+   Compiling toml_datetime v1.1.1+spec-1.1.0
+   Compiling idna_adapter v1.2.2
+   Compiling idna v1.1.0
+   Compiling erased-serde v0.4.10
+   Compiling objc2-foundation v0.3.2
+   Compiling objc2-core-graphics v0.3.2
+   Compiling objc2-core-video v0.3.2
+   Compiling url v2.5.8
+   Compiling objc2-core-text v0.3.2
+   Compiling objc2-security v0.3.2
+   Compiling tokio v1.53.1
+   Compiling objc2-javascript-core v0.3.2
+   Compiling http-body v1.1.0
+   Compiling foreign-types v0.5.0
+   Compiling schemars v0.8.22
+   Compiling urlpattern v0.3.0
+   Compiling serde-untagged v0.1.9
+   Compiling toml v1.1.3+spec-1.1.0
+   Compiling core-graphics-types v0.2.0
+   Compiling tracing-core v0.1.36
+   Compiling tower-service v0.3.3
+   Compiling core-graphics v0.25.0
+   Compiling tauri-utils v2.9.3
+   Compiling tracing v0.1.44
+   Compiling httparse v1.10.1
+   Compiling dispatch2 v0.3.1
+   Compiling futures-channel v0.3.33
+   Compiling slab v0.4.12
+   Compiling sync_wrapper v1.0.2
+   Compiling httpdate v1.0.3
+   Compiling futures-task v0.3.33
+   Compiling tower-layer v0.3.3
+   Compiling atomic-waker v1.1.2
+   Compiling futures-util v0.3.33
+   Compiling keyboard-types v0.7.0
+   Compiling http-body-util v0.1.4
+   Compiling png v0.18.1
+   Compiling ryu v1.0.23
+   Compiling rustix v1.1.4
+   Compiling serialize-to-javascript v0.1.2
+   Compiling serde_urlencoded v0.7.1
+   Compiling axum-core v0.5.6
+   Compiling serde_path_to_error v0.1.20
+   Compiling matchit v0.8.4
+   Compiling ts-rs v10.1.0
+   Compiling tempfile v3.27.0
+   Compiling hyper v1.11.0
+   Compiling tower v0.5.3
+   Compiling hyper-util v0.1.20
+   Compiling axum v0.8.9
+   Compiling tauri-build v2.6.3
+   Compiling tauri-plugin v2.6.3
+   Compiling tauri-codegen v2.6.3
+   Compiling tauri v2.11.5
+   Compiling tauri-plugin-wdio-webdriver v1.2.0
+   Compiling tauri-macros v2.6.3
+   Compiling agent-config-manager v0.1.0 (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/src-tauri)
+   Compiling objc2-cloud-kit v0.3.2
+   Compiling objc2-quartz-core v0.3.2
+   Compiling objc2-core-image v0.3.2
+   Compiling objc2-core-data v0.3.2
+   Compiling objc2-app-kit v0.3.2
+   Compiling objc2-web-kit v0.3.2
+   Compiling tao v0.35.3
+   Compiling window-vibrancy v0.6.0
+   Compiling muda v0.19.3
+   Compiling tauri-runtime v2.11.3
+   Compiling wry v0.55.1
+   Compiling tauri-runtime-wry v2.11.4
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1m 42s
+     Running unittests src/lib.rs (target/debug/deps/agent_config_manager_lib-0fec0feaceea71b1)
+     Running unittests src/main.rs (target/debug/deps/agent_config_manager-029c9706fda81a3b)
+     Running unittests src/bin/export-wire.rs (target/debug/deps/export_wire-7473f0690f6e13e0)
+     Running tests/catalog.rs (target/debug/deps/catalog-e8a0cd0a159c31d4)
+     Running tests/core_read.rs (target/debug/deps/core_read-c01875c36decdf75)
+     Running tests/export_wire.rs (target/debug/deps/export_wire-0e83abc05f6a57cf)
+     Running tests/masking.rs (target/debug/deps/masking-80dfc3d202c54924)
+     Running tests/wire_vectors.rs (target/debug/deps/wire_vectors-0613b77bbfec7c39)
+   Doc-tests agent_config_manager_lib
+        Info Looking up installed tauri packages to check mismatched versions...
+   Compiling objc2-exception-helper v0.1.1
+   Compiling tauri v2.11.5
+   Compiling tauri-macros v2.6.3
+   Compiling objc2 v0.6.4
+   Compiling tauri-plugin-wdio-webdriver v1.2.0
+   Compiling objc2-core-foundation v0.3.2
+   Compiling block2 v0.6.2
+   Compiling objc2-javascript-core v0.3.2
+   Compiling dispatch2 v0.3.1
+   Compiling agent-config-manager v0.1.0 (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/src-tauri)
+   Compiling objc2-foundation v0.3.2
+   Compiling objc2-core-text v0.3.2
+   Compiling objc2-core-graphics v0.3.2
+   Compiling objc2-core-video v0.3.2
+   Compiling objc2-security v0.3.2
+   Compiling objc2-quartz-core v0.3.2
+   Compiling objc2-cloud-kit v0.3.2
+   Compiling objc2-core-image v0.3.2
+   Compiling objc2-core-data v0.3.2
+   Compiling objc2-app-kit v0.3.2
+   Compiling objc2-web-kit v0.3.2
+   Compiling tao v0.35.3
+   Compiling window-vibrancy v0.6.0
+   Compiling muda v0.19.3
+   Compiling wry v0.55.1
+   Compiling tauri-runtime v2.11.3
+   Compiling tauri-runtime-wry v2.11.4
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1m 07s
+       Built application at: /Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/src-tauri/target/debug/export-wire
+[0-0] 2026-08-01T14:56:53.674Z WARN tauri-service:window: Failed to get window states: Error: Tauri core.invoke not available after 5s timeout
+[0-0]     at DirectEvalClient.eval (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:2756:19)
+[0-0]     at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+[0-0]     at async execute (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:3163:17)
+[0-0]     at async Object.execute (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:4140:32)
+[0-0]     at async getWindowStates (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:2916:24)
+[0-0]     at async ensureActiveWindowFocus (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:2970:24)
+[0-0]     at async TauriWorkerService.beforeCommand (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:3905:13)
+[0-0]     at async Promise.all (index 0)
+[0-0]     at async Browser.executeHooksWithArgs (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/utils/build/index.js:965:18)
+[0-0]     at async Browser.wrapCommandFn (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/utils/build/index.js:976:7)
+[0-0] 2026-08-01T14:56:58.730Z WARN tauri-service:window: Failed to get window states: Error: Tauri core.invoke not available after 5s timeout
+[0-0]     at DirectEvalClient.eval (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:2756:19)
+[0-0]     at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+[0-0]     at async execute (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:3163:17)
+[0-0]     at async Object.execute (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:4140:32)
+[0-0]     at async getWindowStates (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:2916:24)
+[0-0]     at async ensureActiveWindowFocus (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:2970:24)
+[0-0]     at async TauriWorkerService.beforeCommand (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:3905:13)
+[0-0]     at async Promise.all (index 0)
+[0-0]     at async Browser.executeHooksWithArgs (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/utils/build/index.js:965:18)
+[0-0]     at async Browser.wrapCommandFn (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/utils/build/index.js:976:7)
+[0-0] 2026-08-01T14:57:04.673Z WARN tauri-service:window: Failed to get window states: Error: Tauri core.invoke not available after 5s timeout
+[0-0]     at DirectEvalClient.eval (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:2756:19)
+[0-0]     at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+[0-0]     at async execute (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:3163:17)
+[0-0]     at async Object.execute (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:4140:32)
+[0-0]     at async getWindowStates (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:2916:24)
+[0-0]     at async ensureActiveWindowFocus (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:2970:24)
+[0-0]     at async TauriWorkerService.beforeCommand (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:3905:13)
+[0-0]     at async Promise.all (index 0)
+[0-0]     at async Browser.executeHooksWithArgs (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/utils/build/index.js:965:18)
+[0-0]     at async Browser.wrapCommandFn (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/utils/build/index.js:976:7)
+[0-0] 2026-08-01T14:57:10.673Z WARN tauri-service:window: Failed to get window states: Error: Tauri core.invoke not available after 5s timeout
+[0-0]     at DirectEvalClient.eval (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:2756:19)
+[0-0]     at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+[0-0]     at async execute (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:3163:17)
+[0-0]     at async Object.execute (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:4140:32)
+[0-0]     at async getWindowStates (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:2916:24)
+[0-0]     at async ensureActiveWindowFocus (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:2970:24)
+[0-0]     at async TauriWorkerService.beforeCommand (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:3905:13)
+[0-0]     at async Promise.all (index 0)
+[0-0]     at async Browser.executeHooksWithArgs (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/utils/build/index.js:965:18)
+[0-0]     at async Browser.wrapCommandFn (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/utils/build/index.js:976:7)
+[0-0] 2026-08-01T14:57:15.707Z WARN tauri-service:window: Failed to get window states: Error: Tauri core.invoke not available after 5s timeout
+[0-0]     at DirectEvalClient.eval (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:2756:19)
+[0-0]     at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+[0-0]     at async execute (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:3163:17)
+[0-0]     at async Object.execute (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:4140:32)
+[0-0]     at async getWindowStates (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:2916:24)
+[0-0]     at async ensureActiveWindowFocus (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:2970:24)
+[0-0]     at async TauriWorkerService.beforeCommand (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:3905:13)
+[0-0]     at async Promise.all (index 0)
+[0-0]     at async Element.executeHooksWithArgs (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/utils/build/index.js:965:18)
+[0-0]     at async Element.wrapCommandFn (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/utils/build/index.js:976:7)
+[0-0] 2026-08-01T14:57:20.746Z WARN tauri-service:window: Failed to get window states: Error: Tauri core.invoke not available after 5s timeout
+[0-0]     at DirectEvalClient.eval (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:2756:19)
+[0-0]     at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+[0-0]     at async execute (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:3163:17)
+[0-0]     at async Object.execute (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:4140:32)
+[0-0]     at async getWindowStates (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:2916:24)
+[0-0]     at async ensureActiveWindowFocus (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:2970:24)
+[0-0]     at async TauriWorkerService.beforeCommand (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:3905:13)
+[0-0]     at async Promise.all (index 0)
+[0-0]     at async Element.executeHooksWithArgs (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/utils/build/index.js:965:18)
+[0-0]     at async Element.wrapCommandFn (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/utils/build/index.js:976:7)
+[0-0] 2026-08-01T14:57:25.782Z WARN tauri-service:window: Failed to get window states: Error: Tauri core.invoke not available after 5s timeout
+[0-0]     at DirectEvalClient.eval (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:2756:19)
+[0-0]     at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+[0-0]     at async execute (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:3163:17)
+[0-0]     at async Object.execute (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:4140:32)
+[0-0]     at async getWindowStates (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:2916:24)
+[0-0]     at async ensureActiveWindowFocus (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:2970:24)
+[0-0]     at async TauriWorkerService.beforeCommand (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:3905:13)
+[0-0]     at async Promise.all (index 0)
+[0-0]     at async Element.executeHooksWithArgs (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/utils/build/index.js:965:18)
+[0-0]     at async Element.wrapCommandFn (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/utils/build/index.js:976:7)
+[0-0] 2026-08-01T14:57:30.835Z WARN tauri-service:window: Failed to get window states: Error: Tauri core.invoke not available after 5s timeout
+[0-0]     at DirectEvalClient.eval (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:2756:19)
+[0-0]     at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+[0-0]     at async execute (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:3163:17)
+[0-0]     at async Object.execute (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:4140:32)
+[0-0]     at async getWindowStates (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:2916:24)
+[0-0]     at async ensureActiveWindowFocus (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:2970:24)
+[0-0]     at async TauriWorkerService.beforeCommand (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:3905:13)
+[0-0]     at async Promise.all (index 0)
+[0-0]     at async Browser.executeHooksWithArgs (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/utils/build/index.js:965:18)
+[0-0]     at async Browser.wrapCommandFn (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/utils/build/index.js:976:7)
+[0-0] 2026-08-01T14:57:35.870Z WARN tauri-service:window: Failed to get window states: Error: Tauri core.invoke not available after 5s timeout
+[0-0]     at DirectEvalClient.eval (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:2756:19)
+[0-0]     at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+[0-0]     at async execute (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:3163:17)
+[0-0]     at async Object.execute (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:4140:32)
+[0-0]     at async getWindowStates (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:2916:24)
+[0-0]     at async ensureActiveWindowFocus (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:2970:24)
+[0-0]     at async TauriWorkerService.beforeCommand (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:3905:13)
+[0-0]     at async Promise.all (index 0)
+[0-0]     at async Browser.executeHooksWithArgs (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/utils/build/index.js:965:18)
+[0-0]     at async Browser.wrapCommandFn (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/utils/build/index.js:976:7)
+[0-0] 2026-08-01T14:57:41.672Z WARN tauri-service:window: Failed to get window states: Error: Tauri core.invoke not available after 5s timeout
+[0-0]     at DirectEvalClient.eval (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:2756:19)
+[0-0]     at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+[0-0]     at async execute (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:3163:17)
+[0-0]     at async Object.execute (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:4140:32)
+[0-0]     at async getWindowStates (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:2916:24)
+[0-0]     at async ensureActiveWindowFocus (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:2970:24)
+[0-0]     at async TauriWorkerService.beforeCommand (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:3905:13)
+[0-0]     at async Promise.all (index 0)
+[0-0]     at async Browser.executeHooksWithArgs (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/utils/build/index.js:965:18)
+[0-0]     at async Browser.wrapCommandFn (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/utils/build/index.js:976:7)
+[0-0] 2026-08-01T14:57:47.677Z WARN tauri-service:window: Failed to get window states: Error: Tauri core.invoke not available after 5s timeout
+[0-0]     at DirectEvalClient.eval (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:2756:19)
+[0-0]     at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+[0-0]     at async execute (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:3163:17)
+[0-0]     at async Object.execute (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:4140:32)
+[0-0]     at async getWindowStates (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:2916:24)
+[0-0]     at async ensureActiveWindowFocus (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:2970:24)
+[0-0]     at async TauriWorkerService.beforeCommand (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:3905:13)
+[0-0]     at async Promise.all (index 0)
+[0-0]     at async Browser.executeHooksWithArgs (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/utils/build/index.js:965:18)
+[0-0]     at async Browser.wrapCommandFn (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/utils/build/index.js:976:7)
+[0-0] 2026-08-01T14:57:47.770Z WARN tauri-service:service: Failed to clear mock store: Error: A sessionId is required for this command
+[0-0]     at FetchRequest.createOptions (file:///Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/webdriver/build/node.js:2162:15)
+[0-0]     at FetchRequest.createOptions (file:///Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/webdriver/build/node.js:2325:49)
+[0-0]     at FetchRequest.makeRequest (file:///Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/webdriver/build/node.js:2137:48)
+[0-0]     at Browser.protocolCommand (file:///Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/webdriver/build/node.js:1695:20)
+[0-0]     at Browser.wrapCommandFn (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/utils/build/index.js:982:32)
+[0-0]     at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+[0-0]     at async Browser.wrapCommandFn (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/utils/build/index.js:982:23)
+[0-0]     at async Object.restoreAllMocks (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:3680:5)
+[0-0]     at async TauriWorkerService.afterSession (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:3941:17)
+[0-0]     at async Promise.all (index 0)
+[0-1] 2026-08-01T14:57:49.135Z WARN tauri-service:service: Failed to clear mock store: Error: A sessionId is required for this command
+[0-1]     at FetchRequest.createOptions (file:///Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/webdriver/build/node.js:2162:15)
+[0-1]     at FetchRequest.createOptions (file:///Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/webdriver/build/node.js:2325:49)
+[0-1]     at FetchRequest.makeRequest (file:///Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/webdriver/build/node.js:2137:48)
+[0-1]     at Browser.protocolCommand (file:///Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/webdriver/build/node.js:1695:20)
+[0-1]     at Browser.wrapCommandFn (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/utils/build/index.js:982:32)
+[0-1]     at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+[0-1]     at async Browser.wrapCommandFn (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/utils/build/index.js:982:23)
+[0-1]     at async Object.restoreAllMocks (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:3680:5)
+[0-1]     at async TauriWorkerService.afterSession (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:3941:17)
+[0-1]     at async Promise.all (index 0)
+        Info Looking up installed tauri packages to check mismatched versions...
+   Compiling agent-config-manager v0.1.0 (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/src-tauri)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 9.14s
+       Built application at: /Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/src-tauri/target/debug/export-wire
+[0-0] 2026-08-01T14:58:28.497Z WARN tauri-service:window: Failed to get window states: Error: Tauri core.invoke not available after 5s timeout
+[0-0]     at DirectEvalClient.eval (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:2756:19)
+[0-0]     at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+[0-0]     at async execute (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:3163:17)
+[0-0]     at async Object.execute (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:4140:32)
+[0-0]     at async getWindowStates (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:2916:24)
+[0-0]     at async ensureActiveWindowFocus (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:2970:24)
+[0-0]     at async TauriWorkerService.beforeCommand (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:3905:13)
+[0-0]     at async Promise.all (index 0)
+[0-0]     at async Browser.executeHooksWithArgs (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/utils/build/index.js:965:18)
+[0-0]     at async Browser.wrapCommandFn (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/utils/build/index.js:976:7)
+[0-0] 2026-08-01T14:58:34.495Z WARN tauri-service:window: Failed to get window states: Error: Tauri core.invoke not available after 5s timeout
+[0-0]     at DirectEvalClient.eval (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:2756:19)
+[0-0]     at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+[0-0]     at async execute (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:3163:17)
+[0-0]     at async Object.execute (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:4140:32)
+[0-0]     at async getWindowStates (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:2916:24)
+[0-0]     at async ensureActiveWindowFocus (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:2970:24)
+[0-0]     at async TauriWorkerService.beforeCommand (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:3905:13)
+[0-0]     at async Promise.all (index 0)
+[0-0]     at async Browser.executeHooksWithArgs (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/utils/build/index.js:965:18)
+[0-0]     at async Browser.wrapCommandFn (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/utils/build/index.js:976:7)
+[0-0] 2026-08-01T14:58:40.495Z WARN tauri-service:window: Failed to get window states: Error: Tauri core.invoke not available after 5s timeout
+[0-0]     at DirectEvalClient.eval (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:2756:19)
+[0-0]     at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+[0-0]     at async execute (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:3163:17)
+[0-0]     at async Object.execute (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:4140:32)
+[0-0]     at async getWindowStates (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:2916:24)
+[0-0]     at async ensureActiveWindowFocus (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:2970:24)
+[0-0]     at async TauriWorkerService.beforeCommand (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:3905:13)
+[0-0]     at async Promise.all (index 0)
+[0-0]     at async Browser.executeHooksWithArgs (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/utils/build/index.js:965:18)
+[0-0]     at async Browser.wrapCommandFn (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/utils/build/index.js:976:7)
+[0-0] 2026-08-01T14:58:46.495Z WARN tauri-service:window: Failed to get window states: Error: Tauri core.invoke not available after 5s timeout
+[0-0]     at DirectEvalClient.eval (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:2756:19)
+[0-0]     at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+[0-0]     at async execute (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:3163:17)
+[0-0]     at async Object.execute (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:4140:32)
+[0-0]     at async getWindowStates (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:2916:24)
+[0-0]     at async ensureActiveWindowFocus (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:2970:24)
+[0-0]     at async TauriWorkerService.beforeCommand (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:3905:13)
+[0-0]     at async Promise.all (index 0)
+[0-0]     at async Browser.executeHooksWithArgs (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/utils/build/index.js:965:18)
+[0-0]     at async Browser.wrapCommandFn (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/utils/build/index.js:976:7)
+[0-0] 2026-08-01T14:58:46.574Z WARN tauri-service:service: Failed to clear mock store: Error: A sessionId is required for this command
+[0-0]     at FetchRequest.createOptions (file:///Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/webdriver/build/node.js:2162:15)
+[0-0]     at FetchRequest.createOptions (file:///Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/webdriver/build/node.js:2325:49)
+[0-0]     at FetchRequest.makeRequest (file:///Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/webdriver/build/node.js:2137:48)
+[0-0]     at Browser.protocolCommand (file:///Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/webdriver/build/node.js:1695:20)
+[0-0]     at Browser.wrapCommandFn (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/utils/build/index.js:982:32)
+[0-0]     at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+[0-0]     at async Browser.wrapCommandFn (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/utils/build/index.js:982:23)
+[0-0]     at async Object.restoreAllMocks (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:3680:5)
+[0-0]     at async TauriWorkerService.afterSession (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:3941:17)
+[0-0]     at async Promise.all (index 0)
+[0-0] 2026-08-01T14:58:56.143Z WARN tauri-service:window: Failed to get window states: Error: Tauri core.invoke not available after 5s timeout
+[0-0]     at DirectEvalClient.eval (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:2756:19)
+[0-0]     at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+[0-0]     at async execute (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:3163:17)
+[0-0]     at async Object.execute (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:4140:32)
+[0-0]     at async getWindowStates (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:2916:24)
+[0-0]     at async ensureActiveWindowFocus (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:2970:24)
+[0-0]     at async TauriWorkerService.beforeCommand (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:3905:13)
+[0-0]     at async Promise.all (index 0)
+[0-0]     at async Browser.executeHooksWithArgs (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/utils/build/index.js:965:18)
+[0-0]     at async Browser.wrapCommandFn (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/utils/build/index.js:976:7)
+[0-0] 2026-08-01T14:59:02.142Z WARN tauri-service:window: Failed to get window states: Error: Tauri core.invoke not available after 5s timeout
+[0-0]     at DirectEvalClient.eval (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:2756:19)
+[0-0]     at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+[0-0]     at async execute (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:3163:17)
+[0-0]     at async Object.execute (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:4140:32)
+[0-0]     at async getWindowStates (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:2916:24)
+[0-0]     at async ensureActiveWindowFocus (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:2970:24)
+[0-0]     at async TauriWorkerService.beforeCommand (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:3905:13)
+[0-0]     at async Promise.all (index 0)
+[0-0]     at async Browser.executeHooksWithArgs (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/utils/build/index.js:965:18)
+[0-0]     at async Browser.wrapCommandFn (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/utils/build/index.js:976:7)
+[0-0] 2026-08-01T14:59:08.142Z WARN tauri-service:window: Failed to get window states: Error: Tauri core.invoke not available after 5s timeout
+[0-0]     at DirectEvalClient.eval (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:2756:19)
+[0-0]     at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+[0-0]     at async execute (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:3163:17)
+[0-0]     at async Object.execute (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:4140:32)
+[0-0]     at async getWindowStates (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:2916:24)
+[0-0]     at async ensureActiveWindowFocus (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:2970:24)
+[0-0]     at async TauriWorkerService.beforeCommand (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:3905:13)
+[0-0]     at async Promise.all (index 0)
+[0-0]     at async Browser.executeHooksWithArgs (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/utils/build/index.js:965:18)
+[0-0]     at async Browser.wrapCommandFn (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/utils/build/index.js:976:7)
+[0-0] 2026-08-01T14:59:14.143Z WARN tauri-service:window: Failed to get window states: Error: Tauri core.invoke not available after 5s timeout
+[0-0]     at DirectEvalClient.eval (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:2756:19)
+[0-0]     at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+[0-0]     at async execute (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:3163:17)
+[0-0]     at async Object.execute (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:4140:32)
+[0-0]     at async getWindowStates (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:2916:24)
+[0-0]     at async ensureActiveWindowFocus (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:2970:24)
+[0-0]     at async TauriWorkerService.beforeCommand (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:3905:13)
+[0-0]     at async Promise.all (index 0)
+[0-0]     at async Browser.executeHooksWithArgs (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/utils/build/index.js:965:18)
+[0-0]     at async Browser.wrapCommandFn (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/utils/build/index.js:976:7)
+[0-0] 2026-08-01T14:59:14.220Z WARN tauri-service:service: Failed to clear mock store: Error: A sessionId is required for this command
+[0-0]     at FetchRequest.createOptions (file:///Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/webdriver/build/node.js:2162:15)
+[0-0]     at FetchRequest.createOptions (file:///Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/webdriver/build/node.js:2325:49)
+[0-0]     at FetchRequest.makeRequest (file:///Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/webdriver/build/node.js:2137:48)
+[0-0]     at Browser.protocolCommand (file:///Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/webdriver/build/node.js:1695:20)
+[0-0]     at Browser.wrapCommandFn (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/utils/build/index.js:982:32)
+[0-0]     at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+[0-0]     at async Browser.wrapCommandFn (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/utils/build/index.js:982:23)
+[0-0]     at async Object.restoreAllMocks (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:3680:5)
+[0-0]     at async TauriWorkerService.afterSession (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:3941:17)
+[0-0]     at async Promise.all (index 0)
+[0-0] 2026-08-01T14:59:23.904Z WARN tauri-service:window: Failed to get window states: Error: Tauri core.invoke not available after 5s timeout
+[0-0]     at DirectEvalClient.eval (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:2756:19)
+[0-0]     at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+[0-0]     at async execute (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:3163:17)
+[0-0]     at async Object.execute (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:4140:32)
+[0-0]     at async getWindowStates (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:2916:24)
+[0-0]     at async ensureActiveWindowFocus (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:2970:24)
+[0-0]     at async TauriWorkerService.beforeCommand (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:3905:13)
+[0-0]     at async Promise.all (index 0)
+[0-0]     at async Browser.executeHooksWithArgs (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/utils/build/index.js:965:18)
+[0-0]     at async Browser.wrapCommandFn (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/utils/build/index.js:976:7)
+[0-0] 2026-08-01T14:59:29.904Z WARN tauri-service:window: Failed to get window states: Error: Tauri core.invoke not available after 5s timeout
+[0-0]     at DirectEvalClient.eval (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:2756:19)
+[0-0]     at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+[0-0]     at async execute (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:3163:17)
+[0-0]     at async Object.execute (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:4140:32)
+[0-0]     at async getWindowStates (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:2916:24)
+[0-0]     at async ensureActiveWindowFocus (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:2970:24)
+[0-0]     at async TauriWorkerService.beforeCommand (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:3905:13)
+[0-0]     at async Promise.all (index 0)
+[0-0]     at async Browser.executeHooksWithArgs (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/utils/build/index.js:965:18)
+[0-0]     at async Browser.wrapCommandFn (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/utils/build/index.js:976:7)
+[0-0] 2026-08-01T14:59:35.904Z WARN tauri-service:window: Failed to get window states: Error: Tauri core.invoke not available after 5s timeout
+[0-0]     at DirectEvalClient.eval (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:2756:19)
+[0-0]     at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+[0-0]     at async execute (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:3163:17)
+[0-0]     at async Object.execute (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:4140:32)
+[0-0]     at async getWindowStates (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:2916:24)
+[0-0]     at async ensureActiveWindowFocus (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:2970:24)
+[0-0]     at async TauriWorkerService.beforeCommand (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:3905:13)
+[0-0]     at async Promise.all (index 0)
+[0-0]     at async Browser.executeHooksWithArgs (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/utils/build/index.js:965:18)
+[0-0]     at async Browser.wrapCommandFn (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/utils/build/index.js:976:7)
+[0-0] 2026-08-01T14:59:41.905Z WARN tauri-service:window: Failed to get window states: Error: Tauri core.invoke not available after 5s timeout
+[0-0]     at DirectEvalClient.eval (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:2756:19)
+[0-0]     at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+[0-0]     at async execute (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:3163:17)
+[0-0]     at async Object.execute (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:4140:32)
+[0-0]     at async getWindowStates (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:2916:24)
+[0-0]     at async ensureActiveWindowFocus (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:2970:24)
+[0-0]     at async TauriWorkerService.beforeCommand (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:3905:13)
+[0-0]     at async Promise.all (index 0)
+[0-0]     at async Browser.executeHooksWithArgs (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/utils/build/index.js:965:18)
+[0-0]     at async Browser.wrapCommandFn (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/utils/build/index.js:976:7)
+[0-0] 2026-08-01T14:59:41.988Z WARN tauri-service:service: Failed to clear mock store: Error: A sessionId is required for this command
+[0-0]     at FetchRequest.createOptions (file:///Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/webdriver/build/node.js:2162:15)
+[0-0]     at FetchRequest.createOptions (file:///Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/webdriver/build/node.js:2325:49)
+[0-0]     at FetchRequest.makeRequest (file:///Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/webdriver/build/node.js:2137:48)
+[0-0]     at Browser.protocolCommand (file:///Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/webdriver/build/node.js:1695:20)
+[0-0]     at Browser.wrapCommandFn (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/utils/build/index.js:982:32)
+[0-0]     at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+[0-0]     at async Browser.wrapCommandFn (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/utils/build/index.js:982:23)
+[0-0]     at async Object.restoreAllMocks (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:3680:5)
+[0-0]     at async TauriWorkerService.afterSession (/Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/node_modules/@wdio/tauri-service/dist/esm/index.js:3941:17)
+[0-0]     at async Promise.all (index 0)
