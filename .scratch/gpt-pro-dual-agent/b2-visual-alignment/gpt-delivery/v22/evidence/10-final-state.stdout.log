@@ -1,0 +1,31 @@
+captured_at=2026-08-01T15:00:16Z
+head=6c6a6bf85dd84e3dfec2201478d9fff5d2f5be5d
+tracked_diff_sha256=a1cff641e5ba63f53028be731f0d27bc5984f398a538d58113cbf43274f2ba40
+-- git status --short --
+ M design-qa.md
+ M package-lock.json
+ M package.json
+ M src/prototypes/full-ui-mock/FullUiMock.tsx
+ M src/prototypes/full-ui-mock/README.md
+ M src/prototypes/full-ui-mock/UI_CHANGE_IMPACT.md
+ M src/prototypes/full-ui-mock/mock.css
+ M src/prototypes/full-ui-mock/state.ts
+ M src/prototypes/full-ui-mock/types.ts
+?? .scratch/gpt-pro-dual-agent/
+?? src/prototypes/full-ui-mock/b2-data.ts
+?? src/prototypes/full-ui-mock/b2-model.ts
+?? src/prototypes/full-ui-mock/b2.css
+?? tests/l1/full-ui-mock-b2-list.test.ts
+?? tests/l1/full-ui-mock-context.test.ts
+?? tests/l2/full-ui-mock-b2-pagination.html
+?? tests/l2/full-ui-mock-b2-pagination.tsx
+?? tests/l2/full-ui-mock-b2.journey.test.ts
+-- final non-evidence untracked --
+src/prototypes/full-ui-mock/b2-data.ts
+src/prototypes/full-ui-mock/b2-model.ts
+src/prototypes/full-ui-mock/b2.css
+tests/l1/full-ui-mock-b2-list.test.ts
+tests/l1/full-ui-mock-context.test.ts
+tests/l2/full-ui-mock-b2-pagination.html
+tests/l2/full-ui-mock-b2-pagination.tsx
+tests/l2/full-ui-mock-b2.journey.test.ts

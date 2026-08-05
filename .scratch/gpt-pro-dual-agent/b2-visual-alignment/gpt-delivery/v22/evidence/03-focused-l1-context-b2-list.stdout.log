@@ -1,0 +1,15 @@
+
+> agent-config-manager@0.1.0 test:frontend
+> vitest run tests/l1/full-ui-mock-context.test.ts tests/l1/full-ui-mock-b2-list.test.ts
+
+
+ RUN  v2.1.9 /Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22
+
+ ✓ tests/l1/full-ui-mock-b2-list.test.ts (10 tests) 9ms
+ ✓ tests/l1/full-ui-mock-context.test.ts (52 tests) 48ms
+
+ Test Files  2 passed (2)
+      Tests  62 passed (62)
+   Start at  22:48:48
+   Duration  826ms (transform 284ms, setup 0ms, collect 545ms, tests 57ms, environment 0ms, prepare 217ms)
+

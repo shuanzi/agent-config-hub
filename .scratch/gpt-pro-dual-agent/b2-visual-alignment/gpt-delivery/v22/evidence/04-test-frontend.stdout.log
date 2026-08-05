@@ -1,0 +1,20 @@
+
+> agent-config-manager@0.1.0 test:frontend
+> vitest run
+
+
+ RUN  v2.1.9 /Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22
+
+ ✓ tests/l1/sensitive-masking.test.ts (11 tests) 4ms
+ ✓ tests/l1/full-ui-mock-b2-list.test.ts (10 tests) 5ms
+ ✓ tests/l1/mock-gateway.test.ts (11 tests) 13ms
+ ✓ tests/contract/frontend-gateway-contract.test.ts (2 tests) 5ms
+ ✓ tests/l1/tauri-gateway.test.ts (4 tests) 47ms
+ ✓ tests/l1/workspace-session.test.ts (18 tests) 159ms
+ ✓ tests/l1/full-ui-mock-context.test.ts (52 tests) 59ms
+
+ Test Files  7 passed (7)
+      Tests  108 passed (108)
+   Start at  22:48:56
+   Duration  992ms (transform 714ms, setup 0ms, collect 1.39s, tests 291ms, environment 1ms, prepare 682ms)
+

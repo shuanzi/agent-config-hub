@@ -1,0 +1,32 @@
+design-qa.md|4189
+6ad08e1c8553f9c66b32a126782da9f8e2a83739b728ccf85b0ec0d6ea7a68df  design-qa.md
+package-lock.json|517311
+ae79b38d37d743d8911ae034609df9721aa8da693062640d851ba7a1e755961a  package-lock.json
+package.json|2013
+18a357734e7b75d40e02b9e856b790db21337fb04a0e56c8a62773fd891ea24b  package.json
+src/prototypes/full-ui-mock/FullUiMock.tsx|191531
+aa34f742b17e86446bbe9f7ee78dacf11204fecc372c6e0ab1ad51281e0c204a  src/prototypes/full-ui-mock/FullUiMock.tsx
+src/prototypes/full-ui-mock/README.md|3390
+32598ac694ba839053a904f591ccf540ef10b182696b0f3bd8c7b197ef35bf95  src/prototypes/full-ui-mock/README.md
+src/prototypes/full-ui-mock/UI_CHANGE_IMPACT.md|8699
+66afecd9769fb21ea886664780187fd2422b41d5ade7999db3682acb96b9931c  src/prototypes/full-ui-mock/UI_CHANGE_IMPACT.md
+src/prototypes/full-ui-mock/mock.css|83705
+d3e9c30729248043b708a3abc720c108bd40c60c3f93ccccdc3a8af8e0d23179  src/prototypes/full-ui-mock/mock.css
+src/prototypes/full-ui-mock/state.ts|9910
+e229f2521b4c611e7bfa368f125a1040442882f677271ab19a38804bdfeb0a6c  src/prototypes/full-ui-mock/state.ts
+src/prototypes/full-ui-mock/types.ts|4279
+49c4655eacd9e831af98827135f16ac2af5149807d00a69d4823642fe9e000a2  src/prototypes/full-ui-mock/types.ts
+src/prototypes/full-ui-mock/b2-data.ts|14499
+605150f256644675dcae83b153457129c0b49c89c72ac0329c7f8bd4f4271938  src/prototypes/full-ui-mock/b2-data.ts
+src/prototypes/full-ui-mock/b2-model.ts|3681
+9b4ed64900edd3080f32cd3ebaa05972a58fc07217a6f904e6e8fbfcb0babbdf  src/prototypes/full-ui-mock/b2-model.ts
+src/prototypes/full-ui-mock/b2.css|45528
+876fb0094139b14aa814ac41c077eb10c003e1565a00563fc975559264ebdd9b  src/prototypes/full-ui-mock/b2.css
+tests/l1/full-ui-mock-b2-list.test.ts|5615
+4fcffe45114262b8f3df3a9b4bc87f71c2cd4d4ce712371bfef59a2fd874b871  tests/l1/full-ui-mock-b2-list.test.ts
+tests/l1/full-ui-mock-context.test.ts|60581
+c81a61002c46266616469ec89cd39f6868819a135e59de548b098939aa683ab4  tests/l1/full-ui-mock-context.test.ts
+tests/l2/full-ui-mock-b2-pagination.html|339
+a4cf69cd9525966a1982c8facc67146492a8812ddeca3f92ead56657aa5aa897  tests/l2/full-ui-mock-b2-pagination.html
+tests/l2/full-ui-mock-b2-pagination.tsx|734
+43c3a23157c9452872cc28d972d7a0fa62a1f8ff1861e3498ace85698f46d991  tests/l2/full-ui-mock-b2-pagination.tsx

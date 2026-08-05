@@ -1,0 +1,504 @@
+
+> agent-config-manager@0.1.0 verify:ticket
+> node scripts/orchestrator/verify-ticket.mjs FE-01
+
+verify:ticket FE-01 run 20260801T145132Z
+evidence: <HOME>/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/.artifacts/verification/FE-01/20260801T145132Z
+
+=== [L0] toolchain: node scripts/orchestrator/verify-toolchain.mjs
+PASS  node==24.18.0  actual v24.18.0
+PASS  npm==11.16.0  actual 11.16.0
+PASS  rustc==1.97.1  actual rustc 1.97.1 (8bab26f4f 2026-07-14)
+PASS  rust-target aarch64-apple-darwin  aarch64-apple-darwin
+PASS  macOS>=15  actual 26.6
+PASS  arch==arm64  actual arm64
+PASS  xcode CLT  /Applications/Xcode.app/Contents/Developer
+PASS  package-lock.json 与 package.json 一致  lockfileVersion 3
+PASS  Cargo.lock 与 Cargo.toml 一致  8 个直接依赖均有满足 req 的锁定版本
+PASS  Chrome 存在（L2 前置）  /Applications/Google Chrome.app/Contents/MacOS/Google Chrome
+verify:toolchain OK（10 项）
+PASS  [L0] toolchain  exit 0 (440ms)
+
+=== [L0] static: node scripts/orchestrator/verify-static.mjs
+wrote /var/folders/5j/2r880lbs0lbdvd2qsgtqy4yr0000gn/T/acm-wire-export-fn9sKW/gateway-wire.ts
+PASS  wire 漂移门禁（export-wire 逐字节比对）  sha256 204de0aa3db3b5d9… 一致
+
+=== tsc -b: corepack npm exec -- tsc -b
+PASS  tsc -b  exit 0 (3352ms)
+
+=== eslint .: corepack npm exec -- eslint .
+PASS  eslint .  exit 0 (1850ms)
+
+=== prettier --check .: corepack npm exec -- prettier --check .
+Checking formatting...
+All matched files use Prettier code style!
+PASS  prettier --check .  exit 0 (1744ms)
+
+=== cargo fmt --check: cargo fmt --check
+PASS  cargo fmt --check  exit 0 (104ms)
+
+=== cargo clippy（默认 feature）: cargo clippy --all-targets -- -D warnings
+PASS  cargo clippy（默认 feature）  exit 0 (2573ms)
+
+=== cargo clippy（test-harness）: cargo clippy --all-targets --features test-harness -- -D warnings
+PASS  cargo clippy（test-harness）  exit 0 (2221ms)
+PASS  禁止依赖守卫
+PASS  敏感占位值守卫（FX-01 占位明文不出现在 fixture 之外）  已扫描 76 个源文件
+
+verify:static OK（9 项）
+PASS  [L0] static  exit 0 (17997ms)
+
+=== [L1] rust: node scripts/orchestrator/test-rust.mjs
+
+=== cargo test（默认 feature）
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 7 tests
+test masked_output_matches_ts_masking_semantics_on_fixture ... ok
+test empty_catalog_when_native_root_unset ... ok
+test revision_stable_across_consecutive_reads ... ok
+test list_filters_by_projects_and_sources ... ok
+test reads_fixture_facts_consistent_with_fixture_json ... ok
+test secret_shaped_dir_name_is_masked_at_every_exit ... ok
+test revision_changes_after_file_change ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 5 tests
+test read_asset_list_succeeds ... ok
+test read_asset_detail_succeeds ... ok
+test unknown_asset_id_fails_with_stable_reason ... ok
+test read_native_file_succeeds_and_is_masked ... ok
+test unknown_file_id_fails_with_stable_reason ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 1 test
+wrote /var/folders/5j/2r880lbs0lbdvd2qsgtqy4yr0000gn/T/.tmpJs8caG/gateway-wire.ts
+wrote /var/folders/5j/2r880lbs0lbdvd2qsgtqy4yr0000gn/T/.tmphD1gIQ/gateway-wire.ts
+test export_wire_is_byte_deterministic ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.53s
+
+
+running 4 tests
+test placeholder_at_line_end_and_adjacent_punctuation ... ok
+test leaves_non_placeholder_text_untouched ... ok
+test masks_multiple_occurrences_and_all_suffix_shapes ... ok
+test masks_placeholder_values ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 8 tests
+test allowed_availability_has_no_extra_fields ... ok
+test event_envelope_serializes_to_golden_json ... ok
+test valid_request_vectors_decode ... ok
+test negative_vectors_are_rejected_at_decode ... ok
+test masked_native_file_response_matches_fixture_golden ... ok
+test oversized_search_text_over_limit_is_rejected_but_normal_request_passes ... ok
+test response_envelope_serializes_to_golden_json ... ok
+test wire_faults_normalize_to_gateway_unavailable ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+PASS  cargo test（默认 feature）  exit 0 (39558ms)
+
+=== cargo test（test-harness）
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 7 tests
+test empty_catalog_when_native_root_unset ... ok
+test masked_output_matches_ts_masking_semantics_on_fixture ... ok
+test revision_stable_across_consecutive_reads ... ok
+test reads_fixture_facts_consistent_with_fixture_json ... ok
+test list_filters_by_projects_and_sources ... ok
+test secret_shaped_dir_name_is_masked_at_every_exit ... ok
+test revision_changes_after_file_change ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 5 tests
+test unknown_asset_id_fails_with_stable_reason ... ok
+test read_asset_list_succeeds ... ok
+test unknown_file_id_fails_with_stable_reason ... ok
+test read_asset_detail_succeeds ... ok
+test read_native_file_succeeds_and_is_masked ... ok
+
+test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 1 test
+wrote /var/folders/5j/2r880lbs0lbdvd2qsgtqy4yr0000gn/T/.tmpb4G7iW/gateway-wire.ts
+wrote /var/folders/5j/2r880lbs0lbdvd2qsgtqy4yr0000gn/T/.tmpzKwPcm/gateway-wire.ts
+test export_wire_is_byte_deterministic ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.58s
+
+
+running 4 tests
+test leaves_non_placeholder_text_untouched ... ok
+test placeholder_at_line_end_and_adjacent_punctuation ... ok
+test masks_multiple_occurrences_and_all_suffix_shapes ... ok
+test masks_placeholder_values ... ok
+
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 8 tests
+test allowed_availability_has_no_extra_fields ... ok
+test event_envelope_serializes_to_golden_json ... ok
+test valid_request_vectors_decode ... ok
+test negative_vectors_are_rejected_at_decode ... ok
+test masked_native_file_response_matches_fixture_golden ... ok
+test oversized_search_text_over_limit_is_rejected_but_normal_request_passes ... ok
+test response_envelope_serializes_to_golden_json ... ok
+test wire_faults_normalize_to_gateway_unavailable ... ok
+
+test result: ok. 8 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+PASS  cargo test（test-harness）  exit 0 (108578ms)
+PASS  [L1] rust  exit 0 (148197ms)
+
+=== [L1] frontend: corepack npm run test:frontend
+
+> agent-config-manager@0.1.0 test:frontend
+> vitest run
+
+
+ RUN  v2.1.9 /Users/xiquandai/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22
+
+ ✓ tests/l1/sensitive-masking.test.ts (11 tests) 3ms
+ ✓ tests/l1/full-ui-mock-b2-list.test.ts (10 tests) 9ms
+ ✓ tests/l1/mock-gateway.test.ts (11 tests) 16ms
+ ✓ tests/contract/frontend-gateway-contract.test.ts (2 tests) 13ms
+ ✓ tests/l1/tauri-gateway.test.ts (4 tests) 75ms
+ ✓ tests/l1/workspace-session.test.ts (18 tests) 187ms
+ ✓ tests/l1/full-ui-mock-context.test.ts (52 tests) 117ms
+
+ Test Files  7 passed (7)
+      Tests  108 passed (108)
+   Start at  22:54:20
+   Duration  1.25s (transform 859ms, setup 0ms, collect 1.70s, tests 421ms, environment 1ms, prepare 797ms)
+
+PASS  [L1] frontend  exit 0 (1978ms)
+
+=== [L2] ui: corepack npm run test:ui
+
+> agent-config-manager@0.1.0 test:ui
+> wdio run tests/l2/wdio.conf.ts
+
+
+Execution of 2 workers started at 2026-08-01T14:54:22.971Z
+
+[0-0] RUNNING in chrome - file:///tests/l2/full-ui-mock-b2.journey.test.ts
+[0-0] PASSED in chrome - file:///tests/l2/full-ui-mock-b2.journey.test.ts
+[0-1] RUNNING in chrome - file:///tests/l2/fx-01.journey.test.ts
+[0-1] PASSED in chrome - file:///tests/l2/fx-01.journey.test.ts
+
+ "spec" Reporter:
+------------------------------------------------------------------
+[chrome 150.0.7871.187 mac #0-0] Running: chrome (v150.0.7871.187) on mac
+[chrome 150.0.7871.187 mac #0-0] Session ID: 920b44a18b03611c57b0038b68f7912f
+[chrome 150.0.7871.187 mac #0-0]
+[chrome 150.0.7871.187 mac #0-0] » tests/l2/full-ui-mock-b2.journey.test.ts
+[chrome 150.0.7871.187 mac #0-0] selected B2 narrow detail source journey
+[chrome 150.0.7871.187 mac #0-0]    ✓ keeps the Edit CTA above the detail content and focuses the source textarea
+[chrome 150.0.7871.187 mac #0-0]    ✓ opens readonly source but blocks every selected write path
+[chrome 150.0.7871.187 mac #0-0]    ✓ blocks readonly and incompatible Management entry, direct URL, and controller routes
+[chrome 150.0.7871.187 mac #0-0]
+[chrome 150.0.7871.187 mac #0-0] selected B2 single target identity journeys
+[chrome 150.0.7871.187 mac #0-0]    ✓ keeps one project Convert target through setup, mapping, review, confirm, and outcome
+[chrome 150.0.7871.187 mac #0-0]    ✓ keeps one global install target and exposes an explicit project choice from global context
+[chrome 150.0.7871.187 mac #0-0]
+[chrome 150.0.7871.187 mac #0-0] selected B2 state isolation and destination truthfulness
+[chrome 150.0.7871.187 mac #0-0]    ✓ resets shared filters across selected and every legacy visual system boundary
+[chrome 150.0.7871.187 mac #0-0]    ✓ resets selected filters when Alt+Arrow crosses into legacy
+[chrome 150.0.7871.187 mac #0-0]    ✓ persists successful dirty and stale edit snapshots in the current Mock session
+[chrome 150.0.7871.187 mac #0-0]    ✓ commits global-search choices to browse detail from dirty edit and secondary flows
+[chrome 150.0.7871.187 mac #0-0]
+[chrome 150.0.7871.187 mac #0-0] selected B2 asset-type rail navigation
+[chrome 150.0.7871.187 mac #0-0]    ✓ keeps a dirty editor until discard and then commits the target browse list
+[chrome 150.0.7871.187 mac #0-0]
+[chrome 150.0.7871.187 mac #0-0] selected B2 Create native target journey
+[chrome 150.0.7871.187 mac #0-0]    ✓ persists global name-based and project fixed instruction targets through the real form
+[chrome 150.0.7871.187 mac #0-0]
+[chrome 150.0.7871.187 mac #0-0] selected B2 incompatible status and list accessibility
+[chrome 150.0.7871.187 mac #0-0]    ✓ shows one visible block reason and keeps every interactive list control as a button
+[chrome 150.0.7871.187 mac #0-0]
+[chrome 150.0.7871.187 mac #0-0] selected B2 create and edit dirty semantics
+[chrome 150.0.7871.187 mac #0-0]    ✓ keeps a restored create template reviewable while a restored edit draft becomes clean
+[chrome 150.0.7871.187 mac #0-0]
+[chrome 150.0.7871.187 mac #0-0] selected B2 rendered pagination focus
+[chrome 150.0.7871.187 mac #0-0]    ✓ scrolls page two to the top and focuses its first row with a 21-item fixture
+[chrome 150.0.7871.187 mac #0-0]
+[chrome 150.0.7871.187 mac #0-0] selected B2 responsive Agent target geometry
+[chrome 150.0.7871.187 mac #0-0]    ✓ keeps chips and target rows uncut across the compact/wide boundary
+[chrome 150.0.7871.187 mac #0-0]
+[chrome 150.0.7871.187 mac #0-0] selected B2 browser QA correction contracts
+[chrome 150.0.7871.187 mac #0-0]    ✓ keeps flow footer primary visible and critical reachable text at 12px or above
+[chrome 150.0.7871.187 mac #0-0]    ✓ keeps 1280 three-column and sends 840 and 760 through the existing narrow steps
+[chrome 150.0.7871.187 mac #0-0]    ✓ restores filter focus on Escape and keeps one nonvisual accessible list heading
+[chrome 150.0.7871.187 mac #0-0]
+[chrome 150.0.7871.187 mac #0-0] legacy A/B/C keyboard and dirty-guard behavior
+[chrome 150.0.7871.187 mac #0-0]    ✓ preserves A search, Escape, focus restoration, and Continue Editing
+[chrome 150.0.7871.187 mac #0-0]    ✓ preserves B search, Escape, focus restoration, and Continue Editing
+[chrome 150.0.7871.187 mac #0-0]    ✓ preserves C search, Escape, focus restoration, and Continue Editing
+[chrome 150.0.7871.187 mac #0-0]
+[chrome 150.0.7871.187 mac #0-0] 21 passing (52.4s)
+------------------------------------------------------------------
+[chrome 150.0.7871.187 mac #0-1] Running: chrome (v150.0.7871.187) on mac
+[chrome 150.0.7871.187 mac #0-1] Session ID: 5bf92c56cd5fc95e5cea539f90ce2c2c
+[chrome 150.0.7871.187 mac #0-1]
+[chrome 150.0.7871.187 mac #0-1] » tests/l2/fx-01.journey.test.ts
+[chrome 150.0.7871.187 mac #0-1] FX-01 只读工作台旅程
+[chrome 150.0.7871.187 mac #0-1]    ✓ a. 默认进入 Skills，列表出现 Demo Skill 两行结构
+[chrome 150.0.7871.187 mac #0-1]    ✓ b. 选中后详情原位显示磁盘源码；遮蔽标记可见；页面无明文占位值
+[chrome 150.0.7871.187 mac #0-1]    ✓ c. 搜索不匹配 → empty 态解释可见；清空恢复
+[chrome 150.0.7871.187 mac #0-1]    ✓ d. 范围切换全部资产仍可见；筛选 Agent=codex → empty
+[chrome 150.0.7871.187 mac #0-1]    ✓ g. 全程 gateway 调用序列只含 read（observe 仅会话建立一次）
+[chrome 150.0.7871.187 mac #0-1]    ✓ e. scenario=stale-index：stale 提示与最近更新时间可见，数据仍展示
+[chrome 150.0.7871.187 mac #0-1]    ✓ f. scenario=fail-list：failed 态可见含重试；点击重试恢复 ready
+[chrome 150.0.7871.187 mac #0-1]    ✓ h. 分组与来源筛选：按作用域分组出现标题，来源筛选选唯一值列表不变
+[chrome 150.0.7871.187 mac #0-1]
+[chrome 150.0.7871.187 mac #0-1] 8 passing (2.8s)
+
+
+Spec Files:	 2 passed, 2 total (100% completed) in 00:01:02  
+
+PASS  [L2] ui  exit 0 (64751ms)
+
+=== [L3] tauri: node scripts/orchestrator/test-tauri.mjs
+
+=== L3 tsc -b
+PASS  L3 tsc -b  exit 0 (3643ms)
+
+=== L3 vite build（vite.l3.config.ts，含 contract 测试入口）
+vite v6.4.3 building for production...
+transforming...
+✓ 48 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/tests/l3/contract.html                  0.52 kB │ gzip:  0.34 kB
+dist/index.html                              0.83 kB │ gzip:  0.51 kB
+dist/assets/main-CLbQ0lID.css                4.18 kB │ gzip:  1.36 kB
+dist/assets/sensitive-masking-wjBokolY.js    0.91 kB │ gzip:  0.52 kB
+dist/assets/tauri-BLP1kL7b.js                3.45 kB │ gzip:  1.54 kB
+dist/assets/tests/l3/contract-C5XFFUQQ.js    3.70 kB │ gzip:  1.57 kB
+dist/assets/main-DMz-BM0T.js               177.23 kB │ gzip: 55.85 kB
+✓ built in 573ms
+PASS  L3 vite build（vite.l3.config.ts，含 contract 测试入口）  exit 0 (1035ms)
+
+=== L3 harness debug build
+PASS  L3 harness debug build  exit 0 (70411ms)
+
+harness 构建完成；artifact identity: com.agentconfigmanager.testharness (debug)
+
+=== L3 wdio（tests/l3：tracer + contract）
+
+Execution of 2 workers started at 2026-08-01T14:56:46.614Z
+
+[0-0] RUNNING in undefined - file:///tests/l3/fx-01.tracer.test.ts
+[0-0] PASSED in undefined - file:///tests/l3/fx-01.tracer.test.ts
+[0-1] RUNNING in undefined - file:///tests/l3/contract.test.ts
+[0-1] PASSED in undefined - file:///tests/l3/contract.test.ts
+
+ "spec" Reporter:
+------------------------------------------------------------------
+[webkit 605.1.15 macos #0-0] Running: webkit (v605.1.15) on macos
+[webkit 605.1.15 macos #0-0] Session ID: 39e87790-0b44-4bda-a4ad-06b46eb3374a
+[webkit 605.1.15 macos #0-0]
+[webkit 605.1.15 macos #0-0] » tests/l3/fx-01.tracer.test.ts
+[webkit 605.1.15 macos #0-0] FX-01 L3 真实 Tauri tracer
+[webkit 605.1.15 macos #0-0]    ✓ 启动 → 真实 read → 遮蔽 → 外部变化 event → 原位重读
+[webkit 605.1.15 macos #0-0]
+[webkit 605.1.15 macos #0-0] 1 passing (59.9s)
+------------------------------------------------------------------
+[webkit 605.1.15 macos #0-1] Running: webkit (v605.1.15) on macos
+[webkit 605.1.15 macos #0-1] Session ID: d4f49442-d9b4-45a3-883d-12a5c028609b
+[webkit 605.1.15 macos #0-1]
+[webkit 605.1.15 macos #0-1] » tests/l3/contract.test.ts
+[webkit 605.1.15 macos #0-1] L3 FrontendGateway 行为契约（真实 Tauri adapter）
+[webkit 605.1.15 macos #0-1]    ✓ 满足 FE-01 只读契约子集
+[webkit 605.1.15 macos #0-1]
+[webkit 605.1.15 macos #0-1] 1 passing (216ms)
+
+
+Spec Files:	 2 passed, 2 total (100% completed) in 00:01:02  
+
+PASS  L3 wdio（tests/l3）  exit 0 (68350ms)
+
+test:tauri OK
+PASS  [L3] tauri  exit 0 (143505ms)
+
+=== [PF] perf: node scripts/orchestrator/perf.mjs PF-01
+PF-01 descriptor digest: 9920956c73cd524f43232f6f9fe27024c7b104d4ce7ff9c91c734e9ac9cfdf2d（profile: representative）
+
+Execution of 1 workers started at 2026-08-01T14:57:51.798Z
+
+[0-0] RUNNING in chrome - file:///performance/pf-01.perf.test.ts
+[0-0] PASSED in chrome - file:///performance/pf-01.perf.test.ts
+
+ "spec" Reporter:
+------------------------------------------------------------------
+[chrome 150.0.7871.187 mac #0-0] Running: chrome (v150.0.7871.187) on mac
+[chrome 150.0.7871.187 mac #0-0] Session ID: 9f7dc0d15d36c3ad1f5442c68f232310
+[chrome 150.0.7871.187 mac #0-0]
+[chrome 150.0.7871.187 mac #0-0] » performance/pf-01.perf.test.ts
+[chrome 150.0.7871.187 mac #0-0] PF-01 catalog-browse 采样
+[chrome 150.0.7871.187 mac #0-0]    ✓ startup → 首屏列表可见（5 次 fresh load）
+[chrome 150.0.7871.187 mac #0-0]    ✓ 选择资产 → 源码可见（20 样本）
+[chrome 150.0.7871.187 mac #0-0]    ✓ 筛选 → 结果可见（20 样本）
+[chrome 150.0.7871.187 mac #0-0]    ✓ 搜索 → 结果可见（20 样本）
+[chrome 150.0.7871.187 mac #0-0]
+[chrome 150.0.7871.187 mac #0-0] 4 passing (7.6s)
+
+
+Spec Files:	 1 passed, 1 total (100% completed) in 00:00:10  
+
+
+=== 确保 L3 harness 已构建（冷启动采样前置）
+
+=== L3 tsc -b
+PASS  L3 tsc -b  exit 0 (3490ms)
+
+=== L3 vite build（vite.l3.config.ts，含 contract 测试入口）
+vite v6.4.3 building for production...
+transforming...
+✓ 48 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/tests/l3/contract.html                  0.52 kB │ gzip:  0.34 kB
+dist/index.html                              0.83 kB │ gzip:  0.51 kB
+dist/assets/main-CLbQ0lID.css                4.18 kB │ gzip:  1.36 kB
+dist/assets/sensitive-masking-wjBokolY.js    0.91 kB │ gzip:  0.52 kB
+dist/assets/tauri-BLP1kL7b.js                3.45 kB │ gzip:  1.54 kB
+dist/assets/tests/l3/contract-C5XFFUQQ.js    3.70 kB │ gzip:  1.57 kB
+dist/assets/main-DMz-BM0T.js               177.23 kB │ gzip: 55.85 kB
+✓ built in 463ms
+PASS  L3 vite build（vite.l3.config.ts，含 contract 测试入口）  exit 0 (891ms)
+
+=== L3 harness debug build
+PASS  L3 harness debug build  exit 0 (10724ms)
+
+harness 构建完成；artifact identity: com.agentconfigmanager.testharness (debug)
+
+=== L3 冷启动采样（第 1/3 次进程启动）
+
+Execution of 1 workers started at 2026-08-01T14:58:21.903Z
+
+[0-0] RUNNING in undefined - file:///performance/pf-01.coldstart.test.ts
+[0-0] PASSED in undefined - file:///performance/pf-01.coldstart.test.ts
+
+ "spec" Reporter:
+------------------------------------------------------------------
+[webkit 605.1.15 macos #0-0] Running: webkit (v605.1.15) on macos
+[webkit 605.1.15 macos #0-0] Session ID: 39af712d-6ae3-460c-b0fd-2924ee74f2c0
+[webkit 605.1.15 macos #0-0]
+[webkit 605.1.15 macos #0-0] » performance/pf-01.coldstart.test.ts
+[webkit 605.1.15 macos #0-0] PF-01 L3 冷启动采样（test-harness）
+[webkit 605.1.15 macos #0-0]    ✓ process start → first trusted snapshot
+[webkit 605.1.15 macos #0-0]
+[webkit 605.1.15 macos #0-0] 1 passing (23.8s)
+
+
+Spec Files:	 1 passed, 1 total (100% completed) in 00:00:24  
+
+
+=== L3 冷启动采样（第 2/3 次进程启动）
+
+Execution of 1 workers started at 2026-08-01T14:58:49.526Z
+
+[0-0] RUNNING in undefined - file:///performance/pf-01.coldstart.test.ts
+[0-0] PASSED in undefined - file:///performance/pf-01.coldstart.test.ts
+
+ "spec" Reporter:
+------------------------------------------------------------------
+[webkit 605.1.15 macos #0-0] Running: webkit (v605.1.15) on macos
+[webkit 605.1.15 macos #0-0] Session ID: df662090-9b91-4e1d-8677-e08ad7feeac4
+[webkit 605.1.15 macos #0-0]
+[webkit 605.1.15 macos #0-0] » performance/pf-01.coldstart.test.ts
+[webkit 605.1.15 macos #0-0] PF-01 L3 冷启动采样（test-harness）
+[webkit 605.1.15 macos #0-0]    ✓ process start → first trusted snapshot
+[webkit 605.1.15 macos #0-0]
+[webkit 605.1.15 macos #0-0] 1 passing (23.8s)
+
+
+Spec Files:	 1 passed, 1 total (100% completed) in 00:00:24  
+
+
+=== L3 冷启动采样（第 3/3 次进程启动）
+
+Execution of 1 workers started at 2026-08-01T14:59:17.062Z
+
+[0-0] RUNNING in undefined - file:///performance/pf-01.coldstart.test.ts
+[0-0] PASSED in undefined - file:///performance/pf-01.coldstart.test.ts
+
+ "spec" Reporter:
+------------------------------------------------------------------
+[webkit 605.1.15 macos #0-0] Running: webkit (v605.1.15) on macos
+[webkit 605.1.15 macos #0-0] Session ID: 1c5d9446-9dae-41e7-9200-76141532a5e5
+[webkit 605.1.15 macos #0-0]
+[webkit 605.1.15 macos #0-0] » performance/pf-01.coldstart.test.ts
+[webkit 605.1.15 macos #0-0] PF-01 L3 冷启动采样（test-harness）
+[webkit 605.1.15 macos #0-0]    ✓ process start → first trusted snapshot
+[webkit 605.1.15 macos #0-0]
+[webkit 605.1.15 macos #0-0] 1 passing (23.8s)
+
+
+Spec Files:	 1 passed, 1 total (100% completed) in 00:00:25  
+
+
+PF-01 baseline-collected / budget-not-frozen
+  pf01.startup.first_list_visible: n=5 p50=2.6ms p95=3.9ms (min 1.8 / max 4.2)
+  pf01.search.results_visible: n=20 p50=1.9ms p95=8.805ms (min 1.3 / max 12.7)
+  pf01.filter.results_visible: n=20 p50=24ms p95=41.965ms (min 18.4 / max 52.7)
+  pf01.select.source_visible: n=20 p50=64ms p95=88.86ms (min 38.7 / max 101.4)
+  pf01.l3.cold_start.first_snapshot: n=3 p50=470ms p95=542ms (min 451 / max 550)
+evidence: <HOME>/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/.artifacts/verification/FE-01/20260801T145132Z/performance
+budget-not-frozen → inconclusive（需单独授权冻结预算后才能 PASS）
+INCONCLUSIVE  [PF] perf  exit 2 (112771ms)
+
+verify:ticket FE-01: inconclusive
+manifest: <HOME>/Documents/code/.worktree/agent-config-hub-b2-gptpro-verify-v22/.artifacts/verification/FE-01/20260801T145132Z/manifest.json

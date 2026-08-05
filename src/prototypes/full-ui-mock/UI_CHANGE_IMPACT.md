@@ -1,110 +1,242 @@
-# 候选 UI 影响台账：方案 C / Skills 信息架构迭代
+# 候选 UI 影响台账：B2 三层配置工作台
 
-> **状态：全部 `pending`，直至 UI 最终验收批准。**
+> 状态：`implemented in throwaway mock; pending user UI acceptance`
 >
-> 本文只记录 throwaway Mock 中正在评审的候选 UI 调整及其潜在回写面，不是产品决策、前端契约、技术方案、wire schema 或票据的事实来源。正式产物在 UI 定稿前保持不变；不得根据本文实现、测试、调整接口或解除票据 blocker。
+> 本文只记录 throwaway Mock 中的候选 UI 调整及其潜在回写面，不是产品决策、前端契约、技术方案、wire schema 或 FE 票据的事实来源。按当前约定，先完成 UI 调整；用户最终定稿前，不反向修改任何正式产物。
 
-## 使用方式与边界
+## B2 v22 既有候选结构（本轮调整前）
 
-- 已选的整体结构仍是方案 C（Asset Type Rail）；本轮只讨论其列表、搜索和 Skills 工作台的信息架构。
-- CC Switch 截图只提供长列表密度与 Agent 状态编排的视觉参考。不得复制其备份恢复、ZIP 安装、发现市场、检查更新、Agent 本体管理或其他产品能力。
-- 每一项在最终验收后仍需逐条确认“接受、修改或拒绝”。只有接受项才进入同一份产品决策基线，再反向更新契约、票据和技术方案；拒绝项只保留为 Mock 设计证据。
-- 搜索、索引、事件和前端缓存仍不能授权写入；原生资产、单资产单目标事务、`prepare` 无副作用、`apply` 前重校验、敏感信息保护等既有不变量不因浏览态重排而改变。
+> 本节与下方 `CR-UI-B2-001`、`候选决策登记` 记录本轮开始时的 v22 影响基线；其中 Hooks、Skill 编辑／事务入口和“项目仅看自有资产”的描述，已被本文末尾“2026-08-03：候选收敛增补”中的新候选覆盖。它们保留用于说明反向影响，不代表当前 selected Mock。
 
-## 候选调整登记
+1. **配置上下文列**
+   - 只展示“全局配置”和“项目配置”。
+   - “全局配置”下不展开资产类型。
+   - “项目配置”下直接展示受管项目列表；选择一个项目后只展示该项目的原生资产。
+2. **资产类型列**
+   - 选择全局或具体项目后，展示 Skills、长期指令、Subagents、Hooks。
+   - 不在项目树中重复四类资产。
+3. **主表面**
+   - 列表与详情／编辑互相替换，不保留第四个常驻详情栏。
+   - 宽／中窗口为三层结构；窄窗口为“上下文 → 类型 → 列表 → 详情／编辑／旅程”单表面页面栈。
+   - 一级上下文栏只包含“全局配置”“项目配置”与项目列表；浏览详情不展示任何文件名，文件仅在编辑态出现。
+   - selected 图标统一来自固定依赖 `lucide-react@1.28.0`，不保留手写图标模块。
+4. **搜索与列表**
+   - 搜索统一收口到右上全局入口与 `⌘K`。
+   - 删除“当前类型／全部”范围 Tab、类目内搜索框和无效作用域 Tab。
+   - 搜索结果可跨项目、上下文和资产类型定位，但不授权写入。
+5. **Skills**
+   - 列表使用高密度两行资产信息和四个 Agent 的只读事实／事务入口。
+   - 浏览详情只展示结构化信息；点击“编辑源码”后才展示文件和源码编辑。
+   - 浏览层不单列文件树或检查器；会影响写入安全的状态在编辑、安装、转换、审查、确认或结果阶段表达。
+6. **Agent 边界**
+   - 只展示识别、可安装、可转换、阻断等检测／兼容事实。
+   - 不新增 Agent 安装、升级、启停或生命周期管理；可行动作进入既有单目标事务闭环，不做即时 toggle。
 
-| ID      | 候选 UI 调整               | 预期 UI 表达                                                                                                                                               | 必须保留的边界                                                                                                                              | 状态      |
-| ------- | -------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- | --------- |
-| UI-C-01 | 当前类型资产库             | 删除“当前类型／全部”范围 Tab；在每个一级资产类目下只列出该类型资产，筛选继续约束当前类目。                                                                 | 四类一级资产导航不变；项目、Agent、作用域和状态仍是筛选或管理维度。                                                                         | `pending` |
-| UI-C-02 | 右上角全局搜索             | 搜索从各类目资产库收口到右上入口与 `⌘K` 浮层；结果按资产类型分组，选择后回到对应工作台上下文。                                                             | 不成为独立搜索页或语义搜索；敏感明文不得进入索引或结果；脏草稿先经过既有保护。                                                              | `pending` |
-| UI-C-03 | Skills 富列表              | Skills 使用紧凑长列表：名称、来源、脱敏描述摘要、关键异常及四个 Agent 的目标状态／动作。                                                                   | 不把列表变成资产卡片墙；正常状态不重复占位；列表中的动作不能直接写入。                                                                      | `pending` |
-| UI-C-04 | 原生资产 + Agent 目标动作  | 每行的 Agent 信息表达为当前原生 Skill 对指定 Agent 的 `recognized`、`installable`、`convertible` 或 `blocked` 状态；可行动作进入既有单目标安装或转换闭环。 | 不创建跨 Agent 聚合身份、中央 Skill 目录、批量启停、一对多安装或 Agent 本体安装／升级／卸载。                                               | `pending` |
-| UI-C-05 | Skills 结构化浏览          | Skills 浏览态仅展示结构化信息：名称、描述、版本、依赖、作用域、生效上下文、来源和 Agent 目标状态。                                                         | 未知字段、内容保真和只读边界仍由原生内容与适配器能力决定；不把结构化摘要表述为新的资产事实。                                                | `pending` |
-| UI-C-06 | 聚焦源码编辑               | 仅在显式“编辑”后显示源码；多文件 Skill 的文件树也仅在编辑、审查和冲突表面出现。                                                                            | 同一工作区、单活动草稿、dirty guard、审查、确认和结果闭环保持；不打开独立详情页或独立编辑窗口。                                             | `pending` |
-| UI-C-07 | 浏览态隐藏检查器与风险分组 | Skills 浏览态不单列检查器，也不显示“兼容与漂移”“变更与恢复”分组。必要的上下文改在结构化摘要或列表中呈现。                                                  | 会影响写入安全的兼容、漂移、Git、冲突、恢复点和稳定原因码，必须在对应编辑、安装、转换、审查、确认或结果阶段重新完整呈现。                   | `pending` |
-| UI-C-08 | 响应式与焦点恢复           | 宽屏下为 Skills 列表与结构化详情并列；不足以维持可读性时，按“列表 → 详情”的单表面切换，并保留返回、选择、滚动与键盘焦点上下文。                            | 不降低源码、关键操作或安全状态的可读性；减少动态效果、`Esc`、浮层关闭和焦点恢复继续适用。                                                   | `pending` |
-| UI-C-09 | 列表进入二级详情           | Skills 一级页只承担扫描、范围与 Agent 使用状态；点击列表项后进入单独的二级详情页，再显示结构化详情和“编辑源码”入口。                                       | 这是对 UI-C-06“同一工作区内不打开独立详情页”的直接冲突；不得因页面层级改变而绕过单资产、脏草稿保护或 `prepare → apply`。                    | `pending` |
-| UI-C-10 | 范围 Tab 代替筛选按钮      | 移除 Skills 列表的“筛选”按钮，改为始终可见的范围 Tab；默认选择“全部”。                                                                                     | 需先定义 Tab 是范围筛选而非资产类型导航；这与 UI-C-01“删除范围 Tab”的方向冲突，且不能改变四类一级资产导航。                                 | `pending` |
-| UI-C-11 | 全局优先排序与项目名称     | “全部”范围中，全局 Scope 的 Skill 排在前；项目 Scope 的行内元信息展示所属项目名称，而非笼统的“项目”标签。                                                  | 排序与展示不得泄漏敏感路径或改变资产身份；全局搜索仍遵循 UI-C-02 的分组结果和脱敏边界。                                                     | `pending` |
-| UI-C-12 | Agent 行内启停             | Skills 行中的各 Agent 位置作为启用／停用入口；可用 Agent 可点击切换，当前环境不可用的 Agent 置灰且不可点击。Mock 仅更新内存态。                            | 这是对 UI-C-04“动作进入既有安装／转换闭环”的直接冲突。若采纳，真实写入仍必须经 `prepare → review → confirm → apply`，不得新增直接写入 RPC。 | `pending` |
-| UI-C-13 | 仅导入项目内 Skill         | 删除“新建 Skill”入口和从模板创建流程；只提供导入项目中已有 Skill 后再进行管理的入口。                                                                      | 这是对既有 FE-05“创建与本地导入”的范围收缩候选，不能仅靠 Mock 删除界面而静默撤销已封板产品能力。                                            | `pending` |
-| UI-C-14 | 移除恢复／历史可见 UI      | 不提供恢复点、历史记录或回滚入口；编辑只表达当前草稿、审查和应用结果。                                                                                     | 这是对 UI-C-07 及既有恢复表达的直接冲突。只可讨论移除可见 UI，不能在未经契约和安全审查前删除内部事务安全、冲突、失败或恢复语义。            | `pending` |
+## CR-UI-B2-001：selected 列表控制契约
 
-## 本轮候选的显式冲突与待决边界
+该候选 Change Request 只固化本次 throwaway Mock 的列表交互，不修改正式查询契约、Gateway 或服务端能力。
 
-- **UI-C-09 ↔ UI-C-06：** 现有候选要求详情／编辑留在同一工作区；本轮要求从一级列表进入二级详情页。最终验收须明确“二级页”是同一工作区的页面状态还是独立窗口／路由，以及源码编辑是否仍只在显式编辑后出现。
-- **UI-C-10 ↔ UI-C-01：** 现有候选删除资产库范围 Tab；本轮恢复范围 Tab。必须先定义“全部／全局／项目”范围模型、默认值和与右上全局搜索的关系，不能同时保留两套相互矛盾的筛选入口。
-- **UI-C-12 ↔ UI-C-04：** 行内启停若成为真实行为，会从“单目标安装或转换入口”扩展为新的写入意图。Mock 可以仅演示内存状态；正式产品必须先确认能力语义、审核流、可用性禁用规则和事务安全边界。
-- **UI-C-13 ↔ FE-05：** 删除新建是产品范围收缩，不是单纯的视觉改动；在最终验收前，正式创建和本地导入闭环仍保持原状。
-- **UI-C-14 ↔ UI-C-07、FE-04、FE-09：** 浏览态隐藏恢复信息与彻底移除恢复／历史／回滚 UI 是两种不同决定。即使最终选择后者，也不能把可恢复删除、冲突恢复、失败结果或内部回滚事务静默删除。
+- 名称排序仅提供升序／降序，默认升序；同名记录保持输入顺序，保证稳定排序。
+- 每页数量仅提供 20／50／100，默认 20。
+- 处理顺序固定为：配置上下文与资产类型 → 搜索／筛选 → 稳定名称排序 → 分页。
+- 筛选条件、排序方向或每页数量变化后统一回到第 1 页。
+- 翻页后列表滚回顶部，并将键盘焦点交给新页首行。
+- `⌘K` 全局搜索跨上下文与资产类型，结果不分页；选择结果后一次性提交上下文、类型、资产和详情目的地。
+- 本轮不增加其他排序字段、服务端分页、持久化列表偏好、批量操作或任何直接写入能力。
 
-## 对既有产物的候选影响映射
+## 候选决策登记
 
-### 产品决策基线（最终验收后才回写）
+| ID       | 候选 UI 调整                                 | 正式边界                                                              | 状态      |
+| -------- | -------------------------------------------- | --------------------------------------------------------------------- | --------- |
+| UI-B2-01 | 一级导航从“资产类型优先”改为“配置上下文优先” | 不改变资产身份、作用域或授权模型                                      | `pending` |
+| UI-B2-02 | 第二列集中四类资产类型                       | 不在全局／项目树内复制类型节点                                        | `pending` |
+| UI-B2-03 | 主表面列表／详情替换                         | 不绕过单资产、单草稿、dirty guard                                     | `pending` |
+| UI-B2-04 | 右上全局搜索                                 | 搜索、索引、事件和缓存均不能授权写入                                  | `pending` |
+| UI-B2-05 | Skill 高密度列表与 Agent 关系                | Agent 状态是只读 projection；动作仍须 prepare／review／confirm／apply | `pending` |
+| UI-B2-06 | Skill 结构化详情 → 编辑源码                  | 原生内容保真、多文件、未知字段和只读边界不变                          | `pending` |
+| UI-B2-07 | 浏览层隐藏文件与独立检查器                   | 风险、漂移、Git、冲突、恢复点和稳定原因码不得从安全流程消失           | `pending` |
+| UI-B2-08 | 窄窗单表面页面栈                             | 保留 Esc、焦点恢复、键盘路径和减少动态效果                            | `pending` |
 
-| 候选项                    | 可能影响的基线章节                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | 后续需要核对的内容                                                                                                           | 状态      |
-| ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- | --------- |
-| UI-C-01、UI-C-02          | [7.2 主工作区布局](../../../docs/product/Agent_Config_Manager_MVP_产品决策基线_v0.1.md#72-主工作区布局)、[7.4 列表与检索](../../../docs/product/Agent_Config_Manager_MVP_产品决策基线_v0.1.md#74-列表与检索)、[7.6 搜索索引一致性](../../../docs/product/Agent_Config_Manager_MVP_产品决策基线_v0.1.md#76-搜索索引一致性)、[20.1 问题 65](../../../docs/product/Agent_Config_Manager_MVP_产品决策基线_v0.1.md#201-核心收尾批已确认)                                                                                                                                                                                                                                                          | 将当前类目列表与右上全局搜索的责任、查询范围、筛选关系、脏草稿保护、索引状态和响应式入口写为一个不矛盾的模型。               | `pending` |
-| UI-C-03、UI-C-04          | [5 资产模型](../../../docs/product/Agent_Config_Manager_MVP_产品决策基线_v0.1.md#5-资产模型)、[6 Agent 支持范围](../../../docs/product/Agent_Config_Manager_MVP_产品决策基线_v0.1.md#6-agent-支持范围)、[7.4 列表与检索](../../../docs/product/Agent_Config_Manager_MVP_产品决策基线_v0.1.md#74-列表与检索)、[9 确定性跨 Agent 转换](../../../docs/product/Agent_Config_Manager_MVP_产品决策基线_v0.1.md#9-确定性跨-agent-转换)                                                                                                                                                                                                                                                              | 确认 Agent 状态是原生资产的展示投影；安装和转换均是既有单目标操作入口，而非行内开关或新资产模型。                            | `pending` |
-| UI-C-05、UI-C-06、UI-C-07 | [7.2 主工作区布局](../../../docs/product/Agent_Config_Manager_MVP_产品决策基线_v0.1.md#72-主工作区布局)、[7.5 资产详情](../../../docs/product/Agent_Config_Manager_MVP_产品决策基线_v0.1.md#75-资产详情)、[8.3 原生结构化编辑 + 源码兜底](../../../docs/product/Agent_Config_Manager_MVP_产品决策基线_v0.1.md#83-原生结构化编辑--源码兜底)、[10 兼容性策略](../../../docs/product/Agent_Config_Manager_MVP_产品决策基线_v0.1.md#10-兼容性策略)、[11 变更事务与并发控制](../../../docs/product/Agent_Config_Manager_MVP_产品决策基线_v0.1.md#11-变更事务与并发控制)、[12 来源、漂移与辅助元数据](../../../docs/product/Agent_Config_Manager_MVP_产品决策基线_v0.1.md#12-来源漂移与辅助元数据) | 明确 Skills 浏览态的结构化摘要、源码和文件树进入编辑态的边界，以及风险／恢复信息从浏览态隐藏但在安全操作阶段完整恢复的规则。 | `pending` |
-| UI-C-08                   | [7.2 主工作区布局](../../../docs/product/Agent_Config_Manager_MVP_产品决策基线_v0.1.md#72-主工作区布局)、[20.5 统一视觉规范](../../../docs/product/Agent_Config_Manager_MVP_产品决策基线_v0.1.md#205-统一视觉规范已确认)                                                                                                                                                                                                                                                                                                                                                                                                                                                                     | 把 Skills 的单表面窄窗口模型与既有收拢、浮层、分隔线、键盘和减少动态效果要求统一，不留两个响应式模型并存。                   | `pending` |
-| UI-C-09                   | [7.2 主工作区布局](../../../docs/product/Agent_Config_Manager_MVP_产品决策基线_v0.1.md#72-主工作区布局)、[7.5 资产详情](../../../docs/product/Agent_Config_Manager_MVP_产品决策基线_v0.1.md#75-资产详情)、[8.3 原生结构化编辑 + 源码兜底](../../../docs/product/Agent_Config_Manager_MVP_产品决策基线_v0.1.md#83-原生结构化编辑--源码兜底)                                                                                                                                                                                                                                                                                                                                                   | 明确一级列表、二级详情、编辑页之间的页面关系、返回上下文与脏草稿保护；这可能推翻既有同工作区详情锚点，须先作产品决策。       | `pending` |
-| UI-C-10、UI-C-11          | [5 资产模型](../../../docs/product/Agent_Config_Manager_MVP_产品决策基线_v0.1.md#5-资产模型)、[7.4 列表与检索](../../../docs/product/Agent_Config_Manager_MVP_产品决策基线_v0.1.md#74-列表与检索)、[7.6 搜索索引一致性](../../../docs/product/Agent_Config_Manager_MVP_产品决策基线_v0.1.md#76-搜索索引一致性)                                                                                                                                                                                                                                                                                                                                                                               | 确认“全部／全局／项目”的范围、全局优先排序、项目名展示及其与右上全局搜索的关系，不把展示顺序误写为身份或授权规则。           | `pending` |
-| UI-C-12                   | [6 Agent 支持范围](../../../docs/product/Agent_Config_Manager_MVP_产品决策基线_v0.1.md#6-agent-支持范围)、[9 确定性跨 Agent 转换](../../../docs/product/Agent_Config_Manager_MVP_产品决策基线_v0.1.md#9-确定性跨-agent-转换)、[11 变更事务与并发控制](../../../docs/product/Agent_Config_Manager_MVP_产品决策基线_v0.1.md#11-变更事务与并发控制)                                                                                                                                                                                                                                                                                                                                             | 先判断“启用／停用”是否为新产品能力；若是，需最小 Change Request，不能把行内 Mock 状态提升为既有安装或转换事实。              | `pending` |
-| UI-C-13                   | [7.1 创建与导入](../../../docs/product/Agent_Config_Manager_MVP_产品决策基线_v0.1.md#71-创建与导入)、[13 项目纳入、排除与管理状态](../../../docs/product/Agent_Config_Manager_MVP_产品决策基线_v0.1.md#13-项目纳入排除与管理状态)                                                                                                                                                                                                                                                                                                                                                                                                                                                            | 明确仅允许导入已纳入项目中的现有 Skill，是否仍保留其他资产类型的新建能力，以及取消／失败时没有副作用的既有规则。             | `pending` |
-| UI-C-14                   | [11 变更事务与并发控制](../../../docs/product/Agent_Config_Manager_MVP_产品决策基线_v0.1.md#11-变更事务与并发控制)、[12 来源、漂移与辅助元数据](../../../docs/product/Agent_Config_Manager_MVP_产品决策基线_v0.1.md#12-来源漂移与辅助元数据)                                                                                                                                                                                                                                                                                                                                                                                                                                                 | 区分移除历史／恢复入口与移除事务安全、冲突处理、失败恢复语义；后者不可由 UI Mock 决定。                                      | `pending` |
+## 对既有产物的潜在影响
 
-### 前端契约、旅程与 fixtures（最终验收后才回写）
+### 产品决策基线
 
-| 候选项                    | 可能影响的契约表面                                                                                                                                                        | 旅程／fixture 影响                                                                                     | 状态      |
-| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ | --------- |
-| UI-C-01、UI-C-02          | `AssetListQuery`、`AssetListSnapshot`、`AssetSummary`、workbench load state；需决定“类目列表”与“全局搜索”是否复用同一 query 的明确范围。                                  | FX-01、FX-07、FX-12：当前类型列表、全局搜索分组、索引 stale／failed、键盘与焦点恢复。                  | `pending` |
-| UI-C-03、UI-C-04          | `AssetSummary` 或对应只读 projection、`ActionAvailability`、`installAsset`、`convertAsset`、install／conversion workflow。                                                | FX-01、FX-09–FX-11、FX-15：四个 Agent 的可解释状态；只有 `prepare → review → confirm → apply` 可写入。 | `pending` |
-| UI-C-05、UI-C-06、UI-C-07 | `AssetDetailQuery`、`AssetDetailSnapshot`、`InspectorData`、`NativeFileQuery`、asset workflow、`ValidationFinding`、`CompatibilityStatus`、`GitStatus`、`RecoveryPoint`。 | FX-01–FX-05、FX-12、FX-16、FX-18：浏览态不取代编辑／审查时的原生、风险、冲突和恢复事实。               | `pending` |
-| UI-C-08                   | frontend-local workspace state、focus／overlay／splitter 交互约束。                                                                                                       | FX-12：窄窗口、键盘、焦点恢复、减少动态效果和敏感临时查看。                                            | `pending` |
-| UI-C-09                   | frontend-local 页面／导航 state、`AssetDetailQuery`、dirty guard 的返回策略。                                                                                             | FX-01–FX-05、FX-12：从列表进入详情、返回列表、进入编辑与脏草稿拦截。                                   | `pending` |
-| UI-C-10、UI-C-11          | `AssetListQuery`、`AssetListSnapshot`、`AssetSummary.scope`／项目显示 projection、排序说明。                                                                              | FX-01、FX-07、FX-12：全部范围默认值、全局优先、项目名、全局搜索和键盘焦点。                            | `pending` |
-| UI-C-12                   | `ActionAvailability`、可能新增的 `OperationIntent`、`PreparedOperation`；现有 install／convert 流程。                                                                     | FX-09–FX-11：可用 Agent 的启停准备、审查、确认、应用；不可用 Agent 必须保持不可点击。                  | `pending` |
-| UI-C-13                   | `OperationIntent`、import workflow、候选项目／来源 validation；现有 create workflow。                                                                                     | FX-13–FX-15：仅导入项目内已有 Skill、取消无副作用、无效来源和同名处理。                                | `pending` |
-| UI-C-14                   | `AppliedResult`、`ConflictResult`、`FailedResult`、`RecoveryPoint` 与对应可见状态。                                                                                       | FX-04、FX-16、FX-18：必须验证不展示历史时，冲突、失败和可执行恢复动作仍可表达。                        | `pending` |
+最终 UI 批准后，复核并只在需要时更新：
 
-正式契约仍以 [前端契约 v0.1](../../../docs/frontend/Agent_Config_Manager_前端契约_v0.1.md) 为准；本文不新增字段、query、intent、fixture 或状态机。
+- 主工作区布局：上下文列、资产类型列、主表面之间的职责。
+- 列表与检索：全局搜索、当前上下文资产列表和筛选的关系。
+- 资产详情：结构化浏览与显式源码编辑的层级。
+- 响应式与可访问性：窄窗页面栈、返回与焦点恢复。
 
-### 前端票据（最终验收后才调整验收表达）
+若最终决定改变产品能力，而不只是界面编排，必须先提交最小 Change Request；Mock 不得静默成为产品事实。
 
-| 票据                                                                                                                   | 潜在调整面                                                                                    | 状态      |
-| ---------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- | --------- |
-| [FE-01 只读工作台](../../../.scratch/agent-config-manager-frontend/issues/01-read-only-workbench.md)                   | 当前类型资产库、右上全局搜索、Skills 富列表、结构化详情与状态表达。                           | `pending` |
-| [FE-02 原生详情与多文件资产](../../../.scratch/agent-config-manager-frontend/issues/02-native-detail-and-multifile.md) | Skills 源码／文件树只在编辑、审查、冲突表面出现；非文本和未知字段边界保持。                   | `pending` |
-| [FE-03 本地草稿编辑](../../../.scratch/agent-config-manager-frontend/issues/03-local-draft-editing.md)                 | 从结构化浏览态进入聚焦源码编辑、dirty guard、返回和草稿上下文恢复。                           | `pending` |
-| [FE-04 审查与安全应用](../../../.scratch/agent-config-manager-frontend/issues/04-review-and-safe-apply.md)             | 若采纳行内启停或取消可见恢复 UI，需复核准备、审查、确认、结果和失败恢复表达。                 | `pending` |
-| [FE-05 创建与本地导入](../../../.scratch/agent-config-manager-frontend/issues/05-create-and-import.md)                 | 复核 Skills 是否收缩为仅导入项目内已有资产；若仍保留 Agent 目标安装，预填入口与审查闭环不变。 | `pending` |
-| [FE-06 跨 Agent 转换](../../../.scratch/agent-config-manager-frontend/issues/06-cross-agent-conversion.md)             | Skills Agent 目标为 `convertAsset` 时的预填目标、完整／降级／阻断映射入口。                   | `pending` |
-| [FE-09 导出、删除与恢复](../../../.scratch/agent-config-manager-frontend/issues/09-export-delete-and-restore.md)       | 若取消可见恢复／历史，需明确不影响可恢复删除、恢复冲突和“不操作 Git”反馈。                    | `pending` |
-| [FE-10 集成验收](../../../.scratch/agent-config-manager-frontend/issues/10-integrated-ui-acceptance.md)                | 全局搜索、窄窗口单表面、键盘、焦点恢复、减少动态效果及脱敏回归。                              | `pending` |
+### 前端契约与 fixtures
 
-票据依赖图、`ARCH-GATE` 状态和 FE-02～FE-10 的暂停状态不由本文修改。
+最终 UI 批准后，逐条核对：
 
-### 技术方案与 wire（最终验收并完成契约回写后才评估）
+- `AssetListQuery`／`AssetListSnapshot` 对精确全局或具体项目上下文的表达。
+- `AssetSummary`、结构化 `AssetDetail`、`NativeFileQuery` 和 Agent action availability 的投影边界。
+- dirty guard、全局搜索目的地、窄窗页面栈和焦点恢复的 frontend-local 状态。
+- dirty guard 只暂存目标转换；继续编辑保持旧上下文、旧资产与编辑器，确认放弃后才原子提交目标上下文。
+- dirty + 全局搜索只允许一个模态表面；继续编辑恢复原 textarea 焦点。
+- 成功 Apply 把确认草稿写入当前会话的 Mock 内存快照；刷新才重置。
+- 多文件 Review 聚焦并标记真实 changed file；Convert 恢复保持无草稿、`dirty=false`。
+- Review、Focused Confirm 与 Outcome 使用同一实际 changed-file count；Outcome 在正常内容流中紧凑展示。
+- 单文件、多文件、只读、索引过期、漂移、冲突、敏感值、完整／降级／阻断转换 fixtures。
 
-| 候选项                    | 可能需要复核的技术面                                                                                                                                                                                                                                                                                                                                                          | 当前结论                                                                                                | 状态      |
-| ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------- | --------- |
-| UI-C-01、UI-C-02          | `FrontendGateway.read` 对 `AssetListQuery`／结果范围的映射；[ARC-02b 三个 verb command](../../../docs/architecture/Agent_Config_Manager_MVP_技术方案_v0.1.md#32-arc-02b三个-verb-command--单一-invalidation-event) 与 [ARC-06c wire schema](../../../docs/architecture/Agent_Config_Manager_MVP_技术方案_v0.1.md#314-arc-06cwire-schema-rust-first-dto--ts-rs) 的 query DTO。 | 可能是既有 read query 的范围表达调整；未获契约批准前不增加 command、event、DTO 字段或 `wireVersion`。   | `pending` |
-| UI-C-03、UI-C-04          | `AssetSummary` 展示 projection、Agent capability／action availability；[ARC-06a WorkspaceSession](../../../docs/architecture/Agent_Config_Manager_MVP_技术方案_v0.1.md#312-arc-06aframework-neutral-深-workspacesession)。                                                                                                                                                    | 优先复用既有 read／prepare／apply 和 `installAsset`／`convertAsset`；不得因为行内展示引入直接写入 RPC。 | `pending` |
-| UI-C-05、UI-C-06、UI-C-07 | 结构化摘要读取、编辑后 `NativeFileQuery`、SourceEditor、检查器状态装配；[ARC-06b 工作台控件](../../../docs/architecture/Agent_Config_Manager_MVP_技术方案_v0.1.md#313-arc-06bcodemirror-6--契约驱动工作台控件)。                                                                                                                                                              | 仅在正式契约证明需要新读模型时才改 wire；源码、风险、diff 和恢复仍由既有 gateway 事实驱动。             | `pending` |
-| UI-C-08                   | WorkspaceSession 的本地布局／焦点 state 与 renderer journey 测试层。                                                                                                                                                                                                                                                                                                          | 不改变 gateway 事实来源、IPC 或 core；实现细节待正式票据执行时决定。                                    | `pending` |
-| UI-C-09                   | WorkspaceSession 的页面状态、返回与脏草稿 guard；renderer journey 测试层。                                                                                                                                                                                                                                                                                                    | 二级详情不能绕过同一活动草稿与事实重读；不因 UI 路由引入新的 gateway 或 IPC 边界。                      | `pending` |
-| UI-C-10、UI-C-11          | `FrontendGateway.read` 中既有 AssetListQuery 的范围与排序表达、query DTO。                                                                                                                                                                                                                                                                                                    | 未经契约批准不得新增索引命令、事件、敏感字段或 `wireVersion`；项目名仍须由授权 read projection 提供。   | `pending` |
-| UI-C-12                   | `FrontendGateway.prepare`／`apply` 对可能新增启停意图的映射、adapter capability、授权与事务重校验。                                                                                                                                                                                                                                                                           | Mock 行内切换不得映射为 renderer 直接写入；在正式决定前，不新增 IPC、adapter 方法或绕过确认的写路径。   | `pending` |
-| UI-C-13                   | 项目范围内导入的 read／validation／transaction 映射；现有 create／import command。                                                                                                                                                                                                                                                                                            | 不因隐藏新建 UI 删除既有 command、路径校验、事务安全或来源授权；是否收缩 command 属契约后续决定。       | `pending` |
-| UI-C-14                   | 事务日志、恢复点、可恢复删除、冲突与回滚的内部安全边界。                                                                                                                                                                                                                                                                                                                      | 仅讨论 renderer 可见 UI；不得删除内部事务、审计、冲突处理或失败恢复能力，也不得以 Mock 作为安全证据。   | `pending` |
+在批准前不新增字段、query、intent、fixture 或状态机。
 
-正式技术方案与 wire 仍以 [技术方案 v0.1](../../../docs/architecture/Agent_Config_Manager_MVP_技术方案_v0.1.md) 为准。
+### 前端票据
+
+最终 UI 批准后，可能需要调整验收表达的票据：
+
+- FE-01：三层只读工作台、全局搜索、高密度列表。
+- FE-02：结构化浏览和显式进入文件／源码层。
+- FE-03：页面切换、单资产草稿和 dirty guard。
+- FE-04：Agent 动作、审查、确认、冲突、结果和恢复表达。
+- FE-05／FE-06：安装、导入与转换入口的上下文预填。
+- FE-07／FE-08：项目与 Agent 管理入口的位置。
+- FE-10：宽／中／窄、键盘、焦点、减少动态效果和敏感信息回归。
+
+FE 依赖图与已冻结产品范围不由本文修改。
+
+### 技术方案与 wire
+
+UI 批准并完成契约回写后，才评估现有 `read`／`prepare`／`apply`／`observe` 是否需要最小映射调整。当前不新增 IPC command、event、DTO、adapter seam、依赖或 `wireVersion`。
+
+## 本轮证据状态
+
+- 旧截图和旧 Fix 报告只作为历史材料，不证明本次 selected B2 重构。
+- 当前实现必须重新通过浏览器宽／中／窄画面、控制台、核心交互与参考图比较后，才能把 `design-qa.md` 从 `blocked` 改为 `passed`。
+- 静态断言、SSR、模型测试或构建成功都不能替代新的浏览器证据。
+
+## 已保存证据
+
+- [设计 QA](../../../design-qa.md)
+- [本轮调整前 1280×720](../../../.scratch/current-ui-audit/01-before-adjustments.jpg)
+- [本轮候选 A 1280×720](../../../.scratch/current-ui-audit/06-inherit-a-clean.jpg)
+- [本轮候选 B 1280×720](../../../.scratch/current-ui-audit/07-inherit-b-clean.jpg)
+- [本轮候选 C 1280×720](../../../.scratch/current-ui-audit/08-inherit-c-clean.jpg)
+
+以上本地截图只用于当前 Mock 方案讨论；`design-qa.md` 仍为 blocked，截图本身不构成正式 visual QA 或 FE 票据闭环。
 
 ## UI 定稿后的回写顺序
 
-1. 记录最终验收结论：对 UI-C-01 至 UI-C-14 分别标记 accepted、modified 或 rejected，并保留拒绝理由。
-2. 仅把 accepted／modified 项回写到同一份产品决策基线；若触及产品能力而非界面编排，先走最小 Change Request。
-3. 从基线反向更新前端契约的类型、状态机、fixture catalog 与覆盖矩阵，再更新 FE-01、FE-02、FE-03、FE-04、FE-05、FE-06、FE-09、FE-10 的验收表达。
-4. 最后复核技术方案和 wire 是否仍可由现有 `read`／`prepare`／`apply`／`observe` 实现；只有契约变更确实不可映射时，才做最小架构或 wire 变更。
-5. 重新运行对应 Mock、契约和票据验证；在正式 FE-01 重做并独立审查通过前，不恢复后续 FE DAG 实现。
+1. 用户集中验收 B2，记录接受、修改或拒绝以及理由。
+2. 仅把已接受的产品级变化回写到同一份产品决策基线。
+3. 从基线反向更新前端契约、fixture catalog 与覆盖矩阵。
+4. 只调整 FE-01～FE-10 的验收表达和引用，不重新拆分既定用户行为。
+5. 最后复核技术方案与 wire；只有现有 seam 无法实现冻结契约时才做最小技术变更。
+6. 正式 FE-01 重做并通过独立审查后，才恢复后续 FE DAG。
+
+## 2026-08-03：候选收敛增补（尚未定稿）
+
+本节只覆盖 selected B2 throwaway Mock，不回写产品基线、前端契约、技术方案、src/contract、Gateway/IPC/Rust 或 FE 票据。UI 最终定稿前，所有正式产物保持不变。
+
+### Hooks 从 selected 候选移除
+
+- selected 的 AssetTypeRail 与全局搜索不再呈现 Hooks；B2 seed 删除 3 个项目 Hook 和 1 个全局 Hook。
+- 这不是删除正式产品资产类型：shared assetTypes、legacy A/B/C 方案、现有产品基线与生产契约仍保留 Hooks。
+- selected 的导航、seed、搜索、旅程和聚焦测试改用 Skills、长期指令或 Subagents；legacy Hooks 仍作为历史/正式边界证据保留。
+
+### Skill 最小功能边界
+
+- selected Skill 只提供结构化“查看 Skill”，以及对四个 Agent 的会话内启用/停用预览；阻断目标不可切换。
+- Skills 列表把文字 checkbox 收敛为真实 Agent 品牌 Logo：点亮表示启用，置灰表示停用，阻断目标不可操作；原生 checkbox 仍承担可访问名称、键盘和 checked/disabled 语义。四个 SVG 随 Mock 本地打包，不新增依赖或网络访问。
+- 预览只改 FullUiMock 的 b2AssetSnapshots 内存快照，刷新即复位；UI 明示“Mock 会话预览，不写入配置”。
+- selected Skill 列表与详情不再把准备安装、准备转换、跨 Agent 转换或编辑源码作为主能力，也不会触发既有 prepare/apply。
+- 这不新增生产写权限、批量操作、Gateway/IPC/DTO 或真实配置写入。旧底层函数与非 Skill／legacy 旅程仅为既有证据保留。
+
+### 长期指令最小功能边界
+
+- selected 长期指令不做跨 Agent 转换；详情与控制器强制进入 `convert` 的路径均 fail-closed，不展示准备安装、准备转换或兼容操作。
+- “Agent 使用状态”仅展示当前原生资产对应的 Agent，不提供切换、安装或转换按钮，也不把其它 Agent 推导成 `installable`。
+- 原生 Markdown 在详情主区域直接可编辑；草稿只进入当前 Mock 会话的 `drafts`，更改后仍经过既有 review／confirm／apply 合成流程。readonly 场景只读，不新增生产保存语义。
+- 该收敛可能影响正式基线中的转换适用范围、详情信息层级，以及 FE-02／FE-03／FE-06 的验收表达；用户最终定稿前不反向更新这些正式产物。
+
+### 项目自有与全局适用（Mock 假设）
+
+- 项目上下文同时展示项目自有资产和适用的全局资产；全局上下文仍只显示全局资产。
+- **本轮仅用于 Mock 的假设**：所有已有 global seed 都视为适用于当前项目。它不是正式的作用域、生效解析、加载顺序或授权事实，正式解析需要在 UI 定稿后的最小 CR 中单独确认。
+- 选择项目上下文内的全局 Skill 时保留当前 configContext，避免跳回 global。
+
+### inherit 布局决策：已选择 A
+
+| 方案        | 结构                                                 | 价值                                           | 代价                               |
+| ----------- | ---------------------------------------------------- | ---------------------------------------------- | ---------------------------------- |
+| A（已选择） | 分段同表：先项目自有、后全局适用，共享列宽/排序/筛选 | 来源边界最明确，同时保留可直接比较的高密度表格 | 分段会降低跨来源的纯名称扫描速度   |
+| B           | 统一混排：一个排序列表，行内来源标识                 | 扫描与全局名称排序最快                         | 来源层级需要持续阅读每行标识       |
+| C           | 项目主表 + 继承侧栏：侧栏列全局适用资产与 Agent 状态 | 项目自有保持主焦点，继承关系独立可读           | 窄空间下必须纵向堆叠，比较路径更长 |
+
+- 入口为 selected + inherit=A|B|C，默认 A；小型开发切换器只在 controls=1、selected 项目 browse list 出现。
+- 切换只更新 inherit 参数，保留当前资产、筛选、排序和会话启用状态；不复用 legacy PrototypeController 作为方案控制器。C 将项目主表与全局侧栏分开，超过一页时如何统一分页仍是未决产品语义，本轮 10 项 seed 不将其伪装成已解决事实。
+- 用户已于 2026-08-03 明确选择 A。selected 默认保持 `inherit=A`；B/C 仅保留为 throwaway Mock 的开发对照，不再作为待定产品候选。
+- 本次确认只冻结“项目自有与全局适用如何同屏”的布局选择，不等同于批准全局适用解析、Skill 正式 enable intent、Hooks 正式下线或任何生产写入能力，也不触发正式产物批量回写。
+
+### 正式产物影响与未决 CR
+
+若且仅若用户定稿后确认产品级变化，再按既定顺序评估：
+
+1. 产品基线：一级导航是否继续含 Hooks、Skill 管理能力边界、项目对全局资产的可见/适用语义。
+2. 前端契约/fixtures：项目查询是否需要表达“项目自有 + 已解析适用全局”的来源与排序语义，以及 Skill enable availability 的只读投影。
+3. FE 票据：按冻结 DAG 复核受影响的验收表达，不从 Mock 直接关闭任何票据。
+4. 技术方案/wire：只有正式契约无法在现有 read/prepare/apply/observe seam 表达时，才提出最小 CR。
+
+未决 CR：全局资产对项目“适用”的真实解析、加载优先级、覆盖关系、可写边界及是否需要任何正式 enable intent；本 Mock 对这些问题不作决定。
+
+## 2026-08-04：状态可扫读性增补（change: b2-state-scannability，尚未定稿）
+
+对应 OpenSpec change `b2-state-scannability`（proposal/design/specs/tasks）。本节只覆盖 selected B2 throwaway Mock，不回写产品基线、前端契约、技术方案或 FE 票据。
+
+### Skills 表 Agent 固定分列
+
+- 每行一组的 4 个 Agent toggle 改为 4 个固定窄列（每列 48px，右锚固定 204px 列轨），列位跨行固定，每个 Agent 形成一条垂直扫描线；列头为品牌 Logo（role="img" + aria-label + title，另保留视觉隐藏的"Agent 启用预览"文本）。
+- 表头移入列表滚动容器并 sticky 定位：表头与行共享同一滚动宽度，classic-scrollbar 平台（Windows/Linux/headless）不再出现列头与单元格 15px 错位。
+- 三态语言不变（点亮/置灰/blocked dashed 不可切换）；单元格全高可点；切换仍只写会话内 Mock 快照并明示"不写入配置"。
+- 1200–1559 的 2×2 回落已删除（4 固定列在该区间实测不溢出）；窄屏退化回行内 toggle 组。
+
+### 来源区分强化
+
+- "项目自有／全局适用"分段标题提升层级（40px、加深底），全局段文字用蓝色；来源 badge 固定专色（项目自有中性灰、全局适用钢蓝 #1d6482，与选中蓝 #1672ef 拉开色相），不与状态/启停用色冲突。
+- 分段内筛选/排序/分页独立生效、两段列宽一致的契约不变。
+
+### 内容型资产 master-detail（对 v22 决策的有记录例外）
+
+- 长期指令与 Subagents 在宽/中屏改为 master-detail：主表面切分为左列表 + 右内容区，选中即显示；长期指令选中即可编辑 Markdown，Subagents 右区为结构化信息 + 只读正文。
+- 这是对 v22"列表与详情互相替换、不保留第四个常驻详情栏"的**例外**：master-detail 是主表面本身的二列切分，不是恢复常驻检查器；仅适用于内容型资产类型，Skills 保持行点击进入详情的跳板模型。
+- 窄屏退化为现有"列表 → 详情"单表面栈，无新增响应式分支；dirty guard、单草稿、焦点归还语义不变。
+- 该例外可能影响正式基线中"主工作区布局"与 FE-02/FE-03 的验收表达；用户最终定稿前不反向更新正式产物。
+
+### 正式产物影响追加
+
+若定稿，按既有顺序追加评估：
+
+1. 产品基线：Skills 列表的 Agent 分列信息结构、来源区分层级、内容型资产的类型差异化主表面。
+2. 前端契约/fixtures：列表行对 Agent 启用投影的既有字段可复用，预计无需新增字段；master-detail 选中态为 frontend-local。
+3. FE 票据：FE-01（高密度列表结构）、FE-02（内容型浏览/编辑层级）、FE-10（响应式与焦点回归）的验收表达。
+4. 技术方案/wire：无预期变化。
+
+## 2026-08-04：类型优先导航（change: b2-type-first-nav，尚未定稿）
+
+对应 OpenSpec change `b2-type-first-nav`（proposal/design/specs/tasks）。本节只覆盖 selected B2 throwaway Mock。
+
+### 导航回归基线 4.3：UI-B2-01 处置为"拒绝"
+
+- 正式产品基线 4.3 本为"资产类型优先、上下文感知"；v22 的"上下文优先"两栏（UI-B2-01）经本轮评估后**拒绝**，Mock 回归基线方向。正式基线无需为导航顺序回写。
+- 第一栏改为三类资产类型（Skills／长期指令／Subagents，收窄至 180px）；第二栏改为作用域选择器（全部／全局配置／各受管项目，220px），为纯选择器，管理入口仍留顶栏。
+- 默认落地 Skills + 全部；作用域切换保持类型/筛选/排序/每页数量并回第 1 页。
+
+### "全部"视图跨来源聚合
+
+- 聚合该类型在全局与全部项目的资产，按"全局适用 → 项目名"分段；空来源不出段；段内筛选/稳定排序/分页独立，分页以聚合结果为基数；同名资产跨来源独立成行，不做合并。
+- 项目视图保持"项目自有 → 全局适用"A 布局两段；全局视图只含全局资产；inherit=B/C 仍仅项目视图可达。
+- 资产身份携带原始上下文：聚合只是列表读模型，详情/编辑/事务按资产自身上下文运行；编辑区头部与 review 侧栏的作用域标识按资产自身来源派生（'全部'下不显示"全部"）。
+
+### 辅助路径
+
+- 窄屏栈调整为 类型 → 作用域 → 列表 → 详情，返回/焦点语义不变。
+- 全局搜索目的地提交资产自身作用域（全局资产→global，项目资产→对应 project）。
+
+### 正式产物影响追加
+
+若定稿：基线 4.3/5.2/7.4 无需为导航顺序改动；需复核"项目可见全局适用资产"的 Mock 假设与基线筛选/分组语义的关系；FE-01/FE-02/FE-03/FE-10 的验收表达按类型优先路径改写；wire 无预期变化。

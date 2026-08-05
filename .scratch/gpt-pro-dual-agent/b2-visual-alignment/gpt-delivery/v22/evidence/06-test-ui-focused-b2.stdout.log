@@ -1,0 +1,64 @@
+
+> agent-config-manager@0.1.0 test:ui
+> wdio run tests/l2/wdio.conf.ts --spec tests/l2/full-ui-mock-b2.journey.test.ts
+
+
+Execution of 1 workers started at 2026-08-01T14:49:16.948Z
+
+[0-0] RUNNING in chrome - file:///tests/l2/full-ui-mock-b2.journey.test.ts
+[0-0] PASSED in chrome - file:///tests/l2/full-ui-mock-b2.journey.test.ts
+
+ "spec" Reporter:
+------------------------------------------------------------------
+[chrome 150.0.7871.187 mac #0-0] Running: chrome (v150.0.7871.187) on mac
+[chrome 150.0.7871.187 mac #0-0] Session ID: 2ea8bcda61de4c2fc2ded005769d7896
+[chrome 150.0.7871.187 mac #0-0]
+[chrome 150.0.7871.187 mac #0-0] » tests/l2/full-ui-mock-b2.journey.test.ts
+[chrome 150.0.7871.187 mac #0-0] selected B2 narrow detail source journey
+[chrome 150.0.7871.187 mac #0-0]    ✓ keeps the Edit CTA above the detail content and focuses the source textarea
+[chrome 150.0.7871.187 mac #0-0]    ✓ opens readonly source but blocks every selected write path
+[chrome 150.0.7871.187 mac #0-0]    ✓ blocks readonly and incompatible Management entry, direct URL, and controller routes
+[chrome 150.0.7871.187 mac #0-0]
+[chrome 150.0.7871.187 mac #0-0] selected B2 single target identity journeys
+[chrome 150.0.7871.187 mac #0-0]    ✓ keeps one project Convert target through setup, mapping, review, confirm, and outcome
+[chrome 150.0.7871.187 mac #0-0]    ✓ keeps one global install target and exposes an explicit project choice from global context
+[chrome 150.0.7871.187 mac #0-0]
+[chrome 150.0.7871.187 mac #0-0] selected B2 state isolation and destination truthfulness
+[chrome 150.0.7871.187 mac #0-0]    ✓ resets shared filters across selected and every legacy visual system boundary
+[chrome 150.0.7871.187 mac #0-0]    ✓ resets selected filters when Alt+Arrow crosses into legacy
+[chrome 150.0.7871.187 mac #0-0]    ✓ persists successful dirty and stale edit snapshots in the current Mock session
+[chrome 150.0.7871.187 mac #0-0]    ✓ commits global-search choices to browse detail from dirty edit and secondary flows
+[chrome 150.0.7871.187 mac #0-0]
+[chrome 150.0.7871.187 mac #0-0] selected B2 asset-type rail navigation
+[chrome 150.0.7871.187 mac #0-0]    ✓ keeps a dirty editor until discard and then commits the target browse list
+[chrome 150.0.7871.187 mac #0-0]
+[chrome 150.0.7871.187 mac #0-0] selected B2 Create native target journey
+[chrome 150.0.7871.187 mac #0-0]    ✓ persists global name-based and project fixed instruction targets through the real form
+[chrome 150.0.7871.187 mac #0-0]
+[chrome 150.0.7871.187 mac #0-0] selected B2 incompatible status and list accessibility
+[chrome 150.0.7871.187 mac #0-0]    ✓ shows one visible block reason and keeps every interactive list control as a button
+[chrome 150.0.7871.187 mac #0-0]
+[chrome 150.0.7871.187 mac #0-0] selected B2 create and edit dirty semantics
+[chrome 150.0.7871.187 mac #0-0]    ✓ keeps a restored create template reviewable while a restored edit draft becomes clean
+[chrome 150.0.7871.187 mac #0-0]
+[chrome 150.0.7871.187 mac #0-0] selected B2 rendered pagination focus
+[chrome 150.0.7871.187 mac #0-0]    ✓ scrolls page two to the top and focuses its first row with a 21-item fixture
+[chrome 150.0.7871.187 mac #0-0]
+[chrome 150.0.7871.187 mac #0-0] selected B2 responsive Agent target geometry
+[chrome 150.0.7871.187 mac #0-0]    ✓ keeps chips and target rows uncut across the compact/wide boundary
+[chrome 150.0.7871.187 mac #0-0]
+[chrome 150.0.7871.187 mac #0-0] selected B2 browser QA correction contracts
+[chrome 150.0.7871.187 mac #0-0]    ✓ keeps flow footer primary visible and critical reachable text at 12px or above
+[chrome 150.0.7871.187 mac #0-0]    ✓ keeps 1280 three-column and sends 840 and 760 through the existing narrow steps
+[chrome 150.0.7871.187 mac #0-0]    ✓ restores filter focus on Escape and keeps one nonvisual accessible list heading
+[chrome 150.0.7871.187 mac #0-0]
+[chrome 150.0.7871.187 mac #0-0] legacy A/B/C keyboard and dirty-guard behavior
+[chrome 150.0.7871.187 mac #0-0]    ✓ preserves A search, Escape, focus restoration, and Continue Editing
+[chrome 150.0.7871.187 mac #0-0]    ✓ preserves B search, Escape, focus restoration, and Continue Editing
+[chrome 150.0.7871.187 mac #0-0]    ✓ preserves C search, Escape, focus restoration, and Continue Editing
+[chrome 150.0.7871.187 mac #0-0]
+[chrome 150.0.7871.187 mac #0-0] 21 passing (45.9s)
+
+
+Spec Files:	 1 passed, 1 total (100% completed) in 00:00:49  
+

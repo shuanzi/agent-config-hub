@@ -1,0 +1,30 @@
+
+> agent-config-manager@0.1.0 verify:static
+> node scripts/orchestrator/verify-static.mjs
+
+wrote /var/folders/5j/2r880lbs0lbdvd2qsgtqy4yr0000gn/T/acm-wire-export-dWs28I/gateway-wire.ts
+PASS  wire 漂移门禁（export-wire 逐字节比对）  sha256 204de0aa3db3b5d9… 一致
+
+=== tsc -b: corepack npm exec -- tsc -b
+PASS  tsc -b  exit 0 (4561ms)
+
+=== eslint .: corepack npm exec -- eslint .
+PASS  eslint .  exit 0 (2625ms)
+
+=== prettier --check .: corepack npm exec -- prettier --check .
+Checking formatting...
+All matched files use Prettier code style!
+PASS  prettier --check .  exit 0 (1916ms)
+
+=== cargo fmt --check: cargo fmt --check
+PASS  cargo fmt --check  exit 0 (144ms)
+
+=== cargo clippy（默认 feature）: cargo clippy --all-targets -- -D warnings
+PASS  cargo clippy（默认 feature）  exit 0 (41765ms)
+
+=== cargo clippy（test-harness）: cargo clippy --all-targets --features test-harness -- -D warnings
+PASS  cargo clippy（test-harness）  exit 0 (60320ms)
+PASS  禁止依赖守卫
+PASS  敏感占位值守卫（FX-01 占位明文不出现在 fixture 之外）  已扫描 76 个源文件
+
+verify:static OK（9 项）
