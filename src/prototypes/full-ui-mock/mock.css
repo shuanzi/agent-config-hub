@@ -4,26 +4,28 @@
  */
 
 :root {
-  --mock-bg: #e8eaed;
+  /* Apple token 回写：中性色/蓝色/圆角对齐 Apple 设计系统；
+     状态色中 amber 保留原值（软底上的文字需要深琥珀，Apple warn #eab308 对比度不足）。 */
+  --mock-bg: #f5f5f7;
   --surface: #ffffff;
-  --surface-muted: #f6f7f8;
-  --surface-raised: #fbfbfc;
-  --surface-selected: #edf3ff;
-  --ink: #202124;
-  --ink-soft: #5f6368;
-  --ink-faint: #8b9097;
-  --line: #dfe1e5;
-  --line-strong: #c7cad0;
-  --blue: #2864dc;
-  --blue-dark: #1d4fb5;
-  --blue-soft: #e8f0ff;
-  --green: #137c4b;
-  --green-soft: #e8f6ee;
+  --surface-muted: #f5f5f7;
+  --surface-raised: #fbfbfd;
+  --surface-selected: color-mix(in srgb, var(--blue) 8%, #ffffff);
+  --ink: #1d1d1f;
+  --ink-soft: #6e6e73;
+  --ink-faint: #86868b;
+  --line: #d2d2d7;
+  --line-strong: #86868b;
+  --blue: #0071e3;
+  --blue-dark: #0066cc;
+  --blue-soft: color-mix(in srgb, var(--blue) 9%, #ffffff);
+  --green: #16a34a;
+  --green-soft: color-mix(in srgb, var(--green) 10%, #ffffff);
   --amber: #9a5b00;
   --amber-soft: #fff5df;
-  --red: #b3261e;
-  --red-soft: #fff0ee;
-  --radius: 7px;
+  --red: #dc2626;
+  --red-soft: color-mix(in srgb, var(--red) 7%, #ffffff);
+  --radius: 8px;
   font-family:
     -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Helvetica Neue', 'PingFang SC', 'Segoe UI',
     sans-serif;
