@@ -30,8 +30,10 @@ import {
   FolderPlus,
   Globe2,
   Import,
+  Info,
   Layers3,
   MoreHorizontal,
+  OctagonAlert,
   PanelLeftClose,
   Plus,
   RotateCcw,
@@ -168,6 +170,7 @@ const viewportNames: Record<ViewPreset, string> = {
 
 type B2IconName =
   | 'activity'
+  | 'alert-octagon'
   | 'alert-triangle'
   | 'arrow-left'
   | 'arrow-up-down'
@@ -187,6 +190,7 @@ type B2IconName =
   | 'folder-plus'
   | 'globe-2'
   | 'import'
+  | 'info'
   | 'layers-3'
   | 'more-horizontal'
   | 'panel-left-close'
@@ -203,6 +207,7 @@ type B2LucideGlyph = LucideIcon;
 
 const b2LucideIcons: Record<B2IconName, B2LucideGlyph> = {
   activity: Activity,
+  'alert-octagon': OctagonAlert,
   'alert-triangle': AlertTriangle,
   'arrow-left': ArrowLeft,
   'arrow-up-down': ArrowUpDown,
@@ -222,6 +227,7 @@ const b2LucideIcons: Record<B2IconName, B2LucideGlyph> = {
   'folder-plus': FolderPlus,
   'globe-2': Globe2,
   import: Import,
+  info: Info,
   'layers-3': Layers3,
   'more-horizontal': MoreHorizontal,
   'panel-left-close': PanelLeftClose,
@@ -2285,6 +2291,7 @@ export function SelectedCatalog({
       {state.scenario === 'stale' && (
         <InlineNotice b2Icons tone="warning" title="索引可能过期">
           当前类型仍可浏览；重新索引前不会据此授权写入。
+          <span className="reason-code">原因码：INDEX_STALE</span>
           <button type="button" onClick={() => patchState({ notice: '正在模拟重建索引…' })}>
             重建
           </button>
@@ -2987,7 +2994,7 @@ function SelectedAssetDetail({
                 <h2>正文内容</h2>
                 <span>{instructionFile.name}</span>
               </header>
-              <pre>{instructionFile.content}</pre>
+              <SourcePreview content={instructionFile.content} highlight />
             </section>
           )}
         </>
@@ -3830,6 +3837,9 @@ function AssetSurface({
           {hideHistory
             ? '可浏览原生文件；编辑和转换暂不可用。'
             : '可浏览与导出原生文件；编辑、转换、恢复和删除不可用。'}
+          {state.variant === 'selected' && (
+            <span className="reason-code">原因码：ASSET_READONLY</span>
+          )}
         </InlineNotice>
       )}
 
@@ -3948,7 +3958,7 @@ function AssetSurface({
           ) : state.view === 'structured' ? (
             <StructuredPreview asset={asset} activeFile={activeFile} />
           ) : (
-            <SourcePreview content={activeFile.content} />
+            <SourcePreview content={activeFile.content} highlight={state.variant === 'selected'} />
           )}
         </section>
 
@@ -4025,7 +4035,122 @@ function FileTree({
   );
 }
 
-function SourcePreview({ content }: { content: string }): JSX.Element {
+function tokenizeSourcePlaceholders(text: string, keyPrefix: string): ReactNode[] {
+  return text
+    .split(/(<[^>]+>)/g)
+    .filter((part) => part.length > 0)
+    .map((part, index) =>
+      part.startsWith('<') && part.endsWith('>') ? (
+        <span key={`${keyPrefix}-${index}`} className="tok-str">
+          {part}
+        </span>
+      ) : (
+        part
+      ),
+    );
+}
+
+function colorizeJsonLiterals(text: string, keyPrefix: string): ReactNode[] {
+  return text.split(/\b(true|false|null)\b/g).map((part, index) =>
+    /^(?:true|false|null)$/.test(part) ? (
+      <span key={`${keyPrefix}-${index}`} className="tok-str">
+        {part}
+      </span>
+    ) : (
+      part
+    ),
+  );
+}
+
+function tokenizeJsonLine(line: string, keyPrefix: string): ReactNode[] {
+  const pattern = /("(?:[^"\\]|\\.)*")(\s*:)?/g;
+  const nodes: ReactNode[] = [];
+  let last = 0;
+  let index = 0;
+  let match: RegExpExecArray | null = pattern.exec(line);
+  while (match !== null) {
+    if (match.index > last) {
+      nodes.push(...colorizeJsonLiterals(line.slice(last, match.index), `${keyPrefix}-t${index}`));
+    }
+    const isKey = match[2] !== undefined;
+    nodes.push(
+      <span key={`${keyPrefix}-m${index}`} className={isKey ? 'tok-key' : 'tok-str'}>
+        {match[1]}
+      </span>,
+    );
+    if (isKey) nodes.push(match[2]);
+    last = match.index + match[0].length;
+    index += 1;
+    match = pattern.exec(line);
+  }
+  if (last < line.length) {
+    nodes.push(...colorizeJsonLiterals(line.slice(last), `${keyPrefix}-e`));
+  }
+  return nodes;
+}
+
+/* 轻量语法着色（定稿）：frontmatter/JSON 键蓝色、字符串与占位符绿色、Markdown 标题加粗。 */
+function renderSourceTokens(content: string): ReactNode[][] {
+  const isJson = content.trimStart().startsWith('{');
+  let inFrontmatter = false;
+  return content.split('\n').map((line, lineIndex) => {
+    const key = `l${lineIndex}`;
+    if (isJson) return tokenizeJsonLine(line, key);
+    if (line.trim() === '---') {
+      inFrontmatter = !inFrontmatter;
+      return [
+        <span key={key} className="cm">
+          {line}
+        </span>,
+      ];
+    }
+    if (/^#{1,3}\s/.test(line)) {
+      return [
+        <span key={key} className="tok-heading">
+          {line}
+        </span>,
+      ];
+    }
+    if (inFrontmatter) {
+      const field = line.match(/^([\w-]+)(:)(.*)$/);
+      if (field !== null) {
+        return [
+          <span key={`${key}-k`} className="tok-key">
+            {field[1]}
+          </span>,
+          field[2],
+          ...tokenizeSourcePlaceholders(field[3], `${key}-v`),
+        ];
+      }
+    }
+    return tokenizeSourcePlaceholders(line, key);
+  });
+}
+
+function SourcePreview({
+  content,
+  highlight = false,
+}: {
+  content: string;
+  highlight?: boolean;
+}): JSX.Element {
+  if (highlight) {
+    const tokenized = renderSourceTokens(content);
+    return (
+      <div className="source-preview is-highlighted" tabIndex={0} aria-label="源码，只读">
+        <pre>
+          {tokenized.map((nodes, index) => (
+            <span key={index} className="sv-line">
+              <span className="ln" aria-hidden="true">
+                {index + 1}
+              </span>
+              <span className="sv-text">{nodes.length === 0 ? ' ' : nodes}</span>
+            </span>
+          ))}
+        </pre>
+      </div>
+    );
+  }
   const lines = content.split('\n');
   return (
     <div className="source-preview" tabIndex={0} aria-label="源码，只读">
@@ -4243,6 +4368,7 @@ function ScenarioBanner({
     return (
       <InlineNotice b2Icons={variant === 'selected'} tone="warning" title="索引状态可能过期">
         正在显示磁盘读取结果。应用前会重新校验，不以索引授权写入。
+        {variant === 'selected' && <span className="reason-code">原因码：INDEX_STALE</span>}
       </InlineNotice>
     );
   }
@@ -4254,6 +4380,7 @@ function ScenarioBanner({
         title="当前 Agent 版本仅支持只读"
       >
         可浏览原生内容与导出；编辑、转换和删除暂不可用。
+        {variant === 'selected' && <span className="reason-code">原因码：TARGET_READONLY</span>}
       </InlineNotice>
     );
   }
@@ -4261,6 +4388,7 @@ function ScenarioBanner({
     return (
       <InlineNotice b2Icons={variant === 'selected'} tone="warning" title="目标能力可能降级">
         浏览不受影响；转换时会逐项说明映射结果。
+        {variant === 'selected' && <span className="reason-code">原因码：MAPPING_DEGRADED</span>}
       </InlineNotice>
     );
   }
@@ -4270,6 +4398,7 @@ function ScenarioBanner({
         {variant === 'selected'
           ? '查看能力映射或授权范围后再重试。'
           : '查看能力映射或授权范围后选择恢复动作。'}
+        {variant === 'selected' && <span className="reason-code">原因码：WRITE_BLOCKED</span>}
       </InlineNotice>
     );
   }
@@ -4277,6 +4406,7 @@ function ScenarioBanner({
     return (
       <InlineNotice b2Icons={variant === 'selected'} tone="warning" title="应用时将模拟磁盘漂移">
         用于验收三方冲突与草稿保留状态。
+        {variant === 'selected' && <span className="reason-code">原因码：DISK_CONFLICT</span>}
       </InlineNotice>
     );
   }
@@ -4284,6 +4414,7 @@ function ScenarioBanner({
     return (
       <InlineNotice b2Icons={variant === 'selected'} tone="danger" title="部分管理状态读取失败">
         原生文件仍可只读浏览；重试不会产生写入。
+        {variant === 'selected' && <span className="reason-code">原因码：STATUS_READ_FAILED</span>}
       </InlineNotice>
     );
   }
@@ -4622,7 +4753,9 @@ function MappingSurface({
       <div className={`mapping-summary ${blocked ? 'danger' : degraded ? 'warning' : 'positive'}`}>
         <span className="mapping-symbol">
           {state.variant === 'selected' ? (
-            <B2Icon name={blocked || degraded ? 'alert-triangle' : 'check-circle-2'} />
+            <B2Icon
+              name={blocked ? 'alert-octagon' : degraded ? 'alert-triangle' : 'check-circle-2'}
+            />
           ) : blocked ? (
             '×'
           ) : degraded ? (
@@ -5931,7 +6064,11 @@ function InlineNotice({
     <div className={`inline-notice ${tone}`} role={tone === 'danger' ? 'alert' : 'status'}>
       <span className="notice-icon" aria-hidden="true">
         {b2Icons ? (
-          <B2Icon name={tone === 'neutral' ? 'activity' : 'alert-triangle'} />
+          <B2Icon
+            name={
+              tone === 'neutral' ? 'info' : tone === 'danger' ? 'alert-octagon' : 'alert-triangle'
+            }
+          />
         ) : tone === 'danger' ? (
           '!'
         ) : tone === 'warning' ? (

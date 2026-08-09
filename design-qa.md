@@ -63,3 +63,30 @@
 - 本次没有执行 commit、push、创建 PR 或部署。
 
 final result: blocked
+
+## 2026-08-08：当前 selected B2 UI demo 验收
+
+> 本节记录当前 selected B2 UI demo 的用户确认。上方 v22 的 `final result: blocked` 属于历史环境与历史证据，保持原样；本节不回溯改写该结论。
+
+### 验收对象与结论
+
+- 用户已确认当前 selected B2 UI demo。
+- Branch：`codex/ui-detail-polish`；base：`5d4b4f3`。
+- 原型入口：`http://127.0.0.1:1421/?prototype=full-ui&variant=selected&journey=browse&scenario=ready&controls=0&inherit=A`。
+- 浏览器验收覆盖 `1586×992`、`1280×800` 与 `390×844`；控制台无 error。
+
+### 当前实现验证
+
+- `npm run test:frontend`：125/125 通过。
+- `npm run build:frontend`：通过。
+- focused WDIO：1/1 通过。
+- L1：64/64 通过（新增跨来源分页边界回归）。
+- 本轮变更文件的 Prettier 检查：通过。
+- `git diff --check`：通过。
+- `npm run verify:static`：9/9 通过。
+
+### 证据边界
+
+- 本节证明当前 throwaway Mock 的 UI／浏览器验收已被用户确认，不证明生产实现、真实配置写入、全局适用解析或 Agent enable intent 已完成。
+- 上述测试、构建与浏览器结果不关闭 FE 票据、IPC、L3 或 L4 门禁；这些事项仍需要各自的正式实现与 provenance-separated evidence。
+- 本次没有执行 commit、push、创建 PR 或部署。

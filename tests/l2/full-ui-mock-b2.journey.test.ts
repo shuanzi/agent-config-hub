@@ -260,6 +260,24 @@ describe('selected B2 long-term instruction boundary', () => {
     expect(await textarea.isEnabled()).toBe(true);
     expect(await $('.b2-instruction-status').getText()).toContain('Codex');
     expect(await $$('.b2-instruction-status button, .b2-instruction-status input').length).toBe(0);
+    const statusGeometry = await browser.execute(() => {
+      const status = document.querySelector<HTMLElement>('.b2-instruction-status');
+      if (status === null) return null;
+      const statusRect = status.getBoundingClientRect();
+      return {
+        flexDirection: getComputedStyle(status).flexDirection,
+        hasHorizontalOverflow: status.scrollWidth > status.clientWidth,
+        childrenFit: Array.from(status.children).every((child) => {
+          const childRect = child.getBoundingClientRect();
+          return childRect.left >= statusRect.left && childRect.right <= statusRect.right + 1;
+        }),
+      };
+    });
+    expect(statusGeometry).toEqual({
+      flexDirection: 'column',
+      hasHorizontalOverflow: false,
+      childrenFit: true,
+    });
     expect(await $$("//button[normalize-space()='跨 Agent 转换']").length).toBe(0);
     expect(await $$("//button[normalize-space()='准备安装']").length).toBe(0);
     expect(await $$("//button[normalize-space()='准备转换']").length).toBe(0);
