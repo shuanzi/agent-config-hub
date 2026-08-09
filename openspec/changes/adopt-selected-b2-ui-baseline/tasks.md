@@ -1,7 +1,7 @@
 ## 1. 在生产实现前建立、冻结并编排正式真相链
 
-- [ ] 1.1 新建产品决策基线 v0.2 draft，不覆盖已验收 v0.1；更新 MVP 可见类型、项目适用性、Skill 状态、类型表面、24 条转换路径及 PD-UI-B2-01～10 的索引和替代关系。
-- [ ] 1.2 独立复核产品决策基线 v0.2 draft、记录用户验收并冻结；不得以本 change、Mock 或文档自验收替代冻结记录。
+- [x] 1.1 新建产品决策基线 v0.2 draft，不覆盖已验收 v0.1；更新 MVP 可见类型、项目适用性、Skill 状态、类型表面、24 条转换路径及 PD-UI-B2-01～10 的索引和替代关系。
+- [x] 1.2 独立复核产品决策基线 v0.2 draft、记录用户验收并冻结；不得以本 change、Mock 或文档自验收替代冻结记录。
 - [ ] 1.3 仅以冻结的产品基线 fingerprint 新建前端契约 v0.2，并写入 metadata；承接 D3 之外的列表控件、默认、焦点和搜索呈现细化。
 - [ ] 1.4 在前端契约 v0.2 定义 `AssetListQuery`、`EffectiveContext`、`AssetRef`、精确 view context 段序、只读 actual read snapshot、Skill target state、`editAsset` 映射和转换边界。
 - [ ] 1.5 在前端契约 v0.2 保留 FX-03 的 Adapter／wire decode、未知字段、`EXECUTABLE_CONTENT_RISK`、敏感遮蔽和 no-execution contract/security 覆盖，并标为 Hook UI 不可达负例。
