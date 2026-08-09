@@ -43,6 +43,7 @@ import {
 } from '../../src/prototypes/full-ui-mock/FullUiMock';
 import {
   changedB2FileNames,
+  paginateB2Items,
   sortB2ItemsByNameStable,
 } from '../../src/prototypes/full-ui-mock/b2-model';
 import {
@@ -140,9 +141,23 @@ function renderAllViewCatalog(options: {
   assetId: string;
   fileName: string;
   sections: B2SourceSection[];
+  page?: {
+    items: B2SourceSection['assets'];
+    page: number;
+    pageSize: 20 | 50 | 100;
+    totalItems: number;
+    totalPages: number;
+  };
   masterDetail?: boolean;
 }): string {
   const aggregated = options.sections.flatMap((section) => section.assets);
+  const page = options.page ?? {
+    items: aggregated,
+    page: 1,
+    pageSize: 20 as const,
+    totalItems: aggregated.length,
+    totalPages: 1,
+  };
   return renderToStaticMarkup(
     createElement(SelectedCatalog, {
       state: {
@@ -158,17 +173,11 @@ function renderAllViewCatalog(options: {
         selectedPanel: 'list',
         selectedStep: 'list',
       },
-      selectedAssets: aggregated,
+      selectedAssets: page.items,
       selectedApplicableGlobalAssets: aggregated.filter((asset) => asset.scope === '全局'),
       selectedSourceSections: options.sections,
-      b2ListControls: { sortDirection: 'asc', pageSize: 20, page: 1 },
-      b2Page: {
-        items: aggregated,
-        page: 1,
-        pageSize: 20,
-        totalItems: aggregated.length,
-        totalPages: 1,
-      },
+      b2ListControls: { sortDirection: 'asc', pageSize: page.pageSize, page: page.page },
+      b2Page: page,
       b2FirstRowFocusRef: createRef<HTMLButtonElement>(),
       b2ListScrollRef: createRef<HTMLDivElement>(),
       selectedFilterTriggerRef: createRef<HTMLButtonElement>(),
@@ -1298,6 +1307,13 @@ describe('selected B2 config context', () => {
       new URL('../../src/prototypes/full-ui-mock/b2.css', import.meta.url),
       'utf8',
     );
+    const legacyCss = readFileSync(
+      new URL('../../src/prototypes/full-ui-mock/mock.css', import.meta.url),
+      'utf8',
+    );
+    const legacyRootTokens = legacyCss.match(/:root \{([\s\S]*?)\n\}/)?.[1] ?? '';
+    const selectedTokens =
+      css.match(/\.mock-root:has\(\.variant-selected\) \{([\s\S]*?)\n\}/)?.[1] ?? '';
 
     expect(css).toContain('grid-template-columns: 180px 220px minmax(0, 1fr);');
     expect(css).toContain('margin: 0 18px 18px;');
@@ -1309,6 +1325,11 @@ describe('selected B2 config context', () => {
     expect(css).toMatch(
       /\.mock-frame\.variant-selected\[data-b2-narrow='true'\] \.b2-stack-back[\s\S]*?display: inline-flex;/,
     );
+    expect(legacyRootTokens).toContain('--blue: #2864dc;');
+    expect(legacyRootTokens).toContain('--green: #137c4b;');
+    expect(legacyRootTokens).not.toContain('#0071e3');
+    expect(selectedTokens).toContain('--blue: #0071e3;');
+    expect(selectedTokens).toContain('--green: #16a34a;');
     const source = readFileSync(
       new URL('../../src/prototypes/full-ui-mock/FullUiMock.tsx', import.meta.url),
       'utf8',
@@ -1323,7 +1344,7 @@ describe('selected B2 config context', () => {
     expect(css).toContain(`@media (max-width: ${maxNarrowWidth}px)`);
     expect(css).toContain(`@media (min-width: ${maxNarrowWidth + 1}px) and (max-width: 1360px)`);
     expect(css).toMatch(
-      /\.variant-selected \.flow-footer \.primary-button \{[\s\S]*?border-color: var\(--b2-blue\);[\s\S]*?color: #fff;[\s\S]*?background: var\(--b2-blue\);/,
+      /\.variant-selected \.flow-footer \.primary-button \{[\s\S]*?border-color: var\(--b2-blue\);[\s\S]*?color: var\(--b2-panel\);[\s\S]*?background: var\(--b2-blue\);/,
     );
     expect(css).toMatch(
       /\.variant-selected \.b2-filter-popover legend,[\s\S]*?\.variant-selected \.b2-filter-popover label \{[\s\S]*?font-size: 12px;/,
@@ -1333,6 +1354,12 @@ describe('selected B2 config context', () => {
     );
     expect(css).toMatch(
       /\.variant-selected \.selected-header-status \.status-dot \{[\s\S]*?font-size: 12px;/,
+    );
+    expect(css).toMatch(
+      /\.mock-frame\[data-viewport='medium'\]\.variant-selected \.b2-instruction-status \{[\s\S]*?align-items: flex-start;[\s\S]*?flex-direction: column;[\s\S]*?gap: 10px;/,
+    );
+    expect(css).toMatch(
+      /\.mock-frame\[data-viewport='medium'\]\.variant-selected \.b2-instruction-status dl \{[\s\S]*?flex-wrap: wrap;[\s\S]*?gap: 8px 18px;/,
     );
     expect(css).toMatch(/\.variant-selected \.outcome-surface \{[\s\S]*?align-content: start;/);
   });
@@ -2154,6 +2181,69 @@ describe('selected B2 config context', () => {
     expect(selectedRowIndex).toBeGreaterThan(-1);
     expect(markup.lastIndexOf('b2-source-badge is-global', selectedRowIndex)).toBeGreaterThan(-1);
     expect(markup.indexOf('b2-source-badge is-project')).toBeGreaterThan(selectedRowIndex);
+  });
+
+  it('keeps full source counts when a global page tail meets a project page head', () => {
+    const globalTemplate = b2Assets.find(
+      (asset) => asset.type === 'Skills' && asset.scope === '全局',
+    )!;
+    const projectTemplate = b2Assets.find(
+      (asset) =>
+        asset.type === 'Skills' &&
+        asset.scope === '项目' &&
+        asset.project === 'agent-config-manager',
+    )!;
+    const globalAssets = Array.from({ length: 21 }, (_, index) => ({
+      ...globalTemplate,
+      id: `cross-source-global-${index + 1}`,
+      name: `global-page-${index + 1}`,
+    }));
+    const projectAssets = Array.from({ length: 2 }, (_, index) => ({
+      ...projectTemplate,
+      id: `cross-source-project-${index + 1}`,
+      name: `project-page-${index + 1}`,
+    }));
+    const sections: B2SourceSection[] = [
+      { key: 'global', label: '全局适用', assets: globalAssets },
+      {
+        key: 'project:agent-config-manager',
+        label: 'agent-config-manager',
+        assets: projectAssets,
+      },
+    ];
+    const allFilteredAssets = sections.flatMap((section) => section.assets);
+    const page = paginateB2Items(allFilteredAssets, 2, 20);
+
+    const markup = renderAllViewCatalog({
+      assetType: 'Skills',
+      assetId: page.items[0].id,
+      fileName: page.items[0].files[0].name,
+      sections,
+      page,
+    });
+    const text = markup.replace(/<!-- -->/g, '');
+
+    expect(page.items.map((asset) => asset.id)).toEqual([
+      'cross-source-global-21',
+      'cross-source-project-1',
+      'cross-source-project-2',
+    ]);
+    expect(page).toMatchObject({ page: 2, pageSize: 20, totalItems: 23, totalPages: 2 });
+    expect(markup).toContain('aria-label="全局适用资产"');
+    expect(markup).toContain('aria-label="agent-config-manager 项目资产"');
+    expect(text).toContain('全局适用 · 21 项');
+    expect(text).toContain('agent-config-manager · 2 项');
+    expect(text).toContain('共 23 项');
+    expect(text).not.toContain('global-page-20');
+
+    const visibleOrder = [
+      '全局适用 · 21 项',
+      'global-page-21',
+      'agent-config-manager · 2 项',
+      'project-page-1',
+    ].map((value) => text.indexOf(value));
+    expect(visibleOrder.every((position) => position >= 0)).toBe(true);
+    expect(visibleOrder).toEqual([...visibleOrder].sort((left, right) => left - right));
   });
 
   it('maps the narrow stack as type → context → list → detail with matching return targets', () => {

@@ -4,6 +4,27 @@
  */
 
 .mock-root:has(.variant-selected) {
+  /* Apple token 仅作用于 selected，legacy A/B/C 继续继承 mock.css 的历史值。 */
+  --mock-bg: #f5f5f7;
+  --surface: #ffffff;
+  --surface-muted: #f5f5f7;
+  --surface-raised: #fbfbfd;
+  --surface-selected: color-mix(in srgb, var(--blue) 8%, #ffffff);
+  --ink: #1d1d1f;
+  --ink-soft: #6e6e73;
+  --ink-faint: #86868b;
+  --line: #d2d2d7;
+  --line-strong: #86868b;
+  --blue: #0071e3;
+  --blue-dark: #0066cc;
+  --blue-soft: color-mix(in srgb, var(--blue) 9%, #ffffff);
+  --green: #16a34a;
+  --green-soft: color-mix(in srgb, var(--green) 10%, #ffffff);
+  --amber: #9a5b00;
+  --amber-soft: #fff5df;
+  --red: #dc2626;
+  --red-soft: color-mix(in srgb, var(--red) 7%, #ffffff);
+  --radius: 8px;
   min-height: 0;
   padding: 0;
   background: var(--surface-muted);
@@ -387,7 +408,7 @@
   align-items: flex-start;
   justify-content: space-between;
   min-height: 104px;
-  padding: 27px 10px 18px;
+  padding: 27px 12px 18px;
   border-bottom: 1px solid var(--b2-line);
 }
 
@@ -1032,7 +1053,7 @@
 }
 
 .variant-selected .b2-detail-section {
-  padding: 24px 0;
+  padding: 20px 0;
   border-bottom: 1px solid var(--b2-line);
 }
 
@@ -1042,7 +1063,7 @@
 
 .variant-selected .b2-detail-section h2,
 .variant-selected .b2-editor-files h2 {
-  margin: 0 0 14px;
+  margin: 0 0 12px;
   color: var(--b2-faint);
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: 12px;
@@ -1051,7 +1072,7 @@
 }
 
 .variant-selected .b2-detail-section > p {
-  margin: -4px 0 14px;
+  margin: -2px 0 12px;
   color: var(--b2-muted);
   font-size: 13px;
   line-height: 1.55;
@@ -1068,8 +1089,8 @@
   grid-template-columns: 105px minmax(0, 1fr);
   align-items: baseline;
   gap: 12px;
-  min-height: 46px;
-  padding: 10px 0;
+  min-height: 44px;
+  padding: 9px 0;
   border-bottom: 1px solid var(--surface-muted);
 }
 
@@ -1828,6 +1849,17 @@
     padding-inline: 6px;
     font-size: 12px;
   }
+
+  .mock-frame.variant-selected .b2-instruction-status {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .mock-frame.variant-selected .b2-instruction-status dl {
+    flex-wrap: wrap;
+    gap: 8px 18px;
+  }
 }
 
 /* Medium reference: preserve all three columns at 1280×800. */
@@ -1855,6 +1887,17 @@
   font-size: 12px;
 }
 
+.mock-frame[data-viewport='medium'].variant-selected .b2-instruction-status {
+  align-items: flex-start;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.mock-frame[data-viewport='medium'].variant-selected .b2-instruction-status dl {
+  flex-wrap: wrap;
+  gap: 8px 18px;
+}
+
 /* Sub-1200 browser widths use the existing single-surface stack. */
 @media (max-width: 1199px) {
   .mock-root:has(.variant-selected) .mock-frame.variant-selected {
@@ -1876,6 +1919,8 @@
 
 .mock-frame.variant-selected[data-b2-narrow='true'] .selected-search-trigger {
   width: 40px;
+  min-width: 40px;
+  max-width: 40px;
   padding: 0 11px;
 }
 
@@ -2008,12 +2053,12 @@
 
 .mock-frame.variant-selected[data-b2-narrow='true'] .b2-row-path {
   min-height: 34px;
-  padding-left: 40px;
+  padding-left: 42px;
 }
 
 .mock-frame.variant-selected[data-b2-narrow='true'] .b2-row-targets {
   grid-template-columns: repeat(4, minmax(0, 1fr)) 30px;
-  padding-left: 38px;
+  padding-left: 42px;
 }
 
 .mock-frame.variant-selected[data-b2-narrow='true'] .b2-agent-chip {
@@ -2023,6 +2068,8 @@
 
 .mock-frame.variant-selected[data-b2-narrow='true'] .selected-catalog-footer {
   grid-row: 4;
+  min-height: 64px;
+  height: 64px;
   padding-inline: 8px;
 }
 
@@ -2420,7 +2467,7 @@
   justify-content: space-between;
   gap: 22px;
   min-height: 48px;
-  padding: 8px 14px;
+  padding: 8px 16px;
   border: 1px solid var(--b2-line);
   border-radius: 8px;
   background: var(--b2-panel-muted);
@@ -2518,7 +2565,7 @@
   width: 100%;
   min-height: 320px;
   box-sizing: border-box;
-  padding: 18px;
+  padding: 16px;
   resize: vertical;
   border: 0;
   border-radius: 0;
@@ -2543,7 +2590,7 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 0 14px;
+  padding: 0 16px;
   border-top: 1px solid var(--b2-line);
   color: var(--b2-faint);
   background: var(--b2-panel);
@@ -2783,7 +2830,16 @@
 
 .mock-frame.variant-selected .b2-master-detail .selected-catalog-heading {
   flex-wrap: wrap;
-  row-gap: 10px;
+  height: 132px;
+  min-height: 132px;
+  padding: 18px 12px 12px;
+  row-gap: 6px;
+}
+
+.mock-frame.variant-selected .b2-master-detail .b2-list-actions {
+  align-self: flex-start;
+  gap: 8px;
+  padding-top: 0;
 }
 
 .mock-frame.variant-selected .b2-master-detail .b2-asset-row {
@@ -2822,6 +2878,7 @@
 
 .variant-selected .b2-subagent-body {
   display: grid;
+  flex: 0 0 auto;
   margin-top: 18px;
   overflow: hidden;
   border: 1px solid var(--b2-line-strong);
@@ -2853,7 +2910,7 @@
 
 .variant-selected .b2-subagent-body pre {
   margin: 0;
-  padding: 18px;
+  padding: 16px;
   overflow: auto;
   color: var(--b2-ink);
   font:
@@ -2885,6 +2942,10 @@
   padding: 0 18px;
   white-space: pre-wrap;
   transition: background 150ms cubic-bezier(0.28, 0, 0.22, 1);
+}
+
+.variant-selected .b2-subagent-body .source-preview .sv-line {
+  padding-inline: 16px;
 }
 
 .variant-selected .source-preview .sv-line:hover {

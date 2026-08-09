@@ -4753,7 +4753,9 @@ function MappingSurface({
       <div className={`mapping-summary ${blocked ? 'danger' : degraded ? 'warning' : 'positive'}`}>
         <span className="mapping-symbol">
           {state.variant === 'selected' ? (
-            <B2Icon name={blocked ? 'alert-octagon' : degraded ? 'alert-triangle' : 'check-circle-2'} />
+            <B2Icon
+              name={blocked ? 'alert-octagon' : degraded ? 'alert-triangle' : 'check-circle-2'}
+            />
           ) : blocked ? (
             '×'
           ) : degraded ? (
