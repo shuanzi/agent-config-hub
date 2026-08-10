@@ -21,6 +21,9 @@ import { fileURLToPath } from 'node:url';
 import type {} from 'webdriverio';
 // @ts-expect-error runtime helper is a plain Node ESM module.
 import { HarnessPeakRssSampler } from '../scripts/orchestrator/pf01-resource.mjs';
+// prettier-ignore
+// @ts-expect-error runtime helper is a plain Node ESM module.
+import { readHarnessExitFailure, waitForHarnessLifecycleState, writeHarnessExitFailure, writeHarnessExitRequest } from '../scripts/orchestrator/pf01-lifecycle.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, '..');
@@ -28,6 +31,27 @@ const appBinary = join(repoRoot, 'src-tauri/target/debug/agent-config-manager');
 
 let fixtureSandbox: string | null = null;
 let resourceSampler: InstanceType<typeof HarnessPeakRssSampler> | null = null;
+
+async function requestHarnessNormalExit(): Promise<void> {
+  const lifecyclePath = process.env.PF01_HARNESS_LIFECYCLE_PATH;
+  if (lifecyclePath === undefined || lifecyclePath.length === 0) return;
+
+  try {
+    const startedHarness = await waitForHarnessLifecycleState({
+      lifecyclePath,
+      expectedNormalExit: false,
+    });
+    writeHarnessExitRequest({ lifecyclePath, harness: startedHarness });
+    await waitForHarnessLifecycleState({
+      lifecyclePath,
+      expectedNormalExit: true,
+      expectedHarness: startedHarness,
+    });
+  } catch (error) {
+    writeHarnessExitFailure(lifecyclePath);
+    throw error;
+  }
+}
 
 function appendResourceRun(outputDir: string, run: unknown): void {
   const resourcePath = join(outputDir, 'l3-resource-runs.json');
@@ -83,7 +107,14 @@ export const config = {
     });
     resourceSampler.start();
   },
+  // Runner 先成功 deleteSession，才执行 config afterSession。失败写到同一临时
+  // sandbox 的 marker；runner 对 hook 异常只记录日志，onComplete 会据此使 WDIO
+  // 非零，避免把未认证的 normal exit 误作有效采样。
+  afterSession: async () => {
+    await requestHarnessNormalExit();
+  },
   onComplete: async () => {
+    let lifecycleFailure: Error | null = null;
     if (process.env.PF01_OUTPUT_DIR !== undefined && resourceSampler !== null) {
       try {
         appendResourceRun(process.env.PF01_OUTPUT_DIR, await resourceSampler.finalize());
@@ -96,6 +127,19 @@ export const config = {
         });
       }
     }
+    const lifecyclePath = process.env.PF01_HARNESS_LIFECYCLE_PATH;
+    if (lifecyclePath !== undefined && lifecyclePath.length > 0) {
+      try {
+        if (readHarnessExitFailure(lifecyclePath) !== null) {
+          lifecycleFailure = new Error('PF-01 L3 harness normal exit not established');
+        }
+      } catch (error) {
+        lifecycleFailure =
+          error instanceof Error
+            ? error
+            : new Error('PF-01 harness lifecycle failure marker invalid');
+      }
+    }
     resourceSampler = null;
     if (fixtureSandbox !== null) {
       rmSync(fixtureSandbox, { recursive: true, force: true });
@@ -103,5 +147,6 @@ export const config = {
     }
     delete process.env.ACM_NATIVE_ROOT;
     delete process.env.PF01_HARNESS_LIFECYCLE_PATH;
+    if (lifecycleFailure !== null) throw lifecycleFailure;
   },
 } as Options.Testrunner;
