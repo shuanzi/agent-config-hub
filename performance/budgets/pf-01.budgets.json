@@ -1,0 +1,125 @@
+{
+  "schemaVersion": 2,
+  "descriptorId": "PF-01",
+  "descriptorDigest": "f7dda0b93f894e87051682ecac0b73a44ff102c5454455c7ad81edea2644a8e5",
+  "profile": "representative",
+  "baselineProvenance": {
+    "run": ".artifacts/performance/PF-01/20260810T174423659Z-p67445-000",
+    "collectedAt": "2026-08-10T17:45:41.501Z",
+    "statusBeforeBudgetFreeze": "baseline-collected / budget-not-frozen",
+    "commit": "4fdff98be42065936bcfff462302f033de5d6b4a",
+    "worktreeDirty": false,
+    "artifact": {
+      "identityPath": ".artifacts/test-harness/identity.json",
+      "kind": "test-harness",
+      "identifier": "com.agentconfigmanager.testharness",
+      "profile": "debug",
+      "binary": "src-tauri/target/debug/agent-config-manager",
+      "binarySha256": "14de757be185be3df0d85e8823ff4580d8780f13012030450343e2f8eba51ae8",
+      "provenance": "L3 专用隔离测试构建；非生产签名/DMG，不取得 L4 credit"
+    },
+    "runner": {
+      "node": "v24.18.0",
+      "npm": "11.16.0",
+      "platform": "darwin",
+      "release": "25.6.0",
+      "macosProductVersion": "26.6.1",
+      "arch": "arm64"
+    },
+    "toolchain": {
+      "cargo": "cargo 1.97.1 (c980f4866 2026-06-30)",
+      "rustc": "rustc 1.97.1 (8bab26f4f 2026-07-14)"
+    },
+    "fixture": {
+      "path": "fixtures/fx-01/native-root",
+      "sha256": "ccaaf3161f651e22968d2ff6b32f4e0d06d108a18ed63977930a4ff27eab9519"
+    },
+    "resources": {
+      "metric": "pf01.l3.peak_rss_bytes",
+      "layer": "L3 test-harness debug（隔离临时 fixture 根；非 release-like artifact）",
+      "sampling": "agent-config-manager harness PID + 后代；50ms process-tree RSS bytes；排除 WDIO/Vite；成功启动至正常退出",
+      "rawPeaksBytes": [
+        111575040,
+        111640576,
+        111771648
+      ],
+      "maxBytes": 111771648
+    }
+  },
+  "formula": {
+    "absoluteCeilingMs": "ceil(p95 * 1.5 / 10) * 10",
+    "regressionAllowance": "current p50 <= baseline p50 * 1.25"
+  },
+  "budgets": [
+    {
+      "metric": "pf01.startup.first_list_visible",
+      "layer": "L2 mock renderer（headless Chrome + Vite dev server；非 release-like artifact）",
+      "baseline": {
+        "p50": 4,
+        "p95": 6.78,
+        "n": 5
+      },
+      "absoluteCeilingMs": 20,
+      "regressionAllowance": {
+        "relativeTo": "baseline-p50",
+        "maxRatio": 1.25
+      }
+    },
+    {
+      "metric": "pf01.search.results_visible",
+      "layer": "L2 mock renderer（headless Chrome + Vite dev server；非 release-like artifact）",
+      "baseline": {
+        "p50": 2.8,
+        "p95": 10.455,
+        "n": 20
+      },
+      "absoluteCeilingMs": 20,
+      "regressionAllowance": {
+        "relativeTo": "baseline-p50",
+        "maxRatio": 1.25
+      }
+    },
+    {
+      "metric": "pf01.filter.results_visible",
+      "layer": "L2 mock renderer（headless Chrome + Vite dev server；非 release-like artifact）",
+      "baseline": {
+        "p50": 19.9,
+        "p95": 44.67,
+        "n": 20
+      },
+      "absoluteCeilingMs": 70,
+      "regressionAllowance": {
+        "relativeTo": "baseline-p50",
+        "maxRatio": 1.25
+      }
+    },
+    {
+      "metric": "pf01.select.skill_cells_visible",
+      "layer": "L2 mock renderer（headless Chrome + Vite dev server；非 release-like artifact）",
+      "baseline": {
+        "p50": 59.8,
+        "p95": 72.935,
+        "n": 20
+      },
+      "absoluteCeilingMs": 110,
+      "regressionAllowance": {
+        "relativeTo": "baseline-p50",
+        "maxRatio": 1.25
+      }
+    },
+    {
+      "metric": "pf01.l3.cold_start.first_snapshot",
+      "layer": "L3 test-harness debug（隔离临时 fixture 根；非 release-like artifact）",
+      "baseline": {
+        "p50": 488,
+        "p95": 527.6,
+        "n": 3
+      },
+      "absoluteCeilingMs": 800,
+      "regressionAllowance": {
+        "relativeTo": "baseline-p50",
+        "maxRatio": 1.25
+      }
+    }
+  ]
+}
