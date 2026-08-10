@@ -48,3 +48,19 @@
 当前没有真实 app、DMG、updater、adapter release artifact、15.0.x 安装启动或签名/notarization evidence；这些保持 `planned / unverified` 并由实现期票据及 `RELEASE-GATE` 负责，不冒充本次架构审查证据。
 
 门禁关闭不代表任何实现、测试或发布已完成，也不授权跳过票据依赖、产品基线、前端契约或本技术方案。
+
+## 2026-08-10：v0.2 技术方案影响复核
+
+**Status:** closed（维持不变）。
+
+在冻结的产品基线 v0.2 与前端契约 v0.2 之后，task 1.8 的最小影响复核确认：`ARC-02b`
+治理既有 command/event 与 trust seam；`ARC-03` 治理 `GatewayCore`、`AdapterRegistry`、
+provenance 与 runtime ownership；`ARC-06c` 治理 Rust-first breaking wire、version、vectors、
+drift 与 provenance-separated evidence。三者合起来覆盖 FE-07R/FE-01 的 foundation ticket
+transfer。影响限于未来的只读 query/projection、Rust-first DTO delta 与计划 evidence 编排；
+不新增 command/event、信任边界、写权限或 prepare/apply/write surface，故本门禁不重开。
+
+未来仅在出现新的 command、信任边界或 serialization 事实源时重新评估并重开 `ARCH-GATE`。
+文档、Mock、OpenSpec 与 static 检查不是 runtime 或 ticket closure evidence；本记录不改变
+tracker frontier、DAG、FE acceptance、`TICKET_REGISTRY`、manifest、wire、Gateway/Adapter、
+UI 或 runtime。后续仅按 task 1.10–1.23 的实际完成情况更新或重算这些对象。
