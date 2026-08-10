@@ -2,9 +2,9 @@
 
 **Acceptance state:** `Frozen (2026-08-10; planning acceptance only)`
 
-**Ticket Status:** `blocked`（不是 `done`；FE-07R 尚未 `done`，且无其 actual-read evidence）
+**Ticket Status:** `ready-for-agent`（不是 `done`；direct blocker FE-07R 已 `done`，actual-read evidence run `20260810T071547Z`）
 
-**Blocked by:** FE-07R — 项目适用性与 actual-read projection 的已验证 bootstrap、shared harness 与 actual-read snapshot。
+**Direct blocker evidence:** FE-07R 已满足；其已验证 bootstrap、shared harness 与 actual-read snapshot 保持为 FE-01 上游输入。
 
 **Primary contract fixture:** `FX-01 single-skill-ready`
 
