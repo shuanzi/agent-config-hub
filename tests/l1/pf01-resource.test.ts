@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 // prettier-ignore
 // @ts-expect-error runtime helper is a plain Node ESM module.
-import { finalizeHarnessPeakRss, HarnessPeakRssSampler, validatePf01ResourceEvidence } from '../../scripts/orchestrator/pf01-resource.mjs';
+import { finalizeHarnessPeakRss, HarnessPeakRssSampler, parsePsRssTable, processTreeRssBytes, validatePf01ResourceEvidence } from '../../scripts/orchestrator/pf01-resource.mjs';
 
 const temporaryRoots: string[] = [];
 
@@ -14,6 +14,39 @@ afterEach(() => {
 });
 
 describe('PF-01 L3 peak RSS evidence', () => {
+  it('接受全系统 ps 中合法的零 RSS 行，只汇总 harness 树的正 RSS', () => {
+    const rows = parsePsRssTable(`
+      1 0 0
+      42 1 0
+      43 42 7
+      900 1 0
+    `);
+
+    expect(rows).toEqual([
+      { pid: 1, parentPid: 0, rssBytes: 0 },
+      { pid: 42, parentPid: 1, rssBytes: 0 },
+      { pid: 43, parentPid: 42, rssBytes: 7 * 1024 },
+      { pid: 900, parentPid: 1, rssBytes: 0 },
+    ]);
+    expect(processTreeRssBytes(rows, 42)).toBe(7 * 1024);
+  });
+
+  it('当 harness 树总 RSS 为零或 ps 数值非法时保持 fail-closed', () => {
+    expect(() =>
+      processTreeRssBytes(
+        parsePsRssTable(`
+          42 1 0
+          43 42 0
+        `),
+        42,
+      ),
+    ).toThrow('tree RSS missing');
+
+    for (const table of ['42 1 -1', '42 xx 7', '0 1 7', '42 9007199254740992 7']) {
+      expect(() => parsePsRssTable(table)).toThrow('inconclusive');
+    }
+  });
+
   it('only accepts three complete, normally-exited harness-tree samples and records their max', () => {
     const runs = [
       { harnessPid: 101, samples: [100, 130, 110], normalExit: true },

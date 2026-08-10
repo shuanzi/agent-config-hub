@@ -28,6 +28,10 @@ function validPositiveInteger(value) {
   return Number.isSafeInteger(value) && value > 0;
 }
 
+function validNonnegativeInteger(value) {
+  return Number.isSafeInteger(value) && value >= 0;
+}
+
 /** 将 macOS `ps -axo pid=,ppid=,rss=` 转为可审计的 PID 表。RSS 单位为 KiB。 */
 export function parsePsRssTable(stdout) {
   const rows = [];
@@ -38,10 +42,16 @@ export function parsePsRssTable(stdout) {
       throw inconclusive('ps output malformed');
     }
     const [pid, parentPid, rssKiB] = fields.map(Number);
-    if (!validPositiveInteger(pid) || !Number.isSafeInteger(parentPid) || !validPositiveInteger(rssKiB)) {
+    const rssBytes = rssKiB * 1024;
+    if (
+      !validPositiveInteger(pid) ||
+      !validNonnegativeInteger(parentPid) ||
+      !validNonnegativeInteger(rssKiB) ||
+      !Number.isSafeInteger(rssBytes)
+    ) {
       throw inconclusive('ps output out of range');
     }
-    rows.push({ pid, parentPid, rssBytes: rssKiB * 1024 });
+    rows.push({ pid, parentPid, rssBytes });
   }
   return rows;
 }
