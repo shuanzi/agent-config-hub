@@ -28,12 +28,12 @@
 
 ### FE-07R：项目适用性与 actual read projection
 
-- [ ] 2.1 重新读取并验证 ARCH-GATE=`closed`、FE-07R=`ready-for-agent` 和全部 direct blockers=done 且有 evidence；任一不满足，记录 blocker 并停止 FE-07R slice。
-- [ ] 2.2 在 FE-07R 内完成最小 read-only contract／domain／Rust-first wire delta：opaque `projectId`、active Adapter／rule provenance、resolved／unknown／blocked／stale fail-closed、All／Global／Project projection，以及读取 built-in／active Adapter／rule provenance 的只读 AdapterRegistry seam；确认 FX-19 主归属，不加入业务写入、项目纳入、停止管理、index lifecycle、prepare／apply 或 UI。
-- [ ] 2.3 在 FE-07R 内建立完成自身 closure 所需的最小 Tauri test-harness／bootstrap、L0–L3 分层验证骨架，并创建／调整可执行 `TICKET_REGISTRY`／`verify:ticket` orchestration entry；将 evidence manifest metadata 改为 ticket／registry-driven：steps、fixture digests、PF descriptors／budgets 与 artifact identity 均按 ticket 配置，禁止硬编码 FE-01／FX-01／PF-01；从 Rust 生成 TypeScript wire、正负 vectors 与 drift 断言，并只实现 read-only resolver、actual read snapshot 和相应 Adapter／Gateway 投影。该 foundation 可供 FE-01 后续消费和扩展。
-- [ ] 2.4 在 FE-07R 内仅执行 L0／L1／L3 actual-read evidence；不增加 L2 UI journey、PF、业务写入、项目／index lifecycle 或 prepare／apply。
-- [ ] 2.5 在 FE-07R 内实际运行 `npm run verify:ticket -- FE-07R`，动态生成 evidence `manifest.json`，并断言该 FE-07R manifest 的 scope／steps 仅匹配 L0／L1／L3 actual-read、使用 FX-19 digest，且不含 PF step、PF descriptor 或 PF budget metadata；保留命令、层级、运行标识和未覆盖边界。
-- [ ] 2.6 对 FE-07R 进行独立只读复审；只有 2.1～2.5 的证据满足更新后 acceptance，才标记 FE-07R done 并更新 frontier 以解锁 FE-01。
+- [x] 2.1 重新读取并验证 ARCH-GATE=`closed`、FE-07R=`ready-for-agent` 和全部 direct blockers=done 且有 evidence；任一不满足，记录 blocker 并停止 FE-07R slice。
+- [x] 2.2 在 FE-07R 内完成最小 read-only contract／domain／Rust-first wire delta：opaque `projectId`、active Adapter／rule provenance、resolved／unknown／blocked／stale fail-closed、All／Global／Project projection，以及读取 built-in／active Adapter／rule provenance 的只读 AdapterRegistry seam；确认 FX-19 主归属，不加入业务写入、项目纳入、停止管理、index lifecycle、prepare／apply 或 UI。
+- [x] 2.3 在 FE-07R 内建立完成自身 closure 所需的最小 Tauri test-harness／bootstrap、L0–L3 分层验证骨架，并创建／调整可执行 `TICKET_REGISTRY`／`verify:ticket` orchestration entry；将 evidence manifest metadata 改为 ticket／registry-driven：steps、fixture digests、PF descriptors／budgets 与 artifact identity 均按 ticket 配置，禁止硬编码 FE-01／FX-01／PF-01；从 Rust 生成 TypeScript wire、正负 vectors 与 drift 断言，并只实现 read-only resolver、actual read snapshot 和相应 Adapter／Gateway 投影。该 foundation 可供 FE-01 后续消费和扩展。
+- [x] 2.4 在 FE-07R 内仅执行 L0／L1／L3 actual-read evidence；不增加 L2 UI journey、PF、业务写入、项目／index lifecycle 或 prepare／apply。
+- [x] 2.5 在 FE-07R 内实际运行 `npm run verify:ticket -- FE-07R`，动态生成 evidence `manifest.json`，并断言该 FE-07R manifest 的 scope／steps 仅匹配 L0／L1／L3 actual-read、使用 FX-19 digest，且不含 PF step、PF descriptor 或 PF budget metadata；保留命令、层级、运行标识和未覆盖边界。
+- [x] 2.6 对 FE-07R 进行独立只读复审；只有 2.1～2.5 的证据满足更新后 acceptance，才标记 FE-07R done 并更新 frontier 以解锁 FE-01。
 
 ## 3. FE-01、FE-02、FE-10、FE-03 与 FE-04 的垂直 slices
 

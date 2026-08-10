@@ -4,10 +4,12 @@
 //! Keychain 等任何插件。`test-harness` feature 额外编译 wdio WebDriver
 //! plugin 与测试 command（L3 专用构建，生产二进制物理不含）。
 
+pub mod adapter_registry;
 pub mod catalog;
 pub mod core;
 pub mod domain;
 pub mod ipc;
+pub mod project_applicability;
 pub mod wire;
 
 /// 进程启动记点（PF-01 L3 冷启动：process start → first trusted snapshot）。

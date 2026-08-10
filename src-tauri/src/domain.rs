@@ -31,6 +31,23 @@ pub enum AssetScope {
     Project,
 }
 
+/// 原生归属与当前读取 view 分离。项目 identity 仅为 opaque id，展示名和路径
+/// 不得参与 identity 或适用性判定。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum NativeOwnership {
+    Global,
+    Project { project_id: String },
+}
+
+impl NativeOwnership {
+    pub fn kind(&self) -> &'static str {
+        match self {
+            NativeOwnership::Global => "global",
+            NativeOwnership::Project { .. } => "project",
+        }
+    }
+}
+
 /// 稳定原因码全集（契约 §6.13，FE-01 封闭列出）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReasonCode {
@@ -118,6 +135,7 @@ pub struct AssetRef {
     pub asset_type: AssetType,
     pub native_unit_ref: String,
     pub adapter_identity: String,
+    pub native_ownership: NativeOwnership,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -224,6 +242,7 @@ pub enum Query {
     AssetList(AssetListQuery),
     AssetDetail(AssetDetailQuery),
     NativeFile(NativeFileQuery),
+    ProjectApplicability(ProjectApplicabilityQuery),
 }
 
 // ---------------------------------------------------------------------------
@@ -256,6 +275,113 @@ pub struct AssetListSnapshot {
     pub queried_at: String,
     /// ISO 8601
     pub index_updated_at: String,
+}
+
+// ---------------------------------------------------------------------------
+// FE-07R：只读项目适用性 actual-read projection
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ProjectApplicabilityView {
+    All,
+    Global,
+    Project { project_id: String },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProjectApplicabilityQuery {
+    pub view: ProjectApplicabilityView,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ApplicabilityResolution {
+    Resolved,
+    Unknown,
+    Blocked,
+    Stale,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ProvenanceSource {
+    BuiltIn,
+    ActivePackage {
+        package_identity: String,
+        package_version: String,
+    },
+}
+
+impl ProvenanceSource {
+    pub fn kind(&self) -> &'static str {
+        match self {
+            ProvenanceSource::BuiltIn => "builtIn",
+            ProvenanceSource::ActivePackage { .. } => "activePackage",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AdapterProvenance {
+    pub identity: String,
+    pub version: String,
+    pub source: ProvenanceSource,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RuleProvenance {
+    pub identity: String,
+    pub version: String,
+    pub source: ProvenanceSource,
+}
+
+/// 某全局原生资产对某个具体项目的 versioned resolver fact。非 resolved
+/// 状态一定携带稳定 reason code，并且绝不产生 project global projection。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EffectiveProjectContext {
+    pub asset: AssetRef,
+    pub project_id: String,
+    pub project_display_name: String,
+    pub adapter: AdapterProvenance,
+    pub rule: RuleProvenance,
+    pub authoritative_read_revision: String,
+    pub source_tier_id: String,
+    pub load_order: u32,
+    pub priority: i32,
+    pub override_relation: Option<OverrideRelation>,
+    pub resolution: ApplicabilityResolution,
+    pub reason_code: Option<ReasonCode>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ApplicabilityFinding {
+    pub asset: AssetRef,
+    pub context: EffectiveProjectContext,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProjectApplicabilitySegmentKind {
+    ProjectNative,
+    GlobalApplicable,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProjectApplicabilitySegment {
+    pub id: String,
+    pub kind: ProjectApplicabilitySegmentKind,
+    pub display_label: String,
+    pub project_id: Option<String>,
+    pub assets: Vec<AssetSummary>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProjectApplicabilitySnapshot {
+    pub query: ProjectApplicabilityQuery,
+    pub authoritative_read_revision: String,
+    pub segments: Vec<ProjectApplicabilitySegment>,
+    pub findings: Vec<ApplicabilityFinding>,
+    pub effective_contexts: Vec<EffectiveProjectContext>,
+    pub aggregate_total: u32,
+    /// ISO 8601
+    pub read_at: String,
 }
 
 // ---------------------------------------------------------------------------
@@ -415,6 +541,7 @@ pub struct NativeFileSnapshot {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Snapshot {
     AssetList(AssetListSnapshot),
+    ProjectApplicability(ProjectApplicabilitySnapshot),
     AssetDetail(AssetDetailSnapshot),
     NativeFile(NativeFileSnapshot),
 }

@@ -14,7 +14,7 @@ use ts_rs::TS;
 use crate::domain;
 
 /// 当前唯一支持的 wire 版本；不匹配在 ingress 封闭失败，不做协商或 fallback。
-pub const GATEWAY_WIRE_VERSION: u32 = 1;
+pub const GATEWAY_WIRE_VERSION: u32 = 2;
 
 // ---------------------------------------------------------------------------
 // 字符串枚举 DTO
@@ -39,6 +39,20 @@ wire_string_enum!(
     Hook
 );
 wire_string_enum!(AssetScopeWire, "camelCase", Global, Project);
+wire_string_enum!(
+    ApplicabilityResolutionWire,
+    "camelCase",
+    Resolved,
+    Unknown,
+    Blocked,
+    Stale
+);
+wire_string_enum!(
+    ProjectApplicabilitySegmentKindWire,
+    "camelCase",
+    ProjectNative,
+    GlobalApplicable
+);
 wire_string_enum!(
     IndexStatusWire,
     "camelCase",
@@ -205,6 +219,29 @@ pub struct AssetRefWire {
     pub asset_type: AssetTypeWire,
     pub native_unit_ref: String,
     pub adapter_identity: String,
+    pub native_ownership: NativeOwnershipWire,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+pub struct GlobalNativeOwnershipWire {}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ProjectNativeOwnershipWire {
+    pub project_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+#[serde(deny_unknown_fields)]
+pub enum NativeOwnershipWire {
+    Global(GlobalNativeOwnershipWire),
+    Project(ProjectNativeOwnershipWire),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -315,6 +352,39 @@ pub struct NativeFileQueryWire {
     pub file_id: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+pub struct AllProjectApplicabilityViewWire {}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+pub struct GlobalProjectApplicabilityViewWire {}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ProjectProjectApplicabilityViewWire {
+    pub project_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+#[serde(deny_unknown_fields)]
+pub enum ProjectApplicabilityViewWire {
+    All(AllProjectApplicabilityViewWire),
+    Global(GlobalProjectApplicabilityViewWire),
+    Project(ProjectProjectApplicabilityViewWire),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ProjectApplicabilityQueryWire {
+    pub view: ProjectApplicabilityViewWire,
+}
+
 /// request payload 封闭 union（ARC-02b：显式 tag，不用字符串 route）。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(
@@ -325,6 +395,7 @@ pub struct NativeFileQueryWire {
 #[serde(deny_unknown_fields)]
 pub enum ReadRequestPayload {
     AssetList(AssetListQueryWire),
+    ProjectApplicability(ProjectApplicabilityQueryWire),
     AssetDetail(AssetDetailQueryWire),
     NativeFile(NativeFileQueryWire),
 }
@@ -371,6 +442,97 @@ pub struct AssetListSnapshotWire {
     pub queried_at: String,
     /// ISO 8601
     pub index_updated_at: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ActivePackageProvenanceSourceWire {
+    pub package_identity: String,
+    pub package_version: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+pub struct BuiltInProvenanceSourceWire {}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+#[serde(deny_unknown_fields)]
+pub enum ProvenanceSourceWire {
+    BuiltIn(BuiltInProvenanceSourceWire),
+    ActivePackage(ActivePackageProvenanceSourceWire),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AdapterProvenanceWire {
+    pub identity: String,
+    pub version: String,
+    pub source: ProvenanceSourceWire,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RuleProvenanceWire {
+    pub identity: String,
+    pub version: String,
+    pub source: ProvenanceSourceWire,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct EffectiveProjectContextWire {
+    pub asset: AssetRefWire,
+    pub project_id: String,
+    pub project_display_name: String,
+    pub adapter: AdapterProvenanceWire,
+    pub rule: RuleProvenanceWire,
+    pub authoritative_read_revision: String,
+    pub source_tier_id: String,
+    pub load_order: u32,
+    pub priority: i32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub override_relation: Option<OverrideRelationWire>,
+    pub resolution: ApplicabilityResolutionWire,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub reason_code: Option<ReasonCodeWire>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ApplicabilityFindingWire {
+    pub asset: AssetRefWire,
+    pub context: EffectiveProjectContextWire,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ProjectApplicabilitySegmentWire {
+    pub id: String,
+    pub kind: ProjectApplicabilitySegmentKindWire,
+    pub display_label: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub project_id: Option<String>,
+    pub assets: Vec<AssetSummaryWire>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ProjectApplicabilitySnapshotWire {
+    pub query: ProjectApplicabilityQueryWire,
+    pub authoritative_read_revision: String,
+    pub segments: Vec<ProjectApplicabilitySegmentWire>,
+    pub findings: Vec<ApplicabilityFindingWire>,
+    pub effective_contexts: Vec<EffectiveProjectContextWire>,
+    pub aggregate_total: u32,
+    pub read_at: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -548,6 +710,7 @@ pub struct NativeFileSnapshotWire {
 #[serde(deny_unknown_fields)]
 pub enum SnapshotWire {
     AssetList(AssetListSnapshotWire),
+    ProjectApplicability(ProjectApplicabilitySnapshotWire),
     AssetDetail(AssetDetailSnapshotWire),
     NativeFile(NativeFileSnapshotWire),
 }
@@ -682,6 +845,20 @@ enum_convert_both!(
     AssetScope,
     (Global, Global),
     (Project, Project)
+);
+enum_convert_both!(
+    ApplicabilityResolutionWire,
+    ApplicabilityResolution,
+    (Resolved, Resolved),
+    (Unknown, Unknown),
+    (Blocked, Blocked),
+    (Stale, Stale)
+);
+enum_convert_both!(
+    ProjectApplicabilitySegmentKindWire,
+    ProjectApplicabilitySegmentKind,
+    (ProjectNative, ProjectNative),
+    (GlobalApplicable, GlobalApplicable)
 );
 enum_convert_both!(
     IndexStatusWire,
@@ -831,6 +1008,7 @@ impl From<domain::AssetRef> for AssetRefWire {
             asset_type: value.asset_type.into(),
             native_unit_ref: value.native_unit_ref,
             adapter_identity: value.adapter_identity,
+            native_ownership: value.native_ownership.into(),
         }
     }
 }
@@ -842,6 +1020,31 @@ impl From<AssetRefWire> for domain::AssetRef {
             asset_type: value.asset_type.into(),
             native_unit_ref: value.native_unit_ref,
             adapter_identity: value.adapter_identity,
+            native_ownership: value.native_ownership.into(),
+        }
+    }
+}
+
+impl From<domain::NativeOwnership> for NativeOwnershipWire {
+    fn from(value: domain::NativeOwnership) -> Self {
+        match value {
+            domain::NativeOwnership::Global => {
+                NativeOwnershipWire::Global(GlobalNativeOwnershipWire {})
+            }
+            domain::NativeOwnership::Project { project_id } => {
+                NativeOwnershipWire::Project(ProjectNativeOwnershipWire { project_id })
+            }
+        }
+    }
+}
+
+impl From<NativeOwnershipWire> for domain::NativeOwnership {
+    fn from(value: NativeOwnershipWire) -> Self {
+        match value {
+            NativeOwnershipWire::Global(_) => domain::NativeOwnership::Global,
+            NativeOwnershipWire::Project(project) => domain::NativeOwnership::Project {
+                project_id: project.project_id,
+            },
         }
     }
 }
@@ -897,6 +1100,38 @@ impl From<AssetListScopeWire> for domain::AssetListScope {
     }
 }
 
+impl From<domain::ProjectApplicabilityView> for ProjectApplicabilityViewWire {
+    fn from(value: domain::ProjectApplicabilityView) -> Self {
+        match value {
+            domain::ProjectApplicabilityView::All => {
+                ProjectApplicabilityViewWire::All(AllProjectApplicabilityViewWire {})
+            }
+            domain::ProjectApplicabilityView::Global => {
+                ProjectApplicabilityViewWire::Global(GlobalProjectApplicabilityViewWire {})
+            }
+            domain::ProjectApplicabilityView::Project { project_id } => {
+                ProjectApplicabilityViewWire::Project(ProjectProjectApplicabilityViewWire {
+                    project_id,
+                })
+            }
+        }
+    }
+}
+
+impl From<ProjectApplicabilityViewWire> for domain::ProjectApplicabilityView {
+    fn from(value: ProjectApplicabilityViewWire) -> Self {
+        match value {
+            ProjectApplicabilityViewWire::All(_) => domain::ProjectApplicabilityView::All,
+            ProjectApplicabilityViewWire::Global(_) => domain::ProjectApplicabilityView::Global,
+            ProjectApplicabilityViewWire::Project(project) => {
+                domain::ProjectApplicabilityView::Project {
+                    project_id: project.project_id,
+                }
+            }
+        }
+    }
+}
+
 impl From<AssetListFiltersWire> for domain::AssetListFilters {
     fn from(value: AssetListFiltersWire) -> Self {
         domain::AssetListFilters {
@@ -924,6 +1159,11 @@ impl From<ReadRequestPayload> for domain::Query {
                     scope: query.scope.into(),
                     search_text: query.search_text,
                     filters: query.filters.map(Into::into),
+                })
+            }
+            ReadRequestPayload::ProjectApplicability(query) => {
+                domain::Query::ProjectApplicability(domain::ProjectApplicabilityQuery {
+                    view: query.view.into(),
                 })
             }
             ReadRequestPayload::AssetDetail(query) => {
@@ -973,6 +1213,103 @@ impl From<domain::AssetListSnapshot> for AssetListSnapshotWire {
             scope: value.scope.into(),
             queried_at: value.queried_at,
             index_updated_at: value.index_updated_at,
+        }
+    }
+}
+
+impl From<domain::ProvenanceSource> for ProvenanceSourceWire {
+    fn from(value: domain::ProvenanceSource) -> Self {
+        match value {
+            domain::ProvenanceSource::BuiltIn => {
+                ProvenanceSourceWire::BuiltIn(BuiltInProvenanceSourceWire {})
+            }
+            domain::ProvenanceSource::ActivePackage {
+                package_identity,
+                package_version,
+            } => ProvenanceSourceWire::ActivePackage(ActivePackageProvenanceSourceWire {
+                package_identity,
+                package_version,
+            }),
+        }
+    }
+}
+
+impl From<domain::AdapterProvenance> for AdapterProvenanceWire {
+    fn from(value: domain::AdapterProvenance) -> Self {
+        AdapterProvenanceWire {
+            identity: value.identity,
+            version: value.version,
+            source: value.source.into(),
+        }
+    }
+}
+
+impl From<domain::RuleProvenance> for RuleProvenanceWire {
+    fn from(value: domain::RuleProvenance) -> Self {
+        RuleProvenanceWire {
+            identity: value.identity,
+            version: value.version,
+            source: value.source.into(),
+        }
+    }
+}
+
+impl From<domain::EffectiveProjectContext> for EffectiveProjectContextWire {
+    fn from(value: domain::EffectiveProjectContext) -> Self {
+        EffectiveProjectContextWire {
+            asset: value.asset.into(),
+            project_id: value.project_id,
+            project_display_name: value.project_display_name,
+            adapter: value.adapter.into(),
+            rule: value.rule.into(),
+            authoritative_read_revision: value.authoritative_read_revision,
+            source_tier_id: value.source_tier_id,
+            load_order: value.load_order,
+            priority: value.priority,
+            override_relation: value.override_relation.map(Into::into),
+            resolution: value.resolution.into(),
+            reason_code: value.reason_code.map(Into::into),
+        }
+    }
+}
+
+impl From<domain::ApplicabilityFinding> for ApplicabilityFindingWire {
+    fn from(value: domain::ApplicabilityFinding) -> Self {
+        ApplicabilityFindingWire {
+            asset: value.asset.into(),
+            context: value.context.into(),
+        }
+    }
+}
+
+impl From<domain::ProjectApplicabilitySegment> for ProjectApplicabilitySegmentWire {
+    fn from(value: domain::ProjectApplicabilitySegment) -> Self {
+        ProjectApplicabilitySegmentWire {
+            id: value.id,
+            kind: value.kind.into(),
+            display_label: value.display_label,
+            project_id: value.project_id,
+            assets: value.assets.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
+impl From<domain::ProjectApplicabilitySnapshot> for ProjectApplicabilitySnapshotWire {
+    fn from(value: domain::ProjectApplicabilitySnapshot) -> Self {
+        ProjectApplicabilitySnapshotWire {
+            query: ProjectApplicabilityQueryWire {
+                view: value.query.view.into(),
+            },
+            authoritative_read_revision: value.authoritative_read_revision,
+            segments: value.segments.into_iter().map(Into::into).collect(),
+            findings: value.findings.into_iter().map(Into::into).collect(),
+            effective_contexts: value
+                .effective_contexts
+                .into_iter()
+                .map(Into::into)
+                .collect(),
+            aggregate_total: value.aggregate_total,
+            read_at: value.read_at,
         }
     }
 }
@@ -1151,6 +1488,9 @@ impl From<domain::Snapshot> for SnapshotWire {
     fn from(value: domain::Snapshot) -> Self {
         match value {
             domain::Snapshot::AssetList(snapshot) => SnapshotWire::AssetList(snapshot.into()),
+            domain::Snapshot::ProjectApplicability(snapshot) => {
+                SnapshotWire::ProjectApplicability(snapshot.into())
+            }
             domain::Snapshot::AssetDetail(snapshot) => SnapshotWire::AssetDetail(snapshot.into()),
             domain::Snapshot::NativeFile(snapshot) => SnapshotWire::NativeFile(snapshot.into()),
         }

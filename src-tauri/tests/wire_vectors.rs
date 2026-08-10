@@ -7,6 +7,7 @@
 
 use std::path::PathBuf;
 
+use agent_config_manager_lib::adapter_registry::AdapterRegistry;
 use agent_config_manager_lib::catalog::Catalog;
 use agent_config_manager_lib::core::GatewayCore;
 use agent_config_manager_lib::ipc::{handle_read, MAX_REQUEST_BYTES};
@@ -22,6 +23,15 @@ fn core() -> GatewayCore {
     )))
 }
 
+fn fx19_core() -> GatewayCore {
+    GatewayCore::with_adapter_registry(
+        Catalog::new(None),
+        AdapterRegistry::from_root(
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../fixtures/fx-19"),
+        ),
+    )
+}
+
 // ---------------------------------------------------------------------------
 // 正向 request vector
 // ---------------------------------------------------------------------------
@@ -30,12 +40,12 @@ fn core() -> GatewayCore {
 fn valid_request_vectors_decode() {
     let vectors = [
         json!({
-            "wireVersion": 1,
+            "wireVersion": 2,
             "requestId": "req-list-1",
             "payload": { "kind": "assetList", "scope": { "kind": "allAssets" } }
         }),
         json!({
-            "wireVersion": 1,
+            "wireVersion": 2,
             "requestId": "req-list-2",
             "payload": {
                 "kind": "assetList",
@@ -50,7 +60,7 @@ fn valid_request_vectors_decode() {
             }
         }),
         json!({
-            "wireVersion": 1,
+            "wireVersion": 2,
             "requestId": "req-detail-1",
             "payload": {
                 "kind": "assetDetail",
@@ -58,12 +68,13 @@ fn valid_request_vectors_decode() {
                     "assetId": "asset-fx01-demo-skill",
                     "assetType": "skill",
                     "nativeUnitRef": "nunit-fx01-demo-skill",
-                    "adapterIdentity": "claude-code@fixture"
+                    "adapterIdentity": "claude-code@fixture",
+                    "nativeOwnership": { "kind": "global" }
                 }
             }
         }),
         json!({
-            "wireVersion": 1,
+            "wireVersion": 2,
             "requestId": "req-file-1",
             "payload": {
                 "kind": "nativeFile",
@@ -71,9 +82,18 @@ fn valid_request_vectors_decode() {
                     "assetId": "asset-fx01-demo-skill",
                     "assetType": "skill",
                     "nativeUnitRef": "nunit-fx01-demo-skill",
-                    "adapterIdentity": "claude-code@fixture"
+                    "adapterIdentity": "claude-code@fixture",
+                    "nativeOwnership": { "kind": "global" }
                 },
                 "fileId": "file-fx01-skill-md"
+            }
+        }),
+        json!({
+            "wireVersion": 2,
+            "requestId": "req-fx19-project",
+            "payload": {
+                "kind": "projectApplicability",
+                "view": { "kind": "project", "projectId": "project-same-b" }
             }
         }),
     ];
@@ -123,6 +143,14 @@ fn negative_vectors_are_rejected_at_decode() {
             "wireVersion": 1, "requestId": "r",
             "payload": { "kind": "assetList", "scope": { "kind": "currentAssetType", "assetType": "spell" } }
         }),
+        // project view 的 opaque identity shape 不可扩展
+        json!({
+            "wireVersion": 2, "requestId": "r",
+            "payload": {
+                "kind": "projectApplicability",
+                "view": { "kind": "project", "projectId": "project-same-b", "bogus": true }
+            }
+        }),
         // 错误类型（wireVersion 为字符串）
         json!({
             "wireVersion": "1", "requestId": "r",
@@ -167,7 +195,7 @@ fn wire_faults_normalize_to_gateway_unavailable() {
     let cases: Vec<Value> = vec![
         // 错误 wireVersion
         json!({
-            "wireVersion": 2, "requestId": "r1",
+            "wireVersion": 1, "requestId": "r1",
             "payload": { "kind": "assetList", "scope": { "kind": "allAssets" } }
         }),
         // 未知 tag
@@ -194,7 +222,7 @@ fn wire_faults_normalize_to_gateway_unavailable() {
 
     // 超限 payload
     let huge = json!({
-        "wireVersion": 1,
+        "wireVersion": 2,
         "requestId": "r1",
         "payload": {
             "kind": "assetList",
@@ -210,12 +238,215 @@ fn wire_faults_normalize_to_gateway_unavailable() {
 fn oversized_search_text_over_limit_is_rejected_but_normal_request_passes() {
     let core = core();
     let ok = json!({
-        "wireVersion": 1,
+        "wireVersion": 2,
         "requestId": "r-ok",
         "payload": { "kind": "assetList", "scope": { "kind": "allAssets" } }
     });
     let response = serde_json::to_value(handle_read(&core, &ok)).unwrap();
     assert_eq!(response["payload"]["kind"], json!("readSucceeded"));
+}
+
+#[test]
+fn fx19_projection_round_trips_through_gateway_core_wire() {
+    let request = json!({
+        "wireVersion": GATEWAY_WIRE_VERSION,
+        "requestId": "req-fx19-core",
+        "payload": {
+            "kind": "projectApplicability",
+            "view": { "kind": "project", "projectId": "project-same-b" }
+        }
+    });
+    let response = serde_json::to_value(handle_read(&fx19_core(), &request)).unwrap();
+    assert_eq!(response["payload"]["kind"], json!("readSucceeded"));
+    let snapshot = &response["payload"]["snapshot"];
+    assert_eq!(snapshot["kind"], json!("projectApplicability"));
+    assert_eq!(snapshot["segments"][1]["kind"], json!("globalApplicable"));
+    assert_eq!(
+        snapshot["segments"][1]["assets"][0]["asset"]["nativeOwnership"],
+        json!({ "kind": "global" })
+    );
+}
+
+#[test]
+fn fx19_all_projection_wire_keeps_registry_provenance_and_stable_findings() {
+    let request = json!({
+        "wireVersion": GATEWAY_WIRE_VERSION,
+        "requestId": "req-fx19-all",
+        "payload": {
+            "kind": "projectApplicability",
+            "view": { "kind": "all" }
+        }
+    });
+    let response = serde_json::to_value(handle_read(&fx19_core(), &request)).unwrap();
+    let snapshot = &response["payload"]["snapshot"];
+    assert_eq!(
+        snapshot["authoritativeReadRevision"],
+        json!("rev-fx19-20260810")
+    );
+    assert_eq!(
+        snapshot["segments"]
+            .as_array()
+            .expect("wire segments must be an array")
+            .iter()
+            .map(|segment| segment["id"].as_str().expect("wire segment id"))
+            .collect::<Vec<_>>(),
+        vec![
+            "segment-fx19-global-applicable",
+            "segment-fx19-project-native-project-blocked",
+            "segment-fx19-project-native-project-provenance-drift",
+            "segment-fx19-project-native-project-same-a",
+            "segment-fx19-project-native-project-same-b",
+            "segment-fx19-project-native-project-stale",
+            "segment-fx19-project-native-project-unknown",
+        ]
+    );
+    assert_eq!(
+        snapshot["effectiveContexts"]
+            .as_array()
+            .expect("wire contexts must be an array")
+            .iter()
+            .find(|context| context["projectId"] == "project-same-a")
+            .expect("active-package context")["adapter"],
+        json!({
+            "identity": "claude-code",
+            "version": "2.1.0",
+            "source": {
+                "kind": "activePackage",
+                "packageIdentity": "fixture-adapter-package",
+                "packageVersion": "2.1.0"
+            }
+        })
+    );
+    assert_eq!(
+        snapshot["effectiveContexts"]
+            .as_array()
+            .expect("wire contexts must be an array")
+            .iter()
+            .find(|context| context["projectId"] == "project-same-b")
+            .expect("built-in context")["rule"],
+        json!({
+            "identity": "claude-skill-rule",
+            "version": "1.0.0",
+            "source": { "kind": "builtIn" }
+        })
+    );
+    assert_eq!(
+        snapshot["findings"],
+        json!([
+            {
+                "asset": snapshot["findings"][0]["asset"],
+                "context": {
+                    "asset": snapshot["findings"][0]["context"]["asset"],
+                    "projectId": "project-provenance-drift",
+                    "projectDisplayName": "Drifted project",
+                    "adapter": {
+                        "identity": "claude-code",
+                        "version": "1.0.0",
+                        "source": { "kind": "builtIn" }
+                    },
+                    "rule": {
+                        "identity": "claude-skill-rule",
+                        "version": "1.0.0",
+                        "source": { "kind": "builtIn" }
+                    },
+                    "authoritativeReadRevision": "rev-fx19-20260810",
+                    "sourceTierId": "source-fx19-global",
+                    "loadOrder": 25,
+                    "priority": 20,
+                    "resolution": "stale",
+                    "reasonCode": "EXTERNAL_CHANGE"
+                }
+            },
+            {
+                "asset": snapshot["findings"][1]["asset"],
+                "context": {
+                    "asset": snapshot["findings"][1]["context"]["asset"],
+                    "projectId": "project-unknown",
+                    "projectDisplayName": "Unknown project",
+                    "adapter": {
+                        "identity": "claude-code",
+                        "version": "2.1.0",
+                        "source": {
+                            "kind": "activePackage",
+                            "packageIdentity": "fixture-adapter-package",
+                            "packageVersion": "2.1.0"
+                        }
+                    },
+                    "rule": {
+                        "identity": "claude-skill-rule",
+                        "version": "2.1.0",
+                        "source": {
+                            "kind": "activePackage",
+                            "packageIdentity": "fixture-adapter-package",
+                            "packageVersion": "2.1.0"
+                        }
+                    },
+                    "authoritativeReadRevision": "rev-fx19-20260810",
+                    "sourceTierId": "source-fx19-global",
+                    "loadOrder": 30,
+                    "priority": 10,
+                    "resolution": "unknown",
+                    "reasonCode": "UNKNOWN_AGENT_VERSION"
+                }
+            },
+            {
+                "asset": snapshot["findings"][2]["asset"],
+                "context": {
+                    "asset": snapshot["findings"][2]["context"]["asset"],
+                    "projectId": "project-blocked",
+                    "projectDisplayName": "Blocked project",
+                    "adapter": {
+                        "identity": "claude-code",
+                        "version": "1.0.0",
+                        "source": { "kind": "builtIn" }
+                    },
+                    "rule": {
+                        "identity": "claude-skill-rule",
+                        "version": "1.0.0",
+                        "source": { "kind": "builtIn" }
+                    },
+                    "authoritativeReadRevision": "rev-fx19-20260810",
+                    "sourceTierId": "source-fx19-global",
+                    "loadOrder": 40,
+                    "priority": 10,
+                    "resolution": "blocked",
+                    "reasonCode": "PERMISSION_DENIED"
+                }
+            },
+            {
+                "asset": snapshot["findings"][3]["asset"],
+                "context": {
+                    "asset": snapshot["findings"][3]["context"]["asset"],
+                    "projectId": "project-stale",
+                    "projectDisplayName": "Stale project",
+                    "adapter": {
+                        "identity": "claude-code",
+                        "version": "2.1.0",
+                        "source": {
+                            "kind": "activePackage",
+                            "packageIdentity": "fixture-adapter-package",
+                            "packageVersion": "2.1.0"
+                        }
+                    },
+                    "rule": {
+                        "identity": "claude-skill-rule",
+                        "version": "2.1.0",
+                        "source": {
+                            "kind": "activePackage",
+                            "packageIdentity": "fixture-adapter-package",
+                            "packageVersion": "2.1.0"
+                        }
+                    },
+                    "authoritativeReadRevision": "rev-fx19-20260810",
+                    "sourceTierId": "source-fx19-global",
+                    "loadOrder": 50,
+                    "priority": 10,
+                    "resolution": "stale",
+                    "reasonCode": "EXTERNAL_CHANGE"
+                }
+            }
+        ])
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -226,7 +457,7 @@ fn oversized_search_text_over_limit_is_rejected_but_normal_request_passes() {
 fn response_envelope_serializes_to_golden_json() {
     let core = core();
     let request = json!({
-        "wireVersion": 1,
+        "wireVersion": 2,
         "requestId": "req-golden-1",
         "payload": {
             "kind": "assetDetail",
@@ -234,7 +465,8 @@ fn response_envelope_serializes_to_golden_json() {
                 "assetId": "asset-fx01-demo-skill",
                 "assetType": "skill",
                 "nativeUnitRef": "nunit-fx01-demo-skill",
-                "adapterIdentity": "claude-code@fixture"
+                "adapterIdentity": "claude-code@fixture",
+                "nativeOwnership": { "kind": "global" }
             }
         }
     });
@@ -253,7 +485,8 @@ fn response_envelope_serializes_to_golden_json() {
                 "assetId": "asset-fx01-demo-skill",
                 "assetType": "skill",
                 "nativeUnitRef": "nunit-fx01-demo-skill",
-                "adapterIdentity": "claude-code@fixture"
+                "adapterIdentity": "claude-code@fixture",
+                "nativeOwnership": { "kind": "global" }
             },
             "displayName": "Demo Skill",
             "nativeUnitKind": "singleFile",
@@ -308,7 +541,7 @@ fn response_envelope_serializes_to_golden_json() {
 fn masked_native_file_response_matches_fixture_golden() {
     let core = core();
     let request = json!({
-        "wireVersion": 1,
+        "wireVersion": 2,
         "requestId": "req-golden-2",
         "payload": {
             "kind": "nativeFile",
@@ -316,7 +549,8 @@ fn masked_native_file_response_matches_fixture_golden() {
                 "assetId": "asset-fx01-demo-skill",
                 "assetType": "skill",
                 "nativeUnitRef": "nunit-fx01-demo-skill",
-                "adapterIdentity": "claude-code@fixture"
+                "adapterIdentity": "claude-code@fixture",
+                "nativeOwnership": { "kind": "global" }
             },
             "fileId": "file-fx01-skill-md"
         }
@@ -358,7 +592,7 @@ fn event_envelope_serializes_to_golden_json() {
     let text = serde_json::to_string(&envelope).unwrap();
     assert_eq!(
         text,
-        r#"{"wireVersion":1,"event":{"kind":"assetsInvalidated","assetType":"skill"}}"#
+        r#"{"wireVersion":2,"event":{"kind":"assetsInvalidated","assetType":"skill"}}"#
     );
 
     // 不带 assetType 时字段省略（skip_serializing_if），不序列化 null。
@@ -371,7 +605,7 @@ fn event_envelope_serializes_to_golden_json() {
     let text = serde_json::to_string(&envelope).unwrap();
     assert_eq!(
         text,
-        r#"{"wireVersion":1,"event":{"kind":"assetsInvalidated"}}"#
+        r#"{"wireVersion":2,"event":{"kind":"assetsInvalidated"}}"#
     );
 
     // 事件往返解码，未知 tag 被拒绝。

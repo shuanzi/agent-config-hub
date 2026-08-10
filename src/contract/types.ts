@@ -23,6 +23,9 @@ export type AgentId = 'claude-code' | 'codex' | 'gemini-cli' | 'opencode';
 /** 全局／项目作用域 */
 export type AssetScope = 'global' | 'project';
 
+/** 原生归属；项目 identity 始终 opaque，显示名/路径不能代替它。 */
+export type NativeOwnership = { kind: 'global' } | { kind: 'project'; projectId: string };
+
 /** 稳定原因码（契约 §6.13，FE-01 全量列出以保持封闭） */
 export type ReasonCode =
   | 'UNKNOWN_AGENT_VERSION'
@@ -91,6 +94,7 @@ export interface AssetRef {
   assetType: AssetType;
   nativeUnitRef: string;
   adapterIdentity: string;
+  nativeOwnership: NativeOwnership;
 }
 
 /** 关键异常（第一行只附带会改变判断的异常；正常状态不常驻标签） */
@@ -167,7 +171,16 @@ export interface NativeFileQuery {
   fileId: string;
 }
 
-export type Query = AssetListQuery | AssetDetailQuery | NativeFileQuery;
+/** FE-07R 的只读 project applicability projection query。 */
+export type ProjectApplicabilityView =
+  { kind: 'all' } | { kind: 'global' } | { kind: 'project'; projectId: string };
+
+export interface ProjectApplicabilityQuery {
+  kind: 'projectApplicability';
+  view: ProjectApplicabilityView;
+}
+
+export type Query = AssetListQuery | ProjectApplicabilityQuery | AssetDetailQuery | NativeFileQuery;
 
 // ---------------------------------------------------------------------------
 // ReadResult（契约 §6.2）
@@ -196,6 +209,66 @@ export interface AssetListSnapshot {
   queriedAt: string;
   /** 索引最近更新时间（ISO 8601）；stale 状态必须可读 */
   indexUpdatedAt: string;
+}
+
+/** 已解析项目适用性的四种封闭状态；非 resolved 必带稳定原因。 */
+export type ApplicabilityResolution = 'resolved' | 'unknown' | 'blocked' | 'stale';
+
+export type ProvenanceSource =
+  { kind: 'builtIn' } | { kind: 'activePackage'; packageIdentity: string; packageVersion: string };
+
+export interface AdapterProvenance {
+  identity: string;
+  version: string;
+  source: ProvenanceSource;
+}
+
+export interface RuleProvenance {
+  identity: string;
+  version: string;
+  source: ProvenanceSource;
+}
+
+export interface EffectiveProjectContext {
+  asset: AssetRef;
+  projectId: string;
+  /** 仅展示；不得用它参与 identity 或 resolution。 */
+  projectDisplayName: string;
+  adapter: AdapterProvenance;
+  rule: RuleProvenance;
+  authoritativeReadRevision: string;
+  sourceTierId: string;
+  loadOrder: number;
+  priority: number;
+  overrideRelation?: OverrideRelation;
+  resolution: ApplicabilityResolution;
+  reasonCode?: ReasonCode;
+}
+
+export interface ApplicabilityFinding {
+  asset: AssetRef;
+  context: EffectiveProjectContext;
+}
+
+export interface ProjectApplicabilitySegment {
+  id: string;
+  kind: 'projectNative' | 'globalApplicable';
+  displayLabel: string;
+  projectId?: string;
+  assets: AssetSummary[];
+}
+
+/** FE-07R actual-read snapshot；无任何 write intent 或 prepared payload。 */
+export interface ProjectApplicabilitySnapshot {
+  kind: 'projectApplicability';
+  query: Omit<ProjectApplicabilityQuery, 'kind'>;
+  authoritativeReadRevision: string;
+  segments: ProjectApplicabilitySegment[];
+  /** unknown/blocked/stale 仅在 all/global 可检查，绝不成为 project projection。 */
+  findings: ApplicabilityFinding[];
+  effectiveContexts: EffectiveProjectContext[];
+  aggregateTotal: number;
+  readAt: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -330,11 +403,13 @@ export interface NativeFileSnapshot {
 
 export type SnapshotFor<Q extends Query> = Q extends AssetListQuery
   ? AssetListSnapshot
-  : Q extends AssetDetailQuery
-    ? AssetDetailSnapshot
-    : Q extends NativeFileQuery
-      ? NativeFileSnapshot
-      : never;
+  : Q extends ProjectApplicabilityQuery
+    ? ProjectApplicabilitySnapshot
+    : Q extends AssetDetailQuery
+      ? AssetDetailSnapshot
+      : Q extends NativeFileQuery
+        ? NativeFileSnapshot
+        : never;
 
 // ---------------------------------------------------------------------------
 // observe（FE-01 封闭子集：WorkspaceSubscription + 失效类事件）

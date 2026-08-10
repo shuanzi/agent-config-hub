@@ -171,6 +171,10 @@ export class ScriptedMockGateway implements FrontendGateway {
     switch (query.kind) {
       case 'assetList':
         return this.readSucceeded(this.buildAssetListSnapshot(query)) as ReadResult<SnapshotFor<Q>>;
+      case 'projectApplicability':
+        // FE-07R only accepts FX-19 through the Rust/Tauri actual-read path; the
+        // legacy scripted mock must not manufacture applicability facts.
+        return this.readFailed('UNSUPPORTED_CAPABILITY') as ReadResult<SnapshotFor<Q>>;
       case 'assetDetail':
         if (query.asset.assetId !== this.assetRef().assetId) {
           return this.readFailed('READ_FAILED');
@@ -346,6 +350,8 @@ export class ScriptedMockGateway implements FrontendGateway {
         };
         return this.readSucceeded(snapshot);
       }
+      case 'projectApplicability':
+        return this.readFailed('UNSUPPORTED_CAPABILITY');
       case 'assetDetail': {
         const record = catalog.assets.find(
           (candidate) => candidate.summary.asset.assetId === query.asset.assetId,
@@ -415,6 +421,7 @@ export class ScriptedMockGateway implements FrontendGateway {
       assetType: 'skill',
       nativeUnitRef: fixture.asset.nativeUnitRef,
       adapterIdentity: fixture.asset.adapterIdentity,
+      nativeOwnership: { kind: 'global' },
     };
   }
 
