@@ -2,11 +2,11 @@
 
 - [x] 1.1 新建产品决策基线 v0.2 draft，不覆盖已验收 v0.1；更新 MVP 可见类型、项目适用性、Skill 状态、类型表面、24 条转换路径及 PD-UI-B2-01～10 的索引和替代关系。
 - [x] 1.2 独立复核产品决策基线 v0.2 draft、记录用户验收并冻结；不得以本 change、Mock 或文档自验收替代冻结记录。
-- [ ] 1.3 仅以冻结的产品基线 fingerprint 新建前端契约 v0.2，并写入 metadata；承接 D3 之外的列表控件、默认、焦点和搜索呈现细化。
-- [ ] 1.4 在前端契约 v0.2 定义 `AssetListQuery`、`EffectiveContext`、`AssetRef`、精确 view context 段序、只读 actual read snapshot、Skill target state、`editAsset` 映射和转换边界。
-- [ ] 1.5 在前端契约 v0.2 保留 FX-03 的 Adapter／wire decode、未知字段、`EXECUTABLE_CONTENT_RISK`、敏感遮蔽和 no-execution contract/security 覆盖，并标为 Hook UI 不可达负例。
-- [ ] 1.6 在前端契约 v0.2 的 fixture catalog 与 coverage matrix 中计划 FX-19 `project-applicability-projection`，并在该契约冻结时确认其由 FE-07R 主归属；逐票据登记适用的 L0／L1／L2／L3／PF 与 contract/security 证据责任，不为所有票据固定分配 L2；其中 FE-07R=`L0／L1／L3 actual-read；无 L2／PF`。
-- [ ] 1.7 独立复核前端契约 v0.2、记录用户验收并冻结；未冻结前不得进入技术方案影响复核。
+- [x] 1.3 仅以冻结的产品基线 fingerprint 新建前端契约 v0.2，并写入 metadata；承接 D3 之外的列表控件、默认、焦点和搜索呈现细化。
+- [x] 1.4 在前端契约 v0.2 定义 `AssetListQuery`、`EffectiveContext`、`AssetRef`、精确 view context 段序、只读 actual read snapshot、Skill target state、`editAsset` 映射和转换边界。
+- [x] 1.5 在前端契约 v0.2 保留 FX-03 的 Adapter／wire decode、未知字段、`EXECUTABLE_CONTENT_RISK`、敏感遮蔽和 no-execution contract/security 覆盖，并标为 Hook UI 不可达负例。
+- [x] 1.6 在前端契约 v0.2 的 fixture catalog 与 coverage matrix 中计划 FX-19 `project-applicability-projection`，并在该契约冻结时确认其由 FE-07R 主归属；逐票据登记适用的 L0／L1／L2／L3／PF 与 contract/security 证据责任，不为所有票据固定分配 L2；其中 FE-07R=`L0／L1／L3 actual-read；无 L2／PF`。
+- [x] 1.7 独立复核前端契约 v0.2、记录用户验收并冻结；未冻结前不得进入技术方案影响复核。
 - [ ] 1.8 在 v0.2 产品和前端契约均冻结后，创建带日期的技术方案影响复核或 addendum，限定于新 query／projection、wire、ticket 编排和证据 seam；明确登记方案 B 内采用基础设施归属 A 的 ownership transfer、FE-07R 计划 evidence registry row，以及调整为“复用 FE-07R foundation 但保留自身 L0／L1／L2／L3／PF-01 证据”的 FE-01 计划 evidence registry row，不静默改写 v0.1 的已验收架构结论。
 - [ ] 1.9 根据 1.8 的复核结果决定 ARCH-GATE 是否维持、重开或进入新的待决状态；不得预设其必然保持 closed。
 - [ ] 1.10 创建并独立冻结 FE-07R acceptance：只读 opaque `projectId`、active Adapter／rule provenance、resolved／unknown／blocked／stale fail-closed、All／Global／Project actual read projection，以及自身 closure 所需的最小 Tauri test-harness／bootstrap、L0–L3 骨架、计划的 `verify:ticket` validation command contract 和只读 AdapterRegistry seam；只跑 L0／L1／L3 actual-read，无 L2 UI 或 PF，明确不含业务写入、项目纳入、停止管理、index lifecycle、prepare／apply 或 UI。

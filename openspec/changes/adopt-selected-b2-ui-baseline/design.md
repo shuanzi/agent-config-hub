@@ -44,9 +44,24 @@ FX-03 继续覆盖 Hook 的 Adapter／wire decode、未知字段保留、可执�
 
 ### D4：Skill Agent 单元格是事务式期望状态控制
 
-每个 Skill 的四个 Agent 单元格表达实际状态、操作可用性、稳定原因和当前事务标识，不做乐观实际状态更新。开启单元格进入目标设置：所选列确定目标 Agent，预填的目标 scope 和原生位置必须在 `prepare` 前的目标设置中可见且可修改。`prepare` 成功后，这两个参数固定；如用户请求改变任一参数，旧 prepared、review 与 confirm 结果必须失效并回到重新 prepare／review。确认摘要必须显示最终的目标 Agent、scope、原生位置、操作类别、能力映射和差异。
+每个 Skill 的四个 Agent 单元格分别表达 target 的 presence、activation、操作可用性、稳定原因和
+当前事务标识，不做乐观实际状态更新。presence 仅为 absent／present／unknown／blocked／stale；
+activation 仅为 notApplicable／enabled／disabled／unknown／blocked／stale，且 absent 时才为
+notApplicable、present 时才可为 enabled/disabled。presence、activation 或适用事实不可判定时
+必须 fail-closed。开启单元格进入目标设置：所选列确定目标 Agent，预填的目标 scope 和原生位置
+必须在 `prepare` 前的目标设置中可见且可修改。无论首次 `prepare` 前或 `prepare` 后，如用户请求
+改变任一参数，系统必须先对新 target 权威重读 presence、activation 与适用事实并重新解析
+operation；旧 operation mapping 立即失效且不得沿用，如已存在，prepared、review 与 confirm 也
+全部失效，随后才回到重新 prepare／review。确认摘要必须显示最终的目标 Agent、scope、原生位置、
+操作类别、能力映射和差异。
 
-Adapter 将开启解析为 `installAsset`、`convertAsset` 或 blocked；关闭只在存在已验证原生停用语义时解析为 `editAsset`，否则禁用并解释原因，且不得回落为删除。删除保持独立显式操作。Skill 安装／转换只由 Agent 单元格启动，所有路径继续经过 prepare、review、confirm、apply、revision 重验和恢复；只有 apply 成功并权威重读后才更新实际状态。
+`presence=absent` 的开启才由 Adapter 解析为 `installAsset`、`convertAsset` 或 blocked；
+`presence=present`、`activation=disabled` 的重新启用只在已验证原生 activation 语义时解析为
+`editAsset`，否则禁用或 blocked；`presence=present`、`activation=enabled` 的开启不产生写入。
+关闭只在 present/enabled 且存在已验证原生 activation 语义时解析为 `editAsset` 停用，否则禁用并
+解释原因，且不得回落为删除。删除保持独立显式操作，不新增通用 `setSkillEnabled` intent。Skill
+安装／转换只由 Agent 单元格启动，所有允许路径继续经过 prepare、review、confirm、apply、revision
+重验和恢复；只有 apply 成功并权威重读后才更新 presence 与 activation。
 
 ### D5：共享安全事务与类型特定资产表面
 
@@ -89,24 +104,24 @@ FE-07R done 后才解锁 FE-01。FE-01 复用 FE-07R 已验证 bootstrap、share
 
 ## PD-UI-B2 决策可追溯性
 
-| 已确认决策                                       | 本 change 的承接位置                                                     |
-| ------------------------------------------------ | ------------------------------------------------------------------------ |
-| PD-UI-B2-01 Hooks 退出 MVP UI                    | D1；`asset-workbench-navigation`；FX-03 负向覆盖                         |
-| PD-UI-B2-02 全局资产按 Adapter 解析投影          | D2；`resolved-global-applicability`                                      |
-| PD-UI-B2-03 Skill 事务式期望状态 toggle          | D4；`skill-agent-state-control`                                          |
-| PD-UI-B2-04 toggle 是 Skill 安装／转换唯一主入口 | D4；`skill-agent-state-control`；`deterministic-conversion-scope`        |
-| PD-UI-B2-05 长期指令不跨 Agent 转换              | D5、D6；`type-specific-asset-surfaces`；`deterministic-conversion-scope` |
-| PD-UI-B2-06 Skill 默认只读与次级源码编辑         | D5；`type-specific-asset-surfaces`                                       |
-| PD-UI-B2-07 Subagent 默认只读与安全编辑          | D5；`type-specific-asset-surfaces`                                       |
-| PD-UI-B2-08 Subagent 保留确定性转换              | D6；`deterministic-conversion-scope`                                     |
-| PD-UI-B2-09 长期指令首次实际修改建草稿           | D5；`type-specific-asset-surfaces`                                       |
-| PD-UI-B2-10 获批的列表语义层级                   | D3；`asset-workbench-navigation`；frontend contract v0.2／UI acceptance  |
+| 已确认决策                                                  | 本 change 的承接位置                                                     |
+| ----------------------------------------------------------- | ------------------------------------------------------------------------ |
+| PD-UI-B2-01 Hooks 退出 MVP UI                               | D1；`asset-workbench-navigation`；FX-03 负向覆盖                         |
+| PD-UI-B2-02 全局资产按 Adapter 解析投影                     | D2；`resolved-global-applicability`                                      |
+| PD-UI-B2-03 Skill presence/activation 事务式期望状态 toggle | D4；`skill-agent-state-control`                                          |
+| PD-UI-B2-04 toggle 是 Skill 安装／转换唯一主入口            | D4；`skill-agent-state-control`；`deterministic-conversion-scope`        |
+| PD-UI-B2-05 长期指令不跨 Agent 转换                         | D5、D6；`type-specific-asset-surfaces`；`deterministic-conversion-scope` |
+| PD-UI-B2-06 Skill 默认只读与次级源码编辑                    | D5；`type-specific-asset-surfaces`                                       |
+| PD-UI-B2-07 Subagent 默认只读与安全编辑                     | D5；`type-specific-asset-surfaces`                                       |
+| PD-UI-B2-08 Subagent 保留确定性转换                         | D6；`deterministic-conversion-scope`                                     |
+| PD-UI-B2-09 长期指令首次实际修改建草稿                      | D5；`type-specific-asset-surfaces`                                       |
+| PD-UI-B2-10 获批的列表语义层级                              | D3；`asset-workbench-navigation`；frontend contract v0.2／UI acceptance  |
 
 ## 风险与取舍
 
 - [列表产品语义被实现参数污染] → 产品 spec 只保留 D3 的层级，所有具体分页、排序、焦点和搜索分页规则仅在 frontend contract v0.2 与验收中定义。
 - [项目适用性过期导致错误写入] → 将投影绑定版本和 revision，prepare／apply 前重读，变化后失效旧审查并封闭失败。
-- [toggle 混淆安装、转换、停用与删除] → 在确认前展示完整摘要；无原生停用时禁用关闭，不以删除替代。
+- [toggle 混淆 presence、activation、安装、转换、启停与删除] → presence/activation 分离；只有 absent 可安装/转换，只有已存在且已验证原生 activation 语义才可 `editAsset` 启停；不可判定时封闭失败，不以删除替代。
 - [转换以 degraded 掩盖内容损失] → Prompt 或未知内容只有可保真 round-trip 或 blocked 两类结果；raw copy 不是转换。
 - [Hook 退出 UI 后丢失安全覆盖] → 将 FX-03 保留为 decode／安全／负向可达性 fixture，不生成正向 UI journey。
 - [foundation owner 漂移或 FE-01 重建读链] → addendum 明确方案 B 内归属 A、FE-07R 与 FE-01 的计划 evidence registry rows；FE-01 复用 foundation，但在自身 ticket 内以共享 harness 保留 L0／L1／L2／L3／PF-01 provenance。
