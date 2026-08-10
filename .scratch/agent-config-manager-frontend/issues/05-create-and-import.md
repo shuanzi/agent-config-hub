@@ -1,42 +1,41 @@
-# FE-05 — 创建、本地导入与单目标安装
+# FE-05 — 长期指令创建/导入与 Skill 单目标安装
 
-**What to build:** 用户能够在当前资产类型工作区内新建、从本地导入，或把已选原生资产安装到一个同格式目标，并复用草稿、审查和安全应用闭环。
+**Acceptance state: Frozen (2026-08-10; planning acceptance only)**
+
+**What to build:** 长期指令有彼此独立的创建和本地导入流程；Skill 的四 Agent 状态单元格只可发起同格式、单目标的 `installAsset`。两类流程均复用既有草稿、审查、确认和安全应用闭环。
 
 **Blocked by:** FE-04 — 审查与安全应用闭环
 
-**Status:** blocked
+**Status:** `blocked`
 
 **Primary contract fixtures:** `FX-08 create-import-validation`、`FX-15 install-single-target`、`FX-17 target-name-collision`
 
-**Accepted technical plan:** `docs/architecture/Agent_Config_Manager_MVP_技术方案_v0.1.md`（2026-07-27）
+## 范围与安全边界
 
-- [ ] “新建”与“从本地导入”同位并列可见，不合并成二次选择入口；
-- [ ] 流程保留当前资产类型、资产列表和工作区上下文；
-- [ ] 新建明确目标 Agent、项目或全局作用域及原生位置；
-- [ ] 导入通过不透明本地来源引用选择文件、目录或受支持配置片段；
-- [ ] 前端不读取、执行或猜测导入来源内容；
-- [ ] 目标或来源无效时提供稳定阻断原因和恢复动作；
-- [ ] 目标已存在或同名冲突时只允许取消、改名，或先审查目标差异后明确确认覆盖；不得静默覆盖；
-- [ ] 目标设置完成后形成单资产草稿并复用 `prepare`/`apply`；
-- [ ] 同格式安装（`installAsset` 行为）始终是一个资产到一个已选 Agent、作用域和原生位置的目标；它复用当前格式的安装/导入草稿与 `prepare`/`apply`，不转换内容。跨 Agent 转换仍只由 FE-06 的 `convertAsset`、能力映射和目标格式生成处理；两者不得混为一条一对多流程；
-- [ ] 取消流程不创建目标资产、来源关系或恢复点；
-- [ ] 应用后目标成为独立原生资产，不保持自动同步；
-- [ ] 不引入全屏向导、中央模板库或产品私有资产格式。
+- [ ] 长期指令的“新建”与“从本地导入”是独立入口，不是转换入口，也不与 Skill 安装混为一条流程；创建/导入形成独立 native asset creation。
+- [ ] 创建、导入和 Skill 安装在首次 `prepare` 前均显示完整 target summary：一个目标 Agent、一个 scope、一个 native location 和 redacted summary。target Agent、scope 或 native location 任一变化必须 authoritative reread 并 remap，旧 operation、prepared/review/confirm 立即失效后才可重新解析。
+- [ ] Skill 安装只能由目标 Agent 单元格发起，只在 `presence=absent` 且相关事实可判定时映射为同格式 `installAsset` 或稳定 `blocked`；不新增 `setSkillEnabled`，不从列表或详情增加重复主入口。
+- [ ] 导入只使用不透明的本地来源引用。前端不得读取、执行或猜测来源内容；不生成产品私有资产格式、中央模板库或自动同步关系。
+- [ ] `FX-17` 同名或目标冲突只允许取消、rename，或 `reviewAndOverwrite`；rename 和 `reviewAndOverwrite` 均使旧 operation 失效并重新 `prepare`，overwrite 只能进入新版 review/confirm 后才可 `apply`。取消、collision 和 `prepare` validation failure 均不创建目标、来源关系或新的恢复点，也不得静默覆盖。`apply` 已开始后的失败保留 shared transaction recovery point 和 rollback facts。
+- [ ] `apply` 成功后，结果必须先以独立 native result 表达，再对受影响 target authoritative reread；reread 前不得乐观显示可用或 presence/activation 更新。结果不与来源持续同步。
+- [ ] 不含跨 Agent 转换；`convertAsset`、能力映射和目标格式生成属于 FE-06。
 
-## 验证命令契约
+## 计划验证契约
 
-**状态：** `planned / unverified`。统一入口为 `npm run verify:ticket -- FE-05`；失败证据写入 `.artifacts/verification/FE-05/<run-id>/`。
+**状态：** `planned / unverified`。计划统一入口为 `npm run verify:ticket -- FE-05`；该命令尚未运行，不是 runtime evidence 或 ticket closure，静态检查和 Mock PASS 也不改变该边界。
 
-**前置条件：** FE-04 已完成并留存审查/安全应用证据；`FX-08 create-import-validation`、`FX-15 install-single-target`、`FX-17 target-name-collision` 与不透明合成来源引用可在隔离测试数据根复现；L3 使用专用 Tauri 测试构建和每次新建的临时来源/目标根。不得读取、执行或猜测用户来源内容，也不得访问用户配置。
+**前置条件：** FE-04 的审查与安全应用闭环已有其自身可复验的前置证据；`FX-08`、`FX-15`、`FX-17` 及不透明合成来源引用可在隔离测试数据根复现。L3 使用专用 Tauri 测试构建与每次新建的临时来源/目标根，不访问用户来源或配置。
 
 **预计层级：**
 
-- L0：本切片相关的静态、类型与生成产物一致性门禁；
-- L1：新建、导入来源引用、单目标 `installAsset`、取消和重名冲突的 FX-08/FX-15/FX-17 契约断言；
-- L2：以 scripted mock `FrontendGateway` 驱动三项 fixture 的浏览器旅程；
-- L3：专用 Tauri 测试构建在隔离临时根执行新建、导入、单目标安装与目标重名不覆盖 tracer；
-- PF：无新增 performance fixture 或 baseline；本票据不因复用 FE-04 的 `prepare`/`apply` 而取得新的性能 credit。
+- L0：本切片相关的静态、类型与生成产物一致性门禁。
+- L1：创建、导入来源引用、单目标 `installAsset`、完整 target summary；target change 的 authoritative reread/remap 与旧 operation/prepared/review/confirm 失效；取消/collision/`prepare` validation failure 无副作用、`apply` 已开始失败时保留 shared transaction recovery point/rollback facts；以及 `FX-08/15/17` 中 rename/`reviewAndOverwrite` 使旧 operation 失效、重新 `prepare`，且 overwrite 进入新版 review/confirm 的 module/contract 断言。
+- L2：以 scripted mock `FrontendGateway` 驱动 `FX-08/15/17` 的浏览器 journey，断言完整 target summary、target change 的 authoritative reread/remap，以及 rename/`reviewAndOverwrite` 使旧 operation 失效后的 reprepare/new review/confirm。
+- L3：专用 Tauri 测试构建在 isolated temporary roots 执行创建、导入、同格式单目标安装与 collision tracer，覆盖完整 target summary、target change authoritative reread/remap，以及 rename/`reviewAndOverwrite` 使旧 operation 失效后的 reprepare/new review/confirm。
+- PF：无新增 performance fixture 或 baseline；复用 FE-04 的 `prepare`/`apply` 不取得新的 performance credit。
 
-**通过判据：** 命令在上述前置条件下退出成功；三项 fixture 的并列入口、上下文保留、不透明来源、稳定阻断、单目标同格式安装、取消无副作用和重名时无静默覆盖均符合票据；L3 留存隔离临时根中的 command/event 与文件事实；跨 Agent 转换仍不进入该票据。
+**通过判据：** 仅覆盖本票据的独立创建/导入、单目标同格式安装与完整 target summary；target change 必须 authoritative reread/remap 并使旧 operation/prepared/review/confirm 失效。`FX-17` 的 rename/`reviewAndOverwrite` 均重新 `prepare`，overwrite 进入新版 review/confirm；取消与 `prepare` validation failure 无副作用，`apply` 已开始失败保留 shared transaction recovery point/rollback facts。转换不得进入该票据。L3 留存隔离临时根中的 command/event 与文件事实。
 
-**Provenance 边界：** L1/L2 只证明 module 与 mock renderer 的创建、导入和安装行为；实际 IPC/read/write credit 仅来自 L3，且只限隔离临时来源与目标。L3 不等同生产 artifact、真实用户配置或 L4；未实际运行前，本命令保持 `planned / unverified`。
+**失败证据：** 计划以脱敏日志、WebDriver trace、截图或 DOM dump，并附层级和 fixture 标识，写入 `.artifacts/verification/FE-05/<run-id>/`。
+
+**Provenance 边界：** L1/L2 分别只证明 module/contract 与 mock renderer 行为。L3 即便穿过真实 WebView/Core/IPC，也只证明 isolated temporary input，绝不证明真实用户配置、真实用户来源或 production artifact。

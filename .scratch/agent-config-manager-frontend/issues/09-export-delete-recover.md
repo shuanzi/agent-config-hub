@@ -1,34 +1,41 @@
-# FE-09 — 导出、删除与恢复
+# FE-09 — 独立导出、删除与恢复
 
-**What to build:** 用户能够安全导出原生资产、执行可恢复删除，并在恢复目标冲突时先审查差异而非覆盖当前内容。
+**Acceptance state: Frozen (2026-08-10; planning acceptance only)**
+
+**What to build:** 用户可安全导出原生资产，执行可恢复删除，并在恢复 target 被占用时审查差异而非覆盖当前内容。三者都是独立显式操作。
 
 **Blocked by:** FE-04 — 审查与安全应用闭环
 
-**Status:** blocked
+**Status:** `blocked`
 
-**Primary contract fixtures:** `FX-13 delete-export-recover`
+**Primary contract fixture:** `FX-13 delete-export-recover`
 
-**Accepted technical plan:** `docs/architecture/Agent_Config_Manager_MVP_技术方案_v0.1.md`（2026-07-27）
+## 范围与安全边界
 
-- [ ] 导出按原始文件或目录结构写入用户选择位置，不生成产品私有格式；`exportAsset` 先 `prepare` 核对目标、敏感/可执行风险和路径，再经 `apply` 产生导出结果；
-- [ ] 导出前提示可能包含敏感值或可执行脚本；
-- [ ] 导出不生成诊断包、完整环境备份或迁移包；
-- [ ] 删除前展示原生资产边界、目标路径和受影响上下文；
-- [ ] 独立文件或目录优先进入系统废纸篓，配置块基于完整宿主文件快照移除；
-- [ ] `deleteAsset` 复用准备、确认、应用和原位结果流程；
-- [ ] `recoverAsset` 先 `prepare` 当前目标、差异、兼容与并发状态，再 `apply`；恢复目标未占用时可安全应用；
-- [ ] 恢复目标被占用时展示差异并阻断静默覆盖；
-- [ ] 外部删除只显示缺失，不自动重新创建；
-- [ ] `setRecoveryPointPinned` 以同一 gateway 的 `prepare`/`apply` 固定或取消固定恢复点；最近有效恢复点仍得到保护；
-- [ ] 导出、删除和恢复均不执行 Git 操作或跨资产影响分析。
+- [ ] `exportAsset` 必须完整经过 `prepare` → review → confirm → `apply`：先核对目标、原生边界、路径及敏感/可执行风险，再按原始文件或目录结构写入用户选择位置；不生成产品私有格式、诊断包、完整环境备份或迁移包。
+- [ ] `deleteAsset` 是独立的 `prepare` → review → confirm → `apply` 操作，不得跳过 review；绝不属于 Skill toggle，也绝不允许 toggle fallback 为 delete；delete 也不归属 FE-04。
+- [ ] 删除前明确显示 native asset boundary、目标路径及所有 affected contexts。对 global projected asset，显示其受影响的 projected contexts，同时只按 native global ownership 执行删除，不建立项目副本或跨资产影响分析。
+- [ ] 独立文件或目录优先进入系统废纸篓；配置块通过完整宿主文件快照移除。外部删除只显示 missing，绝不自动重新创建。
+- [ ] target 未占用的 `recoverAsset` 必须完整经过 `prepare` → review → confirm → `apply`，并核对当前 target、native boundary、差异、兼容与并发状态。target 被占用的 recovery collision 必须以稳定 `blocked` reason 表达，无写入、绝不进入 `apply`，并明确呈现差异以阻断静默覆盖。
+- [ ] `setRecoveryPointPinned` 通过同一 gateway 的 `prepare` → review → confirm → `apply` 固定或取消固定恢复点，不得跳过 review；最近有效恢复点保持保护。
+- [ ] 导出、删除和恢复不得执行 Git 操作；任何 apply 成功后都须对受影响事实 authoritative reread，再显示独立 native result。
 
-## 验证命令契约
+## 计划验证契约
 
-**状态：** `planned / unverified`
+**状态：** `planned / unverified`。计划统一入口为 `npm run verify:ticket -- FE-09`；该命令未运行，不能作为 ticket closure 或 runtime evidence。
 
-- **统一入口：** `npm run verify:ticket -- FE-09`；这是实现后的计划命令，尚未运行。
-- **前置条件：** FE-04 已有 `done` 证据；bootstrap、生成 wire 类型和 `FX-13` 安全 fixture 可用；L3 使用专用 Tauri 测试构建与每次新建的合成临时源、导出和恢复目录，不读取或修改用户资产或 Git 工作树。
-- **预计层级：** L0 检查变更源码、类型、格式、lint 与 wire/schema drift；L1 检查导出风险/边界、prepare 无副作用、恢复点固定、删除后的缺失表面，以及恢复目标冲突必须先有差异且不得静默覆盖；L2 以 scripted mock `FrontendGateway` 跑 `FX-13`；L3 只跑一次隔离临时目录的导出 → 删除 → 恢复目标冲突 tracer；PF-06 记录合成 conversion-transaction descriptor 的 recovery branch、事务与恢复测量及 fixture digest。
-- **通过判据：** 导出保持原始结构，删除与恢复均经 prepare/confirm/apply，冲突只呈现差异而不覆盖；L3 只在临时目录上留下实际导出、删除和恢复冲突的 command/event 与文件事实 tracer；PF-06 留存原始样本、运行环境与 baseline/预算冻结或复测记录，出现 `inconclusive` 不得计通过。
-- **失败证据：** 脱敏日志、WebDriver trace、截图或 DOM dump、层级与 fixture 标识写入 `.artifacts/verification/FE-09/<run-id>/`。
-- **Provenance 边界：** L2 mock PASS 不取得真实 IPC 或文件写入 credit；L3 只证明该合成临时 recovery branch，不证明用户废纸篓、真实资产、Git 或真实 adapter 全回归；PF-06 数据不替代行为或发布证据。
+**前置条件：** FE-04 的审查与安全应用闭环已有其自身可复验的前置证据；bootstrap、生成 wire 类型和 `FX-13` 安全 fixture 可用。L3 使用专用 Tauri 测试构建及每次新建的 synthetic temporary source、export、delete 和 recovery roots，不读取或修改用户资产或 Git 工作树。
+
+**预计层级：**
+
+- L0：检查变更源码、类型、格式、lint 与 wire/schema drift。
+- L1：检查 export 的 `prepare` → review → confirm → `apply`、导出风险/原生边界、prepare 无副作用、global projected asset 的 affected contexts、`deleteAsset` 和 `setRecoveryPointPinned` 的 `prepare` → review → confirm → `apply` 与不得跳过 review 的负向断言、删除后的 missing 表面；负向 contract 断言 toggle 绝不生成 `deleteAsset`，FE-04 不取得 delete ownership；正常 recover 经 `prepare` → review → confirm → `apply`，occupied recovery collision 为稳定 `blocked`、无写入且绝不进入 `apply`。
+- L2：以 scripted mock `FrontendGateway` 跑 `FX-13`，验证 export、`deleteAsset`、`setRecoveryPointPinned` 和正常 recover 的 `prepare` → review → confirm → `apply` 及 delete/pinning 不得跳过 review 的负向断言，以及 occupied recovery collision 的稳定 `blocked`、无写入、无 `apply`。
+- L3：只在 isolated temporary roots 执行 export → `deleteAsset` 的 `prepare` → review → confirm → `apply` → 正常 recover，以及 `setRecoveryPointPinned` 的 `prepare` → review → confirm → `apply` tracer，并断言 delete/pinning 不得跳过 review；另断言 occupied recovery collision 为稳定 `blocked`、无写入且绝不进入 `apply`，并记录 command/event 与文件事实。
+- PF-06：记录 synthetic conversion-transaction descriptor 的 recovery branch、事务与恢复测量及 fixture digest；`inconclusive` 不计通过。
+
+**通过判据：** export、正常 recover、`deleteAsset` 和 `setRecoveryPointPinned` 均完整经过 `prepare` → review → confirm → `apply`，delete/pinning 不得跳过 review，且导出保持原始结构；删除独立于 toggle/FE-04 ownership。occupied recovery collision 仅为稳定 `blocked`、无写入、无 `apply`，只呈现差异不覆盖。L3 只保留临时目录的事实 tracer。
+
+**失败证据：** 计划以脱敏日志、WebDriver trace、截图或 DOM dump，并附层级和 fixture 标识，写入 `.artifacts/verification/FE-09/<run-id>/`。
+
+**Provenance 边界：** L2 mock PASS 不取得真实 IPC 或文件写入 credit。L3 即便穿过真实 WebView/Core/IPC，也只证明 isolated synthetic input，不证明真实用户废纸篓、真实资产、Git 工作树或 production artifact；PF-06 不替代行为或发布证据。
