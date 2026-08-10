@@ -4,7 +4,10 @@
 >
 > 用户验收：**2026-08-09，用户在本 Codex task 中明确回复“验收 v0.2”**
 >
-> 冻结 fingerprint：`sha256:5993102ba5a4503b6a3ba734d4d90503ad2cf648183ff5297d850c4351654d5b`
+> 补充产品决策验收：**2026-08-09，用户在主控任务明确接受 Skill target presence 与
+> activation 分离及本基线第 5 节的操作映射。**
+>
+> 冻结 fingerprint：`sha256:ec28a44db79f019a92199a7d5853a71f15b593d1fe925bd0c6fd0eb65dbeee21`
 >
 > fingerprint 计算范围：从首个 `## 1.` 标题起至文件末尾的 UTF-8 文本（LF）；排除标题与本 metadata 区块
 >
@@ -126,24 +129,37 @@ MUST**：页大小（包括 `20／50／100`）、默认排序、同名输入项�
 ## 5. Skill 的四 Agent 事务式期望状态
 
 每个 Skill 的 Claude Code、Codex、Gemini CLI、OpenCode 单元格表达的是**期望状态
-控制**，不是即时开关。每个单元格必须显示实际状态、可用操作、稳定原因，以及存在时
-的当前事务标识；事务进行中仍显示权威重读前的实际状态。
+控制**，不是即时开关。每个单元格必须分别显示 target 的实际 `presence`、`activation`、
+操作可用性、稳定原因，以及存在时的当前事务标识；事务进行中仍显示权威重读前的实际
+事实。
 
-开启一个未启用单元格时，所选列确定目标 Agent，并进入目标设置：预填的目标 scope
-和原生位置在 `prepare` 前可见且可修改。Adapter 只能将请求解析为：
+`presence` 是封闭状态：`absent`、`present`、`unknown`、`blocked`、`stale`。`activation`
+是封闭状态：`notApplicable`、`enabled`、`disabled`、`unknown`、`blocked`、`stale`；仅
+`presence=absent` 时为 `notApplicable`，`presence=present` 时才可为 `enabled` 或 `disabled`。
+`presence`、`activation` 或适用事实任一为 `unknown`、`blocked` 或 `stale` 时，均必须
+fail-closed，不能推断目标存在、可启停或适用。
 
-- `installAsset`（已验证同格式目标）；
-- `convertAsset`（已验证的异构目标映射）；或
-- `blocked`（无法证明安全映射）。
+开启一个单元格时，所选列确定目标 Agent，并进入目标设置：预填的目标 scope 和原生位置
+在 `prepare` 前可见且可修改。Adapter 必须先依据 `presence`、`activation` 与适用事实解析：
+
+- `presence=absent` 时，开启只能解析为 `installAsset`（已验证同格式目标）、
+  `convertAsset`（已验证的异构目标映射）或 `blocked`；
+- `presence=present` 且 `activation=disabled` 时，只有 Adapter 已验证原生 activation
+  语义，才可将重新启用解析为 `editAsset`，否则必须 `blocked` 或禁用并说明原因；
+- `presence=present` 且 `activation=enabled` 时，开启不产生新的安装、转换或写入；
+- 任何不可判定状态不得进入 `prepare` 或 `apply`。
 
 安装或转换必须依次经过 `prepare → review → confirm → apply → revision 重验 → 恢复`
-的安全闭环。`prepare` 成功后，目标 scope 与原生位置冻结；更改任一参数必须使既有
-prepared、review 与 confirm 失效，并回到重新 prepare／review。确认摘要必须呈现最终
+的安全闭环。无论首次 `prepare` 前或 `prepare` 后，只要目标 scope 或原生位置任一变化，
+系统必须先对新 target 权威重读 presence、activation 与适用事实并重新解析 operation。旧
+operation mapping 立即失效且不得沿用；如已存在，prepared、review 与 confirm 也全部失效。
+只有基于新 target 事实重新映射并重新 prepare/review 后才可继续。确认摘要必须呈现最终
 操作类别、目标 Agent、目标 scope、原生位置、能力映射和差异。
 
-关闭已启用单元格时，只有 Adapter 已验证目标具有原生停用语义，才能解析为
-`editAsset`；否则控制必须禁用并给出稳定原因。关闭绝不回落为 `deleteAsset`，删除始终
-是独立且显式的受保护操作。
+关闭已启用目标时，只有 `presence=present`、`activation=enabled`，且 Adapter 已验证目标
+具有原生 activation 语义，才能解析为 `editAsset` 停用；否则控制必须禁用并给出稳定原因。
+关闭绝不回落为 `deleteAsset`，删除始终是独立且显式的受保护操作；本产品不新增通用
+`setSkillEnabled` intent。
 
 实际状态只在 `apply` 成功且受影响事实权威重读后更新。取消、冲突、失败、回滚或
 apply 成功但重读失败时，保留原实际状态，并以 pending／结果／待重读原因解释。
@@ -227,7 +243,7 @@ prepared 或 applied。模型、工具、权限或其他行为若不能证明安
 | ------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------- |
 | [`asset-workbench-navigation`](../../openspec/changes/adopt-selected-b2-ui-baseline/specs/asset-workbench-navigation/spec.md)         | 第 2.2、3 节：三类可见资产、类型优先、三类作用域、来源段序、单一全局分页、定位搜索和窄屏栈。                 | 不把列表控件参数、默认值、焦点或搜索分页细节提升为产品 MUST。   |
 | [`resolved-global-applicability`](../../openspec/changes/adopt-selected-b2-ui-baseline/specs/resolved-global-applicability/spec.md)   | 第 4 节：Adapter 已解析投影、可解释适用事实、unknown／blocked／stale fail-closed、freshness 与原生全局写回。 | 不以项目名或路径充当身份；不因项目操作创建副本。                |
-| [`skill-agent-state-control`](../../openspec/changes/adopt-selected-b2-ui-baseline/specs/skill-agent-state-control/spec.md)           | 第 5 节：四 Agent 期望状态、目标设置、事务闭环、原生停用、确认后状态更新与唯一入口。                         | 不新增通用 `setSkillEnabled`；toggle 不得回落为删除。           |
+| [`skill-agent-state-control`](../../openspec/changes/adopt-selected-b2-ui-baseline/specs/skill-agent-state-control/spec.md)           | 第 5 节：四 Agent 的 presence/activation、目标设置、事务闭环、原生启停、确认后状态更新与唯一入口。              | 不新增通用 `setSkillEnabled`；toggle 不得回落为删除。           |
 | [`type-specific-asset-surfaces`](../../openspec/changes/adopt-selected-b2-ui-baseline/specs/type-specific-asset-surfaces/spec.md)     | 第 6 节：Skill、长期指令、Subagent 的查看、编辑与草稿差异，以及宽／中／窄表面。                              | 共享 dirty guard 和安全事务；未知或不兼容内容不伪装为完整编辑。 |
 | [`deterministic-conversion-scope`](../../openspec/changes/adopt-selected-b2-ui-baseline/specs/deterministic-conversion-scope/spec.md) | 第 7 节：Skills 与 Subagents 的 24 条路径、类型特定入口、长期指令／Hooks 排除、保真与 no-sync。              | 不允许 batch／raw-copy 伪装为转换，也不承诺行为等价。           |
 
@@ -240,7 +256,7 @@ prepared 或 applied。模型、工具、权限或其他行为若不能证明安
 | ----------- | ----------------------------------------------------------------------- | --------------------------------------------------------------- |
 | PD-UI-B2-01 | Hooks 退出 MVP UI，但保留底层兼容与 FX-03 负例。                        | [2.2](#22-mvp-可见类型与-hook-兼容边界)                         |
 | PD-UI-B2-02 | 全局资产仅按 Adapter 解析投影到项目；未知封闭失败，且编辑原生全局资产。 | [4](#4-已解析的全局适用性与项目视图)                            |
-| PD-UI-B2-03 | Skill 四 Agent 单元格是事务式期望状态，不是即时开关。                   | [5](#5-skill-的四-agent-事务式期望状态)                         |
+| PD-UI-B2-03 | Skill 四 Agent 单元格分离 presence/activation 的事务式期望状态，不是即时开关。 | [5](#5-skill-的四-agent-事务式期望状态)                         |
 | PD-UI-B2-04 | Skill 安装／转换仅由 Agent 单元格主入口启动。                           | [5](#5-skill-的四-agent-事务式期望状态)                         |
 | PD-UI-B2-05 | 长期指令无跨 Agent 转换；创建／导入为独立原生资产创建。                 | [6](#6-三类类型差异化表面与共享安全边界)、[7.1](#71-范围与入口) |
 | PD-UI-B2-06 | Skill 默认只读，保留次级源码编辑。                                      | [6](#6-三类类型差异化表面与共享安全边界)                        |
@@ -257,7 +273,8 @@ prepared 或 applied。模型、工具、权限或其他行为若不能证明安
 产品约束继续有效。
 
 尤其是所有实际写入都必须走既有安全事务，不得绕过 `prepare → review → confirm → apply`
-及 revision 重验和恢复。项目投影、Skill toggle、直接编辑和转换都不改变这一约束。
+及 revision 重验和恢复。项目投影、Skill toggle、直接编辑和转换都不改变这一约束；Skill
+target 的 presence、activation 或适用事实不可判定时必须封闭失败。
 
 Mock、截图、静态检查、synthetic fixture、文档草稿、OpenSpec validation 或本次独立
 文档复核，均**不等于** actual runtime evidence，也不能关闭 FE ticket、ARCH-GATE 或
@@ -289,7 +306,7 @@ actual 证据，才可能改变对应状态；本任务不执行该工作。
 | 原生资产为唯一事实来源、原位管理、无中央副本         | §4.1–§4.2、§5.2                                                                                  | 继续有效；投影不产生副本，转换结果是独立原生资产。                                                 |
 | 默认封闭失败与无静默数据损失                         | §4.4–§4.5                                                                                        | 继续有效；适用性、未知结构、版本和转换映射均不猜测。                                               |
 | 项目有界发现、显式纳入与移除只停止管理               | §6.4（不含旧的规范化路径身份规则）                                                               | 继续有效；本 change 不扩大项目发现或生命周期范围，项目身份改由第 3.1 节的不透明 `projectId` 约束。 |
-| 四 Agent 的版本化支持、兼容只读和官方适配器规则边界  | §6.1–§6.3、§10                                                                                   | 继续有效；v0.2 只细化 Adapter 已解析适用性与能力表达。                                             |
+| 四 Agent 的版本化支持、兼容只读和官方适配器规则边界  | §6.1–§6.3、§10                                                                                   | 继续有效；v0.2 细化 Adapter 已解析适用性及 Skill target presence/activation 能力表达。             |
 | 安全事务、并发控制、快照、原子应用、回滚与恢复       | §11                                                                                              | 继续有效；第 4–7 节的任何写入都进入同一闭环。                                                      |
 | 可恢复删除、原生导出、Git 只读感知                   | §8.4、§11.3–§11.4                                                                                | 继续有效；删除保持独立，toggle 不得回落为删除。                                                    |
 | 来源、漂移、应用私有元数据与不自动同步               | §12                                                                                              | 继续有效；转换结果不与源持续同步。                                                                 |
@@ -321,8 +338,10 @@ selected B2 Mock、截图或浏览器结果提升为生产实现或 actual runti
 ## 13. task 1.2 完成与下游禁区
 
 本基线已完成 OpenSpec task 1.1 的文档产物，以及 task 1.2 的独立只读复核、用户明确
-验收、验收事实记录与冻结；`tasks.md` 仅将 1.1 和 1.2 标为完成。本 slice 在此停止。
-task 1.3 或以后仍未开始，只能在后续独立 slice 中引用文首冻结 fingerprint 后推进。
+验收、验收事实记录与冻结；`tasks.md` 仅将 1.1 和 1.2 标为完成。本段“task 1.3 或以后
+仍未开始”的表述是**初次冻结时**的历史停点，说明当时下游只能在后续独立 slice 中引用
+文首冻结 fingerprint 后推进。本次补充产品决策验收只更新本产品基线的第 5 节，不代表
+frontend contract、runtime、FE ticket、ARCH-GATE 或 RELEASE-GATE 的验收或完成。
 
 本阶段的下游禁区包括但不限于：frontend contract、fixture catalog、coverage matrix、
 技术方案或 addendum、ARCH-GATE、RELEASE-GATE、tracker、FE tickets、TICKET_REGISTRY、
