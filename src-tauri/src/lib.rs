@@ -28,6 +28,9 @@ pub fn process_start_elapsed_millis() -> Option<u64> {
 }
 
 pub fn run() {
+    #[cfg(feature = "test-harness")]
+    test_harness_lifecycle::record_started();
+
     let gateway_core = core::GatewayCore::new(catalog::Catalog::from_env());
 
     #[allow(unused_mut)]
@@ -50,7 +53,54 @@ pub fn run() {
         ipc::test_fx01_cold_start_millis
     ]);
 
-    builder
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+    let result = builder.run(tauri::generate_context!());
+
+    #[cfg(feature = "test-harness")]
+    if result.is_ok() {
+        test_harness_lifecycle::record_normal_exit();
+    }
+
+    result.expect("error while running tauri application");
+}
+
+/// PF-01 resource evidence 的 PID/normal-exit attestation 只存在于 harness
+/// feature。它没有 IPC、不会进入 production build，且仅在 runner 提供的临时
+/// lifecycle 文件路径存在时写入。
+#[cfg(feature = "test-harness")]
+mod test_harness_lifecycle {
+    use std::path::PathBuf;
+
+    const ENV_PATH: &str = "PF01_HARNESS_LIFECYCLE_PATH";
+
+    fn destination() -> Option<PathBuf> {
+        std::env::var_os(ENV_PATH)
+            .filter(|value| !value.is_empty())
+            .map(PathBuf::from)
+    }
+
+    fn write(normal_exit: bool) {
+        let Some(destination) = destination() else {
+            return;
+        };
+        let parent = match destination.parent() {
+            Some(parent) if parent.is_dir() => parent,
+            _ => return,
+        };
+        let temporary = parent.join(format!(".pf01-harness-{}.tmp", std::process::id()));
+        let payload = format!(
+            "{{\"pid\":{},\"binary\":\"agent-config-manager\",\"role\":\"test-harness\",\"normalExit\":{normal_exit}}}\n",
+            std::process::id()
+        );
+        if std::fs::write(&temporary, payload).is_ok() {
+            let _ = std::fs::rename(temporary, destination);
+        }
+    }
+
+    pub fn record_started() {
+        write(false);
+    }
+
+    pub fn record_normal_exit() {
+        write(true);
+    }
 }

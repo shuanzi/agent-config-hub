@@ -100,9 +100,20 @@ export function writeJson(filePath, value) {
   fs.writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
 }
 
-export function makeRunId() {
-  // 2026-07-28T04:08:35.065Z → 20260728T040835Z（UTC，秒级）
-  return `${new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d+Z$/, '')}Z`;
+let lastRunTimestamp = '';
+let runSequence = 0;
+
+export function makeRunId(now = new Date()) {
+  // 毫秒 + PID + 同毫秒进程内序号，避免并发 verifier evidence 目录碰撞。
+  // 2026-07-28T04:08:35.065Z → 20260728T040835065Z-p12345-000
+  const timestamp = now.toISOString().replace(/[-:]/g, '').replace('.', '');
+  if (timestamp === lastRunTimestamp) {
+    runSequence += 1;
+  } else {
+    lastRunTimestamp = timestamp;
+    runSequence = 0;
+  }
+  return `${timestamp}-p${process.pid}-${String(runSequence).padStart(3, '0')}`;
 }
 
 /**

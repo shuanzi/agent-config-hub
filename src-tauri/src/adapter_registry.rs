@@ -28,6 +28,11 @@ impl AdapterRegistry {
         Self { root: Some(root) }
     }
 
+    /// FE-01 仅据此选择是否组合既有 FE-07R resolver；不读取、修改或枚举 root。
+    pub fn is_configured(&self) -> bool {
+        self.root.is_some()
+    }
+
     /// 只读读取 registry 当前事实。错误不携带磁盘路径或 serde 内部字符串，
     /// 由调用者归一化为稳定 ReadFailed。
     pub fn read(&self) -> Result<AdapterRegistrySnapshot, RegistryReadError> {

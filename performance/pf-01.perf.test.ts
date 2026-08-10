@@ -24,7 +24,7 @@ const METRIC = {
   startup: 'pf01.startup.first_list_visible',
   search: 'pf01.search.results_visible',
   filter: 'pf01.filter.results_visible',
-  select: 'pf01.select.source_visible',
+  select: 'pf01.select.skill_cells_visible',
 } as const;
 
 const STARTUP_SAMPLES = 5;
@@ -34,7 +34,8 @@ const INTERACTION_SAMPLES = 20;
  * 名称按全局序号步长 4 编号，两词命中数（representative 25/3，stress 25/3）
  * 互不相同且都小于全量，保证每次交替都有真实 DOM 变更 */
 const SEARCH_TERMS = ['pf01-skill-00', 'pf01-skill-000'];
-const FILTER_AGENTS = ['codex', 'gemini-cli'];
+// 首个筛选必须令首屏条数变化，避免 20→20 时缺少可观测的 DOM 稳定边界。
+const FILTER_AGENTS = ['gemini-cli', 'codex'];
 
 const samples: Record<string, number[]> = {
   [METRIC.startup]: [],
@@ -52,6 +53,7 @@ interface Pf01Page {
   __pf01?: {
     getStartupMs: () => number | null;
     countList: (condition: { searchText?: string; agents?: string[] }) => number | null;
+    openLocator: () => void;
     dispatchSearch: (searchText: string) => void;
   };
   __pf01Probe?: ProbeState;
@@ -67,25 +69,28 @@ async function openFresh(): Promise<void> {
 async function armListProbe(expectedCount: number): Promise<void> {
   await browser.execute((count) => {
     const page = window as unknown as Pf01Page;
-    const pane = document.querySelector('.list-pane');
-    if (pane === null) throw new Error('缺少 .list-pane');
+    // 筛选会短暂置为 loading 并卸载 `.list-pane`；必须监听不卸载的父容器，
+    // 再对新建的列表计算 rows，不能把观察器绑在将被移除的旧节点上。
+    const root = document.querySelector('.workbench-main');
+    if (root === null) throw new Error('缺少 .workbench-main');
+    const rowCount = () => root.querySelectorAll('.list-pane [role="option"]').length;
     page.__pf01Probe = { start: performance.now(), result: null };
     const probe = page.__pf01Probe;
     const observer = new MutationObserver(() => {
-      if (pane.querySelectorAll('[role="option"]').length !== count) return;
+      if (rowCount() !== count) return;
       requestAnimationFrame(() => {
         if (probe.result !== null) return;
-        if (pane.querySelectorAll('[role="option"]').length === count) {
+        if (rowCount() === count) {
           probe.result = performance.now() - probe.start;
           observer.disconnect();
         }
       });
     });
-    observer.observe(pane, { childList: true, subtree: true, characterData: true });
+    observer.observe(root, { childList: true, subtree: true, characterData: true });
   }, expectedCount);
 }
 
-/** 详情探针：pre.source-view 存在且详情区内容不同于 arm 时刻 */
+/** 详情探针：只读结构化详情中的四个固定 Skill cells 出现且内容更新。 */
 async function armDetailProbe(): Promise<void> {
   await browser.execute(() => {
     const page = window as unknown as Pf01Page;
@@ -96,13 +101,35 @@ async function armDetailProbe(): Promise<void> {
     const probe = page.__pf01Probe;
     const observer = new MutationObserver(() => {
       if (probe.result !== null) return;
-      if (panel.querySelector('pre.source-view') === null) return;
+      if (panel.querySelectorAll('.skill-target-grid article').length !== 4) return;
       if ((panel.textContent ?? '') === before) return;
       probe.result = performance.now() - probe.start;
       observer.disconnect();
     });
     observer.observe(panel, { childList: true, subtree: true, characterData: true });
   });
+}
+
+/** locator 探针：非空搜索的三类固定分组中结果数量稳定。 */
+async function armLocatorProbe(expectedCount: number): Promise<void> {
+  await browser.execute((count) => {
+    const page = window as unknown as Pf01Page;
+    const locator = document.querySelector('.global-locator');
+    if (locator === null) throw new Error('缺少 .global-locator');
+    page.__pf01Probe = { start: performance.now(), result: null };
+    const probe = page.__pf01Probe;
+    const observer = new MutationObserver(() => {
+      if (locator.querySelectorAll('[data-testid="locator-result"]').length !== count) return;
+      requestAnimationFrame(() => {
+        if (probe.result !== null) return;
+        if (locator.querySelectorAll('[data-testid="locator-result"]').length === count) {
+          probe.result = performance.now() - probe.start;
+          observer.disconnect();
+        }
+      });
+    });
+    observer.observe(locator, { childList: true, subtree: true, characterData: true });
+  }, expectedCount);
 }
 
 /** 搜索 intent：probe 记点重置为 dispatch 时刻，再发出单次 dispatch */
@@ -157,7 +184,7 @@ describe('PF-01 catalog-browse 采样', () => {
     }
   });
 
-  it(`选择资产 → 源码可见（${INTERACTION_SAMPLES} 样本）`, async () => {
+  it(`选择 Skill 资产 → 四个只读 Agent cells 可见（${INTERACTION_SAMPLES} 样本）`, async () => {
     await openFresh();
     for (let index = 0; index < INTERACTION_SAMPLES; index += 1) {
       await armDetailProbe();
@@ -180,10 +207,12 @@ describe('PF-01 catalog-browse 采样', () => {
 
   it(`搜索 → 结果可见（${INTERACTION_SAMPLES} 样本）`, async () => {
     await openFresh();
+    await browser.execute(() => (window as unknown as Pf01Page).__pf01?.openLocator());
+    await $('.global-locator').waitForDisplayed();
     for (let index = 0; index < INTERACTION_SAMPLES; index += 1) {
       const term = SEARCH_TERMS[index % SEARCH_TERMS.length];
       const expected = await expectedCount({ searchText: term });
-      await armListProbe(expected);
+      await armLocatorProbe(expected);
       await dispatchSearchIntent(term);
       samples[METRIC.search].push(await awaitProbeMs());
     }

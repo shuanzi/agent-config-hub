@@ -58,18 +58,29 @@
       "sampling": "两个 Agent 交替；起点为 probe arm 时刻，含一次本地 WebDriver 往返（恒定开销）"
     },
     {
-      "id": "pf01.select.source_visible",
+      "id": "pf01.select.skill_cells_visible",
       "surface": "选择资产",
-      "definition": "点击列表行（真实 WebDriver click）→ 详情区磁盘源码（pre.source-view）内容更新可见",
+      "definition": "点击 Skill 行（真实 WebDriver click）→ 结构化只读详情与四个固定 Agent cells 可见",
       "minSamples": 20,
       "sampling": "前两行交替点击；起点为 probe arm 时刻，含一次本地 WebDriver 往返（恒定开销）"
     }
   ],
-  "budgetStatus": "baseline-collected / budget-not-frozen",
-  "budgetNote": "FE-01 只采集首条 baseline；数值预算未冻结，建议预算写入 evidence 的 proposed-budgets.json，需用户单独授权后方可进入版本控制的 performance/budgets manifest",
+  "resourceMetrics": [
+    {
+      "id": "pf01.l3.peak_rss_bytes",
+      "surface": "L3 test-harness 资源 provenance",
+      "definition": "每次 cold start 仅采 agent-config-manager harness PID 及后代的 process-tree RSS bytes；从成功启动至正常退出每 50ms 采样，记录每次峰值；排除 WDIO/Vite，L2 与 L4 不采此项",
+      "unit": "bytes",
+      "sampleCount": 3,
+      "aggregation": "保留 3 次 raw peak，并记录 max",
+      "sampling": "agent-config-manager harness PID + 后代；50ms process-tree RSS bytes；排除 WDIO/Vite；成功启动至正常退出"
+    }
+  ],
+  "budgetStatus": "formula-authorized / clean-manifest-gated",
+  "budgetNote": "用户已授权：完整 clean representative baseline 首次运行按公式生成版本化预算，但该次仍为 budget-not-frozen/inconclusive；后续独立 clean rerun 才可比较。仅 descriptor digest、完整 provenance 与 schema 均匹配的 manifest 才是 frozen。旧 20260810T124356Z 仅 preliminary/inconclusive，禁止追补 provenance 或作为冻结来源。",
   "digest": {
     "algorithm": "sha256",
     "canonicalization": "将本文件 digest.value 置为空字符串后对文件原始字节求 sha256；由 scripts/orchestrator/lib.mjs 的 pfDescriptorDigest 复算",
-    "value": "9920956c73cd524f43232f6f9fe27024c7b104d4ce7ff9c91c734e9ac9cfdf2d"
+    "value": "f7dda0b93f894e87051682ecac0b73a44ff102c5454455c7ad81edea2644a8e5"
   }
 }

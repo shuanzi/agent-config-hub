@@ -33,6 +33,8 @@ import {
   writeJson,
 } from './lib.mjs';
 import { TICKET_REGISTRY, ticketConfig } from './ticket-registry.mjs';
+import { maybeWriteLatestCleanPass } from './latest-clean-pass.mjs';
+import { collectCurrentPf01Attestation, validateFrozenPf01Budget } from './pf01-budget.mjs';
 
 /** step 退出码 → 状态映射（ARC-06c §3.17）：0=pass，2=inconclusive，其余=fail */
 function stepStatusOf(exitCode) {
@@ -44,9 +46,37 @@ function stepStatusOf(exitCode) {
 const STATUS_LABEL = { pass: 'PASS', inconclusive: 'INCONCLUSIVE', fail: 'FAIL' };
 
 function budgetState(performance) {
-  return fs.existsSync(path.join(REPO_ROOT, performance.budgetPath))
-    ? performance.frozenLabel
-    : performance.unfrozenLabel;
+  const budgetPath = path.join(REPO_ROOT, performance.budgetPath);
+  if (!fs.existsSync(budgetPath)) {
+    return {
+      label: performance.unfrozenLabel,
+      status: 'inconclusive',
+      validation: { valid: false, violations: ['预算文件不存在'] },
+    };
+  }
+  try {
+    const budget = JSON.parse(fs.readFileSync(budgetPath, 'utf8'));
+    const descriptor = JSON.parse(
+      fs.readFileSync(path.join(REPO_ROOT, performance.descriptorPath), 'utf8'),
+    );
+    const validation = validateFrozenPf01Budget(
+      budget,
+      descriptor,
+      performance.profile ?? 'representative',
+      collectCurrentPf01Attestation(),
+    );
+    return {
+      label: validation.valid ? performance.frozenLabel : 'budget-invalid（禁止作为 PF PASS 依据）',
+      status: validation.valid ? 'pass' : 'fail',
+      validation,
+    };
+  } catch (error) {
+    return {
+      label: 'budget-invalid（禁止作为 PF PASS 依据）',
+      status: 'fail',
+      validation: { valid: false, violations: [error instanceof Error ? error.message : '预算文件无法解析'] },
+    };
+  }
 }
 
 async function toolchainInfo() {
@@ -158,9 +188,12 @@ async function main() {
   // 整体 status：有 fail → fail；否则有 inconclusive（含 evidence 污染）→
   // inconclusive；否则 pass。未知退出码已由 stepStatusOf 归为 fail。
   const anyFailed = stepResults.some((step) => step.status === 'fail');
+  const budget = ticket.performance === undefined ? null : budgetState(ticket.performance);
   const anyInconclusive =
-    evidenceContaminated || stepResults.some((step) => step.status === 'inconclusive');
-  const overallStatus = anyFailed ? 'fail' : anyInconclusive ? 'inconclusive' : 'pass';
+    evidenceContaminated ||
+    stepResults.some((step) => step.status === 'inconclusive') ||
+    budget?.status === 'inconclusive';
+  const overallStatus = anyFailed || budget?.status === 'fail' ? 'fail' : anyInconclusive ? 'inconclusive' : 'pass';
 
   // harness artifact identity（test:tauri 写入；production 标 N/A）
   const identityPath = path.join(REPO_ROOT, ticket.artifact.identityPath);
@@ -191,9 +224,11 @@ async function main() {
     artifactIdentity,
     startAt,
     endAt,
+    completedAt: endAt,
   };
   if (ticket.performance !== undefined) {
-    manifest.budgetState = budgetState(ticket.performance);
+    manifest.budgetState = budget?.label;
+    manifest.budgetValidation = budget?.validation;
     manifest.pfDescriptorDigest = pfDescriptorDigest(
       path.join(REPO_ROOT, ticket.performance.descriptorPath),
     );
@@ -215,6 +250,15 @@ async function main() {
     if (generatedManifest.runId !== path.basename(evidenceRoot)) {
       throw new Error('generated manifest runId does not match evidence directory');
     }
+  }
+  const cleanPassIndex = await maybeWriteLatestCleanPass({
+    root: REPO_ROOT,
+    evidenceRoot,
+    ticketId,
+    manifest,
+  });
+  if (cleanPassIndex.updated) {
+    console.log(`latest clean pass: ${cleanPassIndex.indexPath}`);
   }
 
   console.log(`\nverify:ticket ${ticketId}: ${manifest.status}`);

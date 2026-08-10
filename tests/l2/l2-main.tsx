@@ -11,7 +11,7 @@
 import { createRoot } from 'react-dom/client';
 import { ScriptedMockGateway, type RecordedReadCall } from '../../src/gateway/mock';
 import type { AgentId, AssetScope, AssetStatusFilter } from '../../src/contract/types';
-import { WorkspaceSession } from '../../src/session/WorkspaceSession';
+import { ReadOnlyWorkbenchSession } from '../../src/session/ReadOnlyWorkbenchSession';
 import { App } from '../../src/App';
 import '../../src/ui/workbench.css';
 
@@ -27,6 +27,8 @@ interface Pf01Bridge {
   getStartupMs: () => number | null;
   /** 当前资产类型（skills）+ 给定条件下的期望行数 */
   countList: (condition: Pf01ListCondition) => number | null;
+  /** 打开 locator 但不产生搜索结果，供搜索性能探针先绑定 DOM。 */
+  openLocator: () => void;
   /** 以单次 dispatch 表达搜索 intent（避免多键入与输入延迟混入测量） */
   dispatchSearch: (searchText: string) => void;
 }
@@ -51,7 +53,7 @@ if (scenario === 'perf-catalog') {
   // User Timing 起点：入口模块求值时刻（navigation 之后的最早可记点）
   const entryAt = performance.now();
   mock.enablePerfCatalog(params.get('perfProfile') === 'stress' ? 'stress' : 'representative');
-  const session = new WorkspaceSession(mock);
+  const session = new ReadOnlyWorkbenchSession(mock);
   const unsubscribe = session.subscribe(() => {
     const loadState = session.getSnapshot().loadState;
     if ((loadState.kind === 'ready' || loadState.kind === 'stale') && startupMs === null) {
@@ -62,26 +64,28 @@ if (scenario === 'perf-catalog') {
   window.__pf01 = {
     getStartupMs: () => startupMs,
     countList: (condition) =>
-      mock.perfListCount({
-        kind: 'assetList',
-        scope: { kind: 'currentAssetType', assetType: 'skill' },
-        searchText: condition.searchText,
-        filters: {
-          agents: condition.agents,
-          scopes: condition.scopes,
-          statuses: condition.statuses,
-        },
-      }),
-    dispatchSearch: (searchText) => session.dispatch({ kind: 'setSearchText', searchText }),
+      condition.searchText === undefined
+        ? mock.perfWorkbenchVisibleCount({
+            kind: 'workbench',
+            assetType: 'skill',
+            viewContext: { kind: 'all' },
+            filters: { agents: condition.agents, statuses: condition.statuses },
+          })
+        : mock.perfLocatorCount(condition.searchText),
+    dispatchSearch: (searchText) => {
+      session.dispatch({ kind: 'openLocator' });
+      session.dispatch({ kind: 'setLocatorSearch', searchText });
+    },
+    openLocator: () => session.dispatch({ kind: 'openLocator' }),
   };
   mount(session);
 } else {
   mock.applyScenario(scenario);
-  const session = new WorkspaceSession(mock);
+  const session = new ReadOnlyWorkbenchSession(mock);
   mount(session);
 }
 
-function mount(session: WorkspaceSession): void {
+function mount(session: ReadOnlyWorkbenchSession): void {
   const container = document.getElementById('root');
   if (container === null) {
     throw new Error('缺少 #root 挂载点');

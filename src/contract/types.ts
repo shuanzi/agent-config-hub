@@ -1,3 +1,17 @@
+import type {
+  GlobalLocatorQuery,
+  GlobalLocatorSnapshot,
+  WorkbenchActualReadSnapshot,
+  WorkbenchQuery,
+} from '../workbench/read-only-model';
+
+export type {
+  GlobalLocatorQuery,
+  GlobalLocatorSnapshot,
+  WorkbenchActualReadSnapshot,
+  WorkbenchQuery,
+} from '../workbench/read-only-model';
+
 /**
  * FrontendGateway 语言无关契约类型的 TypeScript 表达（FE-01 封闭子集）。
  *
@@ -180,7 +194,13 @@ export interface ProjectApplicabilityQuery {
   view: ProjectApplicabilityView;
 }
 
-export type Query = AssetListQuery | ProjectApplicabilityQuery | AssetDetailQuery | NativeFileQuery;
+export type Query =
+  | AssetListQuery
+  | ProjectApplicabilityQuery
+  | AssetDetailQuery
+  | NativeFileQuery
+  | WorkbenchQuery
+  | GlobalLocatorQuery;
 
 // ---------------------------------------------------------------------------
 // ReadResult（契约 §6.2）
@@ -409,7 +429,11 @@ export type SnapshotFor<Q extends Query> = Q extends AssetListQuery
       ? AssetDetailSnapshot
       : Q extends NativeFileQuery
         ? NativeFileSnapshot
-        : never;
+        : Q extends WorkbenchQuery
+          ? WorkbenchActualReadSnapshot
+          : Q extends GlobalLocatorQuery
+            ? GlobalLocatorSnapshot
+            : never;
 
 // ---------------------------------------------------------------------------
 // observe（FE-01 封闭子集：WorkspaceSubscription + 失效类事件）

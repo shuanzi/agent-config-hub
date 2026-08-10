@@ -81,7 +81,8 @@ export const TICKET_REGISTRY = Object.freeze({
     performance: {
       descriptorPath: 'performance/descriptors/pf-01.catalog-browse.json',
       budgetPath: 'performance/budgets/pf-01.budgets.json',
-      unfrozenLabel: 'budget-not-frozen（FE-01 不冻结数值预算）',
+      profile: 'representative',
+      unfrozenLabel: 'budget-not-frozen（首次完整 clean representative baseline 生成预算；该次仍为 inconclusive）',
       frozenLabel: 'budget-frozen（performance/budgets/pf-01.budgets.json）',
     },
     artifact: {

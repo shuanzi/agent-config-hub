@@ -1,0 +1,111 @@
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, describe, expect, it } from 'vitest';
+
+// prettier-ignore
+// @ts-expect-error runtime helper is a plain Node ESM module.
+import { finalizeHarnessPeakRss, HarnessPeakRssSampler, validatePf01ResourceEvidence } from '../../scripts/orchestrator/pf01-resource.mjs';
+
+const temporaryRoots: string[] = [];
+
+afterEach(() => {
+  for (const root of temporaryRoots.splice(0)) rmSync(root, { recursive: true, force: true });
+});
+
+describe('PF-01 L3 peak RSS evidence', () => {
+  it('only accepts three complete, normally-exited harness-tree samples and records their max', () => {
+    const runs = [
+      { harnessPid: 101, samples: [100, 130, 110], normalExit: true },
+      { harnessPid: 102, samples: [90, 150], normalExit: true },
+      { harnessPid: 103, samples: [120, 125], normalExit: true },
+    ];
+    const evidence = finalizeHarnessPeakRss(runs);
+
+    expect(evidence).toEqual({
+      metric: 'pf01.l3.peak_rss_bytes',
+      layer: 'L3 test-harness debug（隔离临时 fixture 根；非 release-like artifact）',
+      sampling: {
+        process: 'agent-config-manager harness PID and descendants only',
+        intervalMs: 50,
+        window: 'successful process start to normal exit',
+      },
+      rawPeakBytes: [130, 150, 125],
+      maxBytes: 150,
+    });
+    expect(validatePf01ResourceEvidence(evidence)).toEqual({ valid: true });
+  });
+
+  it('fails closed when PID ownership, sampling, or normal exit cannot be established', () => {
+    for (const runs of [
+      [
+        { harnessPid: null, samples: [100], normalExit: true },
+        { harnessPid: 102, samples: [100], normalExit: true },
+        { harnessPid: 103, samples: [100], normalExit: true },
+      ],
+      [
+        { harnessPid: 101, samples: [], normalExit: true },
+        { harnessPid: 102, samples: [100], normalExit: true },
+        { harnessPid: 103, samples: [100], normalExit: true },
+      ],
+      [
+        { harnessPid: 101, samples: [100], normalExit: false },
+        { harnessPid: 102, samples: [100], normalExit: true },
+        { harnessPid: 103, samples: [100], normalExit: true },
+      ],
+    ]) {
+      expect(() => finalizeHarnessPeakRss(runs)).toThrow('inconclusive');
+    }
+    expect(
+      validatePf01ResourceEvidence({
+        metric: 'pf01.l3.peak_rss_bytes',
+        layer: 'L2 mock renderer',
+        sampling: {},
+        rawPeakBytes: [1, 2, 3],
+        maxBytes: 3,
+      }),
+    ).toEqual({ valid: false });
+  });
+
+  it('lifecycle 写入 normalExit 后停止采样，只使用退出前已认证的 samples', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'acm-pf01-resource-'));
+    temporaryRoots.push(root);
+    const lifecyclePath = join(root, 'lifecycle.json');
+    let readCalls = 0;
+    const sampler = new HarnessPeakRssSampler({
+      lifecyclePath,
+      intervalMs: 60_000,
+      readRows: async () => {
+        readCalls += 1;
+        return [{ pid: 42, parentPid: 1, rssBytes: 1024 }];
+      },
+    });
+    writeFileSync(
+      lifecyclePath,
+      JSON.stringify({
+        pid: 42,
+        binary: 'agent-config-manager',
+        role: 'test-harness',
+        normalExit: false,
+      }),
+    );
+    await sampler.capture();
+    writeFileSync(
+      lifecyclePath,
+      JSON.stringify({
+        pid: 42,
+        binary: 'agent-config-manager',
+        role: 'test-harness',
+        normalExit: true,
+      }),
+    );
+    await sampler.capture();
+
+    expect(readCalls).toBe(1);
+    await expect(sampler.finalize({ waitForLifecycleMs: 0 })).resolves.toEqual({
+      harnessPid: 42,
+      samples: [1024],
+      normalExit: true,
+    });
+  });
+});

@@ -12,21 +12,23 @@
  * proposed-budgets.json 到输出目录。
  *
  * 预算门（ARC-06c §3.16，预算未冻结不得宣称通过）：
- * - 版本控制预算文件 performance/budgets/pf-01.budgets.json 不存在 →
- *   汇总照常写，但进程以退出码 2 结束（budget-not-frozen → inconclusive，
- *   需单独授权冻结预算后才能 PASS）；
+ * - 首次完整、clean representative baseline 在用户授权下可自动生成版本化
+ *   performance/budgets/pf-01.budgets.json，但该首次运行仍以退出码 2 结束
+ *   （budget-not-frozen → inconclusive）；后续独立 clean rerun 才能比较；
  * - 存在 → 按预算逐 metric 比较，超预算 exit 1，达标 exit 0（未来路径）。
  * 采样本身失败（wdio 非零退出、样本数不足）一律 exit 1。
  *
- * 建议预算（absolute ceiling + regression allowance）只写入 evidence 输出
- * 目录，明确标注“未冻结，需用户单独授权”，绝不写入版本控制内文件。
+ * 样本/资源/provenance 不完整或 worktree dirty 一律 inconclusive，绝不写预算。
  *
  * 输出目录：环境变量 PERF_OUTPUT_DIR（verify:ticket 注入 evidence 目录），
  * 缺省 .artifacts/performance/PF-01/<run-id>/。
  */
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import {
+  capture,
+  gitInfo,
   makeRunId,
   pfDescriptorDigest,
   runStep,
@@ -37,6 +39,15 @@ import {
   REPO_ROOT,
 } from './lib.mjs';
 import { ensureHarnessBuilt } from './build-harness.mjs';
+import {
+  assertCleanPf01Baseline,
+  collectCurrentPf01Attestation,
+  freezePf01Budget,
+  PF01_BUDGET_CONSTANTS,
+  validateCurrentPf01Attestation,
+  validateFrozenPf01Budget,
+} from './pf01-budget.mjs';
+import { finalizeHarnessPeakRss, validatePf01ResourceEvidence } from './pf01-resource.mjs';
 
 const DESCRIPTOR_PATH = path.join(REPO_ROOT, 'performance/descriptors/pf-01.catalog-browse.json');
 const BUDGETS_PATH = path.join(REPO_ROOT, 'performance/budgets/pf-01.budgets.json');
@@ -49,7 +60,7 @@ const MIN_SAMPLES = {
   'pf01.startup.first_list_visible': 5,
   'pf01.search.results_visible': 20,
   'pf01.filter.results_visible': 20,
-  'pf01.select.source_visible': 20,
+  'pf01.select.skill_cells_visible': 20,
   'pf01.l3.cold_start.first_snapshot': 3,
 };
 
@@ -57,7 +68,7 @@ const METRIC_LAYERS = {
   'pf01.startup.first_list_visible': LAYER_L2,
   'pf01.search.results_visible': LAYER_L2,
   'pf01.filter.results_visible': LAYER_L2,
-  'pf01.select.source_visible': LAYER_L2,
+  'pf01.select.skill_cells_visible': LAYER_L2,
   'pf01.l3.cold_start.first_snapshot': LAYER_L3,
 };
 
@@ -94,7 +105,67 @@ function proposeBudget(metricId, stats) {
     proposedAbsoluteCeilingMs: absoluteCeilingMs,
     proposedRegressionAllowance: { relativeTo: 'baseline-p50', maxRatio: 1.25 },
     status: 'proposed-not-frozen',
-    note: '未冻结，需用户单独授权后方可进入版本控制的 performance/budgets manifest；当前仅作 evidence 留存',
+    note: '本次完整 clean baseline 会在同一 runner 内生成版本化预算；首次运行仍为 inconclusive，须后续独立 clean rerun 比较。',
+  };
+}
+
+function relativeArtifactPath(filePath) {
+  const relative = path.relative(REPO_ROOT, filePath);
+  if (relative.startsWith('..') || path.isAbsolute(relative)) {
+    throw new Error(`PF-01 artifact 必须位于 repo 内: ${filePath}`);
+  }
+  return relative;
+}
+
+async function completeBaselineProvenance({ outputDir, resourceEvidence, currentAttestation }) {
+  const attestation = validateCurrentPf01Attestation(currentAttestation);
+  if (!attestation.valid) throw new Error(attestation.violations.join('; '));
+  const [git, cargo, rustc, npm, macosProductVersion] = await Promise.all([
+    gitInfo(),
+    capture('cargo', ['--version']),
+    capture('rustc', ['--version']),
+    capture('corepack', ['npm', '--version']),
+    capture('sw_vers', ['-productVersion']),
+  ]);
+  if (typeof git.commit !== 'string' || !/^[a-f0-9]{40,64}$/i.test(git.commit)) {
+    throw new Error('git commit unavailable');
+  }
+  assertCleanPf01Baseline(git);
+  if (cargo.exitCode !== 0 || rustc.exitCode !== 0 || npm.exitCode !== 0 || macosProductVersion.exitCode !== 0) {
+    throw new Error('toolchain or macOS product version unavailable');
+  }
+  return {
+    run: relativeArtifactPath(outputDir),
+    collectedAt: new Date().toISOString(),
+    statusBeforeBudgetFreeze: 'baseline-collected / budget-not-frozen',
+    commit: git.commit,
+    worktreeDirty: false,
+    artifact: {
+      identityPath: currentAttestation.artifact.identityPath,
+      kind: currentAttestation.artifact.kind,
+      identifier: currentAttestation.artifact.identifier,
+      profile: currentAttestation.artifact.profile,
+      binary: currentAttestation.artifact.binary,
+      binarySha256: currentAttestation.artifact.binarySha256,
+      provenance: currentAttestation.artifact.provenance,
+    },
+    runner: {
+      node: process.version,
+      npm: npm.stdout.trim(),
+      platform: os.platform(),
+      release: os.release(),
+      macosProductVersion: macosProductVersion.stdout.trim(),
+      arch: os.arch(),
+    },
+    toolchain: { cargo: cargo.stdout.trim(), rustc: rustc.stdout.trim() },
+    fixture: currentAttestation.fixture,
+    resources: {
+      metric: resourceEvidence.metric,
+      layer: resourceEvidence.layer,
+      sampling: PF01_BUDGET_CONSTANTS.RESOURCE_SAMPLING,
+      rawPeaksBytes: resourceEvidence.rawPeakBytes,
+      maxBytes: resourceEvidence.maxBytes,
+    },
   };
 }
 
@@ -103,8 +174,7 @@ function proposeBudget(metricId, stats) {
  * p95 ≤ absoluteCeilingMs 且 p50 ≤ baseline.p50 × regressionAllowance.maxRatio。
  * 返回违规描述列表（空 = 全部达标）。
  */
-function compareAgainstBudgets(budgetsPath, metrics) {
-  const payload = JSON.parse(fs.readFileSync(budgetsPath, 'utf8'));
+function compareAgainstBudgets(payload, metrics) {
   const entries = new Map((payload.budgets ?? []).map((entry) => [entry.metric, entry]));
   const violations = [];
   for (const [metricId, stats] of Object.entries(metrics)) {
@@ -156,6 +226,16 @@ async function main() {
   }
   console.log(`PF-01 descriptor digest: ${digest}（profile: ${profile}）`);
 
+  // authoritative baseline 与 budget freeze 只允许绑定 clean commit；此 gate
+  // 位于任何 L2/L3 采样之前，避免 dirty run 留下可被误用的候选 artifact。
+  const startingGit = await gitInfo();
+  try {
+    assertCleanPf01Baseline(startingGit);
+  } catch (error) {
+    console.error(`INCONCLUSIVE  ${error instanceof Error ? error.message : 'clean worktree required'}`);
+    process.exit(2);
+  }
+
   const outputDir =
     process.env.PERF_OUTPUT_DIR ?? path.join(ARTIFACTS_ROOT, 'performance/PF-01', makeRunId());
   fs.mkdirSync(outputDir, { recursive: true });
@@ -188,6 +268,17 @@ async function main() {
     console.error('FAIL  harness 构建失败');
     process.exit(1);
   }
+  let currentAttestation;
+  try {
+    currentAttestation = collectCurrentPf01Attestation();
+    const attestation = validateCurrentPf01Attestation(currentAttestation);
+    if (!attestation.valid) throw new Error(attestation.violations.join('; '));
+  } catch (error) {
+    console.error(
+      `INCONCLUSIVE  当前 harness/FX-01 attestation 无效：${error instanceof Error ? error.message : 'unknown'}`,
+    );
+    process.exit(2);
+  }
 
   const l3SamplesPath = path.join(outputDir, 'l3-samples.json');
   fs.rmSync(l3SamplesPath, { force: true });
@@ -210,6 +301,24 @@ async function main() {
   }
   const l3SamplesPayload = JSON.parse(fs.readFileSync(l3SamplesPath, 'utf8'));
 
+  // 资源口径由用户冻结为 L3 harness PID+后代 50ms sampled peak RSS。
+  // 任一 run 无 PID/样本/normal exit attestation 都必须让 PF inconclusive；
+  // L2 Chrome/Vite/WDIO 与 L4 artifact 不在本 metric 的归属范围内。
+  const resourceRunsPath = path.join(outputDir, 'l3-resource-runs.json');
+  let resourceEvidence;
+  let resourceError = null;
+  try {
+    if (!fs.existsSync(resourceRunsPath)) throw new Error('L3 resource runs 未生成');
+    const resourceRuns = JSON.parse(fs.readFileSync(resourceRunsPath, 'utf8'));
+    resourceEvidence = finalizeHarnessPeakRss(resourceRuns.runs);
+    if (!validatePf01ResourceEvidence(resourceEvidence).valid) {
+      throw new Error('L3 resource evidence schema invalid');
+    }
+  } catch (error) {
+    resourceEvidence = null;
+    resourceError = error instanceof Error ? error.message : 'L3 resource evidence invalid';
+  }
+
   // --- 合并汇总（每 metric 标注 layer provenance） ----------------------------
   const mergedSamples = { ...samplesPayload.metrics };
   for (const [metricId, entry] of Object.entries(l3SamplesPayload.metrics ?? {})) {
@@ -231,24 +340,87 @@ async function main() {
       layer: METRIC_LAYERS[metricId],
     };
   }
+  if (resourceEvidence === null) complete = false;
 
-  const budgetsFrozen = fs.existsSync(BUDGETS_PATH);
+  // 首次完整采样前不存在版本化预算；即使本次获授权自动生成预算，也必须
+  // 保持这一次为 budget-not-frozen/inconclusive，不能把首次结果冒充 PASS。
+  const budgetExistedBeforeRun = fs.existsSync(BUDGETS_PATH);
+  let existingBudget = null;
+  let budgetValidation = null;
+  if (budgetExistedBeforeRun) {
+    try {
+      existingBudget = JSON.parse(fs.readFileSync(BUDGETS_PATH, 'utf8'));
+      budgetValidation = validateFrozenPf01Budget(
+        existingBudget,
+        JSON.parse(fs.readFileSync(DESCRIPTOR_PATH, 'utf8')),
+        profile,
+        currentAttestation,
+      );
+    } catch (error) {
+      budgetValidation = {
+        valid: false,
+        violations: [error instanceof Error ? error.message : '预算文件无法解析'],
+      };
+    }
+  }
+  let generatedBudget = null;
+  let provenanceError = null;
+  if (complete && !budgetExistedBeforeRun && resourceEvidence !== null) {
+    try {
+      generatedBudget = freezePf01Budget({
+        descriptor: JSON.parse(fs.readFileSync(DESCRIPTOR_PATH, 'utf8')),
+        profile,
+        metrics,
+        baselineProvenance: await completeBaselineProvenance({
+          outputDir,
+          resourceEvidence,
+          currentAttestation,
+        }),
+      });
+      const validation = validateFrozenPf01Budget(
+        generatedBudget,
+        JSON.parse(fs.readFileSync(DESCRIPTOR_PATH, 'utf8')),
+        profile,
+        currentAttestation,
+      );
+      if (!validation.valid) throw new Error(validation.violations.join('; '));
+      writeJson(BUDGETS_PATH, generatedBudget);
+    } catch (error) {
+      generatedBudget = null;
+      provenanceError = error instanceof Error ? error.message : 'baseline provenance unavailable';
+      complete = false;
+    }
+  }
   const status = !complete
     ? 'inconclusive'
-    : budgetsFrozen
-      ? 'budget-comparison'
-      : 'baseline-collected / budget-not-frozen';
+    : !budgetExistedBeforeRun
+      ? 'baseline-collected / budget-not-frozen'
+      : budgetValidation?.valid
+        ? 'budget-comparison'
+        : 'budget-invalid';
   const summary = {
     schemaVersion: 1,
     descriptorId: 'PF-01',
     descriptorDigest: digest,
     profile,
     status,
-    budgetState: budgetsFrozen
-      ? 'budget-frozen（performance/budgets/pf-01.budgets.json）'
-      : 'budget-not-frozen（FE-01 不冻结数值预算）',
+    budgetState: !budgetExistedBeforeRun
+      ? generatedBudget === null
+        ? 'budget-not-frozen（本次 baseline 不完整，未生成版本化预算）'
+        : 'budget-created / first-run-inconclusive（须后续独立 rerun 比较）'
+      : budgetValidation?.valid
+        ? 'budget-frozen（performance/budgets/pf-01.budgets.json）'
+        : 'budget-invalid（禁止比较或 PASS）',
     surfaces: { L2: LAYER_L2, L3: LAYER_L3 },
     metrics,
+    resources:
+      resourceEvidence === null
+        ? { status: 'inconclusive', reason: resourceError ?? provenanceError }
+        : { status: 'collected', ...resourceEvidence },
+    budgetValidation:
+      budgetValidation === null
+        ? { status: generatedBudget === null ? 'not-created' : 'created-for-next-rerun' }
+        : budgetValidation,
     collectedAt: samplesPayload.collectedAt,
   };
   const proposedBudgets = {
@@ -256,8 +428,16 @@ async function main() {
     descriptorId: 'PF-01',
     profile,
     status: 'proposed-not-frozen',
-    note: '以下为基于本次样本分布的建议预算（absolute ceiling = p95×1.5 上取整 10ms；regression allowance = baseline p50×1.25）。未冻结，需用户单独授权；不得据此关闭任何性能验收。',
+    note: '以下为基于本次样本分布的建议预算（absolute ceiling = p95×1.5 上取整 10ms；regression allowance = baseline p50×1.25）。首次 clean baseline 已获授权生成版本化预算，但本次仍不得据此关闭性能验收。',
     budgets: Object.entries(metrics).map(([metricId, stats]) => proposeBudget(metricId, stats)),
+    resources:
+      resourceEvidence === null
+        ? { status: 'inconclusive', reason: resourceError }
+        : {
+            status: 'collected-not-budgeted',
+            ...resourceEvidence,
+            note: '资源峰值仅作为 PF-01 L3 provenance；用户冻结的毫秒预算公式不适用于 bytes。',
+          },
   };
 
   for (const [file, payload] of [
@@ -282,17 +462,22 @@ async function main() {
   console.log(`evidence: ${sanitizeText(outputDir)}`);
 
   if (!complete) {
-    console.error('FAIL  样本数不足（见各 metric 的 complete 标记）');
-    process.exit(1);
+    console.error(`INCONCLUSIVE  样本、资源或 provenance 不完整（${provenanceError ?? '见 summary'}）`);
+    process.exit(2);
   }
 
-  // 预算门：未冻结 → inconclusive（退出码 2），不得宣称通过
-  if (!budgetsFrozen) {
+  // 预算门：首次生成预算仍为 inconclusive；后续独立运行才可比较。
+  if (!budgetExistedBeforeRun) {
     console.log('budget-not-frozen → inconclusive（需单独授权冻结预算后才能 PASS）');
     process.exit(2);
   }
 
-  const violations = compareAgainstBudgets(BUDGETS_PATH, metrics);
+  if (!budgetValidation?.valid || existingBudget === null) {
+    console.error(`FAIL  versioned budget invalid:\n  ${(budgetValidation?.violations ?? []).join('\n  ')}`);
+    process.exit(1);
+  }
+
+  const violations = compareAgainstBudgets(existingBudget, metrics);
   if (violations.length > 0) {
     console.error(`FAIL  超预算:\n  ${violations.join('\n  ')}`);
     process.exit(1);

@@ -11,7 +11,12 @@ export const GATEWAY_WIRE_VERSION = 2 as const;
 export type AssetTypeWire = "skill" | "longTermInstruction" | "subagent" | "hook";
 export type AgentIdWire = "claude-code" | "codex" | "gemini-cli" | "opencode";
 export type AssetScopeWire = "global" | "project";
+export type MvpAssetTypeWire = "skill" | "longTermInstruction" | "subagent";
+export type SegmentSourceWire = "globalApplicable" | "projectNative";
+export type SkillPresenceWire = "absent" | "present" | "unknown" | "blocked" | "stale";
+export type SkillActivationWire = "notApplicable" | "enabled" | "disabled" | "unknown" | "blocked" | "stale";
 export type ApplicabilityResolutionWire = "resolved" | "unknown" | "blocked" | "stale";
+export type LocatorMatchedFieldWire = "displayName" | "assetType" | "agent" | "ownership" | "projectHint" | "redactedSummary";
 export type ProjectApplicabilitySegmentKindWire = "projectNative" | "globalApplicable";
 export type ReasonCodeWire = "UNKNOWN_AGENT_VERSION" | "INCOMPATIBLE_STRUCTURE" | "UNSUPPORTED_CAPABILITY" | "READ_ONLY_POLICY" | "PERMISSION_DENIED" | "OUTSIDE_MANAGED_SCOPE" | "PROJECT_UNAVAILABLE" | "UNKNOWN_FIELD_PRESERVED" | "NON_TEXT_UNPREVIEWABLE" | "VALIDATION_FAILED" | "EXECUTABLE_CONTENT_RISK" | "INDEX_STALE" | "EXTERNAL_CHANGE" | "REPREPARE_REQUIRED" | "MERGE_CONFLICT" | "TARGET_NAME_CONFLICT" | "CONVERSION_DEGRADED" | "CONVERSION_BLOCKED" | "READ_FAILED" | "SNAPSHOT_REQUIRED" | "SNAPSHOT_FAILED" | "SECURE_STORAGE_UNAVAILABLE" | "DISK_FULL" | "WRITE_FAILED" | "ROLLBACK_FAILED" | "RECOVERY_TARGET_OCCUPIED" | "ADAPTER_SIGNATURE_INVALID" | "ADAPTER_COMPATIBILITY_MISMATCH" | "ADAPTER_REGRESSION_FAILED" | "IMPORT_SOURCE_UNAVAILABLE" | "EXPORT_DESTINATION_INVALID" | "GATEWAY_UNAVAILABLE";
 export type IndexStatusWire = "fresh" | "stale" | "rebuilding" | "failed";
@@ -46,7 +51,14 @@ export type GlobalProjectApplicabilityViewWire = Record<string, never>;
 export type ProjectProjectApplicabilityViewWire = { projectId: string, };
 export type ProjectApplicabilityViewWire = { "kind": "all" } & AllProjectApplicabilityViewWire | { "kind": "global" } & GlobalProjectApplicabilityViewWire | { "kind": "project" } & ProjectProjectApplicabilityViewWire;
 export type ProjectApplicabilityQueryWire = { view: ProjectApplicabilityViewWire, };
-export type ReadRequestPayload = { "kind": "assetList" } & AssetListQueryWire | { "kind": "projectApplicability" } & ProjectApplicabilityQueryWire | { "kind": "assetDetail" } & AssetDetailQueryWire | { "kind": "nativeFile" } & NativeFileQueryWire;
+export type AllViewContextWire = Record<string, never>;
+export type GlobalViewContextWire = Record<string, never>;
+export type ProjectViewContextWire = { projectId: string, };
+export type ViewContextWire = { "kind": "all" } & AllViewContextWire | { "kind": "global" } & GlobalViewContextWire | { "kind": "project" } & ProjectViewContextWire;
+export type WorkbenchFiltersWire = { agents?: Array<AgentIdWire>, sourceIds?: Array<string>, statuses?: Array<AssetStatusFilterWire>, projectIds?: Array<string>, };
+export type WorkbenchQueryWire = { assetType: MvpAssetTypeWire, viewContext: ViewContextWire, filters?: WorkbenchFiltersWire, };
+export type GlobalLocatorQueryWire = { searchText: string, assetTypes: Array<MvpAssetTypeWire>, };
+export type ReadRequestPayload = { "kind": "assetList" } & AssetListQueryWire | { "kind": "workbench" } & WorkbenchQueryWire | { "kind": "globalLocator" } & GlobalLocatorQueryWire | { "kind": "projectApplicability" } & ProjectApplicabilityQueryWire | { "kind": "assetDetail" } & AssetDetailQueryWire | { "kind": "nativeFile" } & NativeFileQueryWire;
 export type ReadRequestEnvelope = { wireVersion: number, requestId: string, payload: ReadRequestPayload, };
 export type AssetSummaryWire = { asset: AssetRefWire, displayName: string, anomalies: Array<AnomalyWire>, agents: Array<AgentIdWire>, scope: AssetScopeWire, contextHint: AssetContextHintWire, sourceTier: SourceTierWire, availability: ActionAvailabilityWire, };
 export type AssetListSnapshotWire = { assets: Array<AssetSummaryWire>, indexStatus: IndexStatusWire, scope: AssetListScopeWire, 
@@ -58,6 +70,16 @@ queriedAt: string,
  * ISO 8601
  */
 indexUpdatedAt: string, };
+export type SkillTargetStateWire = { agent: AgentIdWire, presence: SkillPresenceWire, activation: SkillActivationWire, applicability: ApplicabilityResolutionWire, stableReason?: string, };
+export type WorkbenchRowWire = { summary: AssetSummaryWire, sortBaseName: string, authoritativeInputOrder: number, statusMemberships: Array<AssetStatusFilterWire>, skillTargetStates: Array<SkillTargetStateWire>, redactedSummary?: string, };
+export type WorkbenchSegmentWire = { id: string, source: SegmentSourceWire, displayLabel: string, projectId?: string, rows: Array<WorkbenchRowWire>, };
+export type EffectiveContextFactWire = { asset: AssetRefWire, assetId: string, projectId: string, projectDisplayName: string, adapter: AdapterProvenanceWire, rule: RuleProvenanceWire, authoritativeReadRevision: string, sourceTierId: string, loadOrder: number, priority: number, overrideRelation?: OverrideRelationWire, resolution: ApplicabilityResolutionWire, reasonCode?: ReasonCodeWire, };
+export type WorkbenchFindingWire = { assetId: string, reasonCode: ReasonCodeWire, context: EffectiveContextFactWire, };
+export type WorkbenchActualReadSnapshotWire = { query: WorkbenchQueryWire, authoritativeReadRevision: string, segments: Array<WorkbenchSegmentWire>, effectiveContexts: Array<EffectiveContextFactWire>, findings: Array<WorkbenchFindingWire>, aggregateTotal: number, indexStatus: IndexStatusWire, readAt: string, };
+export type LocatorDestinationWire = { "kind": "skillDetail", assetRef: AssetRefWire, } | { "kind": "unsupportedReadOnly", assetRef: AssetRefWire, reasonCode: ReasonCodeWire, };
+export type LocatorResultWire = { row: WorkbenchRowWire, destinationViewContext: ViewContextWire, destination: LocatorDestinationWire, matchedField: LocatorMatchedFieldWire, };
+export type LocatorGroupWire = { assetType: MvpAssetTypeWire, count: number, results: Array<LocatorResultWire>, };
+export type GlobalLocatorSnapshotWire = { groups: Array<LocatorGroupWire>, aggregateTotal: number, readAt: string, };
 export type BuiltInProvenanceSourceWire = Record<string, never>;
 export type ActivePackageProvenanceSourceWire = { packageIdentity: string, packageVersion: string, };
 export type ProvenanceSourceWire = { "kind": "builtIn" } & BuiltInProvenanceSourceWire | { "kind": "activePackage" } & ActivePackageProvenanceSourceWire;
@@ -88,7 +110,7 @@ export type NonTextMetadataContentWire = { fileKindLabel: string,
 sizeBytes: number, pathDisplay: string, reasonCode: ReasonCodeWire, reason: string, };
 export type NativeFileContentWire = { "kind": "source" } & SourceContentWire | { "kind": "nonTextMetadata" } & NonTextMetadataContentWire;
 export type NativeFileSnapshotWire = { file: NativeFileRefWire, revision: string, assetRevision: string, content: NativeFileContentWire, structuredView: ActionAvailabilityWire, };
-export type SnapshotWire = { "kind": "assetList" } & AssetListSnapshotWire | { "kind": "projectApplicability" } & ProjectApplicabilitySnapshotWire | { "kind": "assetDetail" } & AssetDetailSnapshotWire | { "kind": "nativeFile" } & NativeFileSnapshotWire;
+export type SnapshotWire = { "kind": "assetList" } & AssetListSnapshotWire | { "kind": "workbench" } & WorkbenchActualReadSnapshotWire | { "kind": "globalLocator" } & GlobalLocatorSnapshotWire | { "kind": "projectApplicability" } & ProjectApplicabilitySnapshotWire | { "kind": "assetDetail" } & AssetDetailSnapshotWire | { "kind": "nativeFile" } & NativeFileSnapshotWire;
 export type ReadSucceededWire = { snapshot: SnapshotWire, };
 export type ReadFailedWire = { reasonCode: ReasonCodeWire, message: string, recoveryAction?: RecoveryActionWire, };
 export type ReadResponsePayload = { "kind": "readSucceeded" } & ReadSucceededWire | { "kind": "readFailed" } & ReadFailedWire;

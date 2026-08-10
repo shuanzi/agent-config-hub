@@ -29,6 +29,15 @@ import type {
   Subscription,
   WorkspaceEvent,
 } from '../contract/types';
+import type {
+  GlobalLocatorSnapshot,
+  MvpAssetType,
+  ReadOnlyAssetRef,
+  ReadOnlyRow,
+  SkillTargetState,
+  ViewContext,
+  WorkbenchActualReadSnapshot,
+} from '../workbench/read-only-model';
 import {
   GATEWAY_WIRE_VERSION,
   type ReadRequestEnvelope,
@@ -37,6 +46,63 @@ import {
 } from './wire/gateway-wire';
 
 const INVALIDATION_EVENT = 'acm://workspace-invalidation';
+const MVP_ASSET_TYPES: readonly MvpAssetType[] = ['skill', 'longTermInstruction', 'subagent'];
+const AGENT_IDS = ['claude-code', 'codex', 'gemini-cli', 'opencode'] as const;
+const STATUS_MEMBERSHIPS = [
+  'editable',
+  'readOnly',
+  'incompatible',
+  'normal',
+  'overridden',
+  'conflict',
+  'drift',
+] as const;
+const INDEX_STATUSES = ['fresh', 'stale', 'rebuilding', 'failed'] as const;
+const APPLICABILITY = ['resolved', 'unknown', 'blocked', 'stale'] as const;
+const PRESENCE = ['absent', 'present', 'unknown', 'blocked', 'stale'] as const;
+const ACTIVATION = ['notApplicable', 'enabled', 'disabled', 'unknown', 'blocked', 'stale'] as const;
+const LOCATOR_MATCH_FIELDS = [
+  'displayName',
+  'assetType',
+  'agent',
+  'ownership',
+  'projectHint',
+  'redactedSummary',
+] as const;
+const REASON_CODES = [
+  'UNKNOWN_AGENT_VERSION',
+  'INCOMPATIBLE_STRUCTURE',
+  'UNSUPPORTED_CAPABILITY',
+  'READ_ONLY_POLICY',
+  'PERMISSION_DENIED',
+  'OUTSIDE_MANAGED_SCOPE',
+  'PROJECT_UNAVAILABLE',
+  'UNKNOWN_FIELD_PRESERVED',
+  'NON_TEXT_UNPREVIEWABLE',
+  'VALIDATION_FAILED',
+  'EXECUTABLE_CONTENT_RISK',
+  'INDEX_STALE',
+  'EXTERNAL_CHANGE',
+  'REPREPARE_REQUIRED',
+  'MERGE_CONFLICT',
+  'TARGET_NAME_CONFLICT',
+  'CONVERSION_DEGRADED',
+  'CONVERSION_BLOCKED',
+  'READ_FAILED',
+  'SNAPSHOT_REQUIRED',
+  'SNAPSHOT_FAILED',
+  'SECURE_STORAGE_UNAVAILABLE',
+  'DISK_FULL',
+  'WRITE_FAILED',
+  'ROLLBACK_FAILED',
+  'RECOVERY_TARGET_OCCUPIED',
+  'ADAPTER_SIGNATURE_INVALID',
+  'ADAPTER_COMPATIBILITY_MISMATCH',
+  'ADAPTER_REGRESSION_FAILED',
+  'IMPORT_SOURCE_UNAVAILABLE',
+  'EXPORT_DESTINATION_INVALID',
+  'GATEWAY_UNAVAILABLE',
+] as const;
 
 /** observe 时序配置（默认值面向生产；测试可注入极小延迟以保持确定性） */
 export interface TauriGatewayOptions {
@@ -63,6 +129,457 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+function isOneOf<T extends readonly string[]>(value: unknown, values: T): value is T[number] {
+  return typeof value === 'string' && values.includes(value);
+}
+
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === 'string' && value.trim() !== '';
+}
+
+function viewContextFromWire(value: unknown): ViewContext | null {
+  if (!isRecord(value) || typeof value.kind !== 'string') return null;
+  if (value.kind === 'all' || value.kind === 'global') return { kind: value.kind };
+  return value.kind === 'project' && isNonEmptyString(value.projectId)
+    ? { kind: 'project', projectId: value.projectId }
+    : null;
+}
+
+function assetRefFromWire(
+  value: unknown,
+  expectedAssetType: MvpAssetType,
+): ReadOnlyAssetRef | null {
+  if (
+    !isRecord(value) ||
+    !isNonEmptyString(value.assetId) ||
+    value.assetType !== expectedAssetType ||
+    !isNonEmptyString(value.nativeUnitRef) ||
+    !isNonEmptyString(value.adapterIdentity) ||
+    !isRecord(value.nativeOwnership)
+  ) {
+    return null;
+  }
+  const nativeOwnership =
+    value.nativeOwnership.kind === 'global'
+      ? ({ kind: 'global' } as const)
+      : value.nativeOwnership.kind === 'project' &&
+          isNonEmptyString(value.nativeOwnership.projectId)
+        ? ({ kind: 'project', projectId: value.nativeOwnership.projectId } as const)
+        : null;
+  return nativeOwnership === null
+    ? null
+    : {
+        assetId: value.assetId,
+        assetType: expectedAssetType,
+        nativeUnitRef: value.nativeUnitRef,
+        adapterIdentity: value.adapterIdentity,
+        nativeOwnership,
+      };
+}
+
+function rowFromWire(value: unknown, expectedAssetType: MvpAssetType): ReadOnlyRow | null {
+  if (!isRecord(value) || !isRecord(value.summary) || !isRecord(value.summary.asset)) return null;
+  const summary = value.summary as Record<string, unknown>;
+  const assetRef = assetRefFromWire(summary.asset, expectedAssetType);
+  if (
+    assetRef === null ||
+    !isNonEmptyString(summary.displayName) ||
+    !isNonEmptyString(value.sortBaseName) ||
+    !Number.isInteger(value.authoritativeInputOrder) ||
+    (value.authoritativeInputOrder as number) < 0 ||
+    !Array.isArray(summary.agents) ||
+    !summary.agents.every((agent) => isOneOf(agent, AGENT_IDS)) ||
+    !isRecord(summary.sourceTier) ||
+    !isNonEmptyString(summary.sourceTier.id) ||
+    !isNonEmptyString(summary.sourceTier.label) ||
+    !isRecord(summary.contextHint) ||
+    !Array.isArray(value.statusMemberships) ||
+    !value.statusMemberships.every((status) => isOneOf(status, STATUS_MEMBERSHIPS)) ||
+    !Array.isArray(value.skillTargetStates) ||
+    (value.redactedSummary !== undefined && !isNonEmptyString(value.redactedSummary))
+  ) {
+    return null;
+  }
+  const ownershipHint =
+    summary.contextHint.kind === 'path' && isNonEmptyString(summary.contextHint.pathHint)
+      ? summary.contextHint.pathHint
+      : summary.contextHint.kind === 'project' && isNonEmptyString(summary.contextHint.projectName)
+        ? summary.contextHint.projectName
+        : null;
+  if (ownershipHint === null) return null;
+  const targetStates = value.skillTargetStates.map((cell) => {
+    if (
+      !isRecord(cell) ||
+      !isOneOf(cell.agent, AGENT_IDS) ||
+      !isOneOf(cell.presence, PRESENCE) ||
+      !isOneOf(cell.activation, ACTIVATION) ||
+      !isOneOf(cell.applicability, APPLICABILITY) ||
+      (cell.stableReason !== undefined && !isNonEmptyString(cell.stableReason))
+    ) {
+      return null;
+    }
+    return {
+      agent: cell.agent,
+      presence: cell.presence,
+      activation: cell.activation,
+      applicability: cell.applicability,
+      ...(cell.stableReason === undefined ? {} : { stableReason: cell.stableReason }),
+    } satisfies SkillTargetState;
+  });
+  if (
+    targetStates.some((cell) => cell === null) ||
+    (expectedAssetType === 'skill' &&
+      (targetStates.length !== AGENT_IDS.length ||
+        !AGENT_IDS.every((agent, index) => targetStates[index]?.agent === agent)))
+  ) {
+    return null;
+  }
+  return {
+    assetRef,
+    assetId: assetRef.assetId,
+    displayName: summary.displayName,
+    sortBaseName: value.sortBaseName,
+    authoritativeInputOrder: value.authoritativeInputOrder as number,
+    nativeOwnership: assetRef.nativeOwnership,
+    agents: [...summary.agents] as ReadOnlyRow['agents'],
+    sourceTierId: summary.sourceTier.id,
+    sourceTierLabel: summary.sourceTier.label,
+    ownershipHint,
+    ...(value.redactedSummary === undefined ? {} : { redactedSummary: value.redactedSummary }),
+    statuses: [...value.statusMemberships] as ReadOnlyRow['statuses'],
+    skillTargetStates: targetStates as SkillTargetState[],
+  };
+}
+
+function provenanceFromWire(value: unknown):
+  | { identity: string; version: string; source: { kind: 'builtIn' } }
+  | {
+      identity: string;
+      version: string;
+      source: { kind: 'activePackage'; packageIdentity: string; packageVersion: string };
+    }
+  | null {
+  if (
+    !isRecord(value) ||
+    !isNonEmptyString(value.identity) ||
+    !isNonEmptyString(value.version) ||
+    !isRecord(value.source)
+  )
+    return null;
+  if (value.source.kind === 'builtIn')
+    return { identity: value.identity, version: value.version, source: { kind: 'builtIn' } };
+  if (
+    value.source.kind === 'activePackage' &&
+    isNonEmptyString(value.source.packageIdentity) &&
+    isNonEmptyString(value.source.packageVersion)
+  ) {
+    return {
+      identity: value.identity,
+      version: value.version,
+      source: {
+        kind: 'activePackage',
+        packageIdentity: value.source.packageIdentity,
+        packageVersion: value.source.packageVersion,
+      },
+    };
+  }
+  return null;
+}
+
+function effectiveContextFromWire(value: unknown, expectedAssetType: MvpAssetType) {
+  if (
+    !isRecord(value) ||
+    !isNonEmptyString(value.assetId) ||
+    !isNonEmptyString(value.projectId) ||
+    !isNonEmptyString(value.projectDisplayName) ||
+    !isOneOf(value.resolution, APPLICABILITY) ||
+    !isNonEmptyString(value.authoritativeReadRevision) ||
+    !isNonEmptyString(value.sourceTierId) ||
+    !Number.isInteger(value.loadOrder) ||
+    !Number.isInteger(value.priority) ||
+    (value.reasonCode !== undefined && !isOneOf(value.reasonCode, REASON_CODES))
+  )
+    return null;
+  const asset = assetRefFromWire(value.asset, expectedAssetType);
+  const adapter = provenanceFromWire(value.adapter);
+  const rule = provenanceFromWire(value.rule);
+  const overrideRelation =
+    value.overrideRelation === undefined
+      ? undefined
+      : isRecord(value.overrideRelation) &&
+          isOneOf(value.overrideRelation.kind, [
+            'overrides',
+            'overriddenBy',
+            'shadowed',
+          ] as const) &&
+          isNonEmptyString(value.overrideRelation.otherAssetId) &&
+          isNonEmptyString(value.overrideRelation.note)
+        ? {
+            kind: value.overrideRelation.kind,
+            otherAssetId: value.overrideRelation.otherAssetId,
+            note: value.overrideRelation.note,
+          }
+        : null;
+  if (
+    asset === null ||
+    asset.assetId !== value.assetId ||
+    adapter === null ||
+    rule === null ||
+    overrideRelation === null
+  )
+    return null;
+  if ((value.resolution === 'resolved') !== (value.reasonCode === undefined)) return null;
+  return {
+    asset,
+    assetId: value.assetId,
+    projectId: value.projectId,
+    projectDisplayName: value.projectDisplayName,
+    adapter,
+    rule,
+    authoritativeReadRevision: value.authoritativeReadRevision,
+    sourceTierId: value.sourceTierId,
+    loadOrder: value.loadOrder as number,
+    priority: value.priority as number,
+    resolution: value.resolution,
+    ...(overrideRelation === undefined ? {} : { overrideRelation }),
+    ...(value.reasonCode === undefined ? {} : { reasonCode: value.reasonCode }),
+  };
+}
+
+function filtersFromWire(value: unknown, viewContext: ViewContext) {
+  if (value === undefined) return undefined;
+  if (!isRecord(value)) return null;
+  const agents = value.agents;
+  const sourceIds = value.sourceIds;
+  const statuses = value.statuses;
+  const projectIds = value.projectIds;
+  if (
+    (agents !== undefined &&
+      (!Array.isArray(agents) || !agents.every((agent) => isOneOf(agent, AGENT_IDS)))) ||
+    (sourceIds !== undefined &&
+      (!Array.isArray(sourceIds) || !sourceIds.every(isNonEmptyString))) ||
+    (statuses !== undefined &&
+      (!Array.isArray(statuses) ||
+        !statuses.every((status) => isOneOf(status, STATUS_MEMBERSHIPS)))) ||
+    (projectIds !== undefined &&
+      (!Array.isArray(projectIds) || !projectIds.every(isNonEmptyString))) ||
+    (viewContext.kind !== 'all' && projectIds !== undefined)
+  )
+    return null;
+  return {
+    ...(agents === undefined ? {} : { agents }),
+    ...(sourceIds === undefined ? {} : { sourceIds }),
+    ...(statuses === undefined ? {} : { statuses }),
+    ...(projectIds === undefined ? {} : { projectIds }),
+  };
+}
+
+/** Rust-first DTO → contract read snapshot. Unknown/malformed nested fields fail closed. */
+function workbenchSnapshotFromWire(value: unknown): WorkbenchActualReadSnapshot | null {
+  if (!isRecord(value) || value.kind !== 'workbench' || !isRecord(value.query)) return null;
+  const query = value.query;
+  const assetType = query.assetType;
+  const aggregateTotalValue = value.aggregateTotal;
+  const viewContext = viewContextFromWire(query.viewContext);
+  if (
+    viewContext === null ||
+    !isOneOf(assetType, MVP_ASSET_TYPES) ||
+    !isNonEmptyString(value.authoritativeReadRevision) ||
+    !Array.isArray(value.segments) ||
+    typeof aggregateTotalValue !== 'number' ||
+    !Number.isInteger(aggregateTotalValue) ||
+    aggregateTotalValue < 0 ||
+    !isOneOf(value.indexStatus, INDEX_STATUSES) ||
+    !isNonEmptyString(value.readAt)
+  ) {
+    return null;
+  }
+  const filters = filtersFromWire(query.filters, viewContext);
+  if (filters === null) return null;
+  const segments = value.segments.map((segment) => {
+    if (
+      !isRecord(segment) ||
+      !isNonEmptyString(segment.id) ||
+      (segment.source !== 'globalApplicable' && segment.source !== 'projectNative') ||
+      !isNonEmptyString(segment.displayLabel) ||
+      !Array.isArray(segment.rows)
+    ) {
+      return null;
+    }
+    if (
+      (segment.source === 'globalApplicable' && segment.projectId !== undefined) ||
+      (segment.source === 'projectNative' && !isNonEmptyString(segment.projectId))
+    )
+      return null;
+    const rows = segment.rows.map((row) => rowFromWire(row, assetType));
+    return rows.some((row) => row === null)
+      ? null
+      : {
+          id: segment.id,
+          source: segment.source,
+          displayLabel: segment.displayLabel,
+          ...(typeof segment.projectId === 'string' ? { projectId: segment.projectId } : {}),
+          rows: rows as ReadOnlyRow[],
+        };
+  });
+  if (segments.some((segment) => segment === null)) return null;
+  const effectiveContexts = !Array.isArray(value.effectiveContexts)
+    ? null
+    : value.effectiveContexts.map((context) => effectiveContextFromWire(context, assetType));
+  const findings = !Array.isArray(value.findings)
+    ? null
+    : value.findings.map((finding) => {
+        if (
+          !isRecord(finding) ||
+          !isNonEmptyString(finding.assetId) ||
+          !isOneOf(finding.reasonCode, REASON_CODES)
+        )
+          return null;
+        const context = effectiveContextFromWire(finding.context, assetType);
+        return context === null ||
+          context.assetId !== finding.assetId ||
+          context.reasonCode !== finding.reasonCode
+          ? null
+          : { assetId: finding.assetId, reasonCode: finding.reasonCode, context };
+      });
+  if (
+    effectiveContexts === null ||
+    effectiveContexts.some((context) => context === null) ||
+    findings === null ||
+    findings.some((finding) => finding === null)
+  )
+    return null;
+  const aggregateTotal = (segments as Array<{ rows: readonly ReadOnlyRow[] }>).reduce(
+    (total, segment) => total + segment.rows.length,
+    0,
+  );
+  if (aggregateTotal !== aggregateTotalValue) return null;
+  return {
+    kind: 'workbench',
+    query: {
+      kind: 'workbench',
+      assetType,
+      viewContext,
+      ...(filters === undefined ? {} : { filters }),
+    },
+    authoritativeReadRevision: value.authoritativeReadRevision,
+    segments: segments as WorkbenchActualReadSnapshot['segments'],
+    effectiveContexts: effectiveContexts as WorkbenchActualReadSnapshot['effectiveContexts'],
+    findings: findings as WorkbenchActualReadSnapshot['findings'],
+    aggregateTotal: aggregateTotalValue,
+    indexStatus: value.indexStatus,
+    readAt: value.readAt,
+  };
+}
+
+function locatorSnapshotFromWire(value: unknown): GlobalLocatorSnapshot | null {
+  if (
+    !isRecord(value) ||
+    value.kind !== 'globalLocator' ||
+    !Array.isArray(value.groups) ||
+    !isNonEmptyString(value.readAt)
+  ) {
+    return null;
+  }
+  const aggregateTotalValue = value.aggregateTotal;
+  if (
+    typeof aggregateTotalValue !== 'number' ||
+    !Number.isInteger(aggregateTotalValue) ||
+    aggregateTotalValue < 0
+  )
+    return null;
+  const groups = value.groups.map((group) => {
+    if (!isRecord(group)) return null;
+    const assetType = group.assetType;
+    const count = group.count;
+    if (
+      !isOneOf(assetType, MVP_ASSET_TYPES) ||
+      typeof count !== 'number' ||
+      !Number.isInteger(count) ||
+      count < 0 ||
+      !Array.isArray(group.results)
+    ) {
+      return null;
+    }
+    const results = group.results.map((result) => {
+      if (!isRecord(result)) return null;
+      const row = rowFromWire(result.row, assetType);
+      const destinationViewContext = viewContextFromWire(result.destinationViewContext);
+      const destination =
+        isRecord(result.destination) && result.destination.kind === 'skillDetail'
+          ? assetType === 'skill'
+            ? assetRefFromWire(result.destination.assetRef, assetType)
+            : null
+          : isRecord(result.destination) && result.destination.kind === 'unsupportedReadOnly'
+            ? (() => {
+                const assetRef = assetRefFromWire(result.destination.assetRef, assetType);
+                return assetRef === null || !isOneOf(result.destination.reasonCode, REASON_CODES)
+                  ? null
+                  : { assetRef, reasonCode: result.destination.reasonCode };
+              })()
+            : null;
+      const matchedField = isOneOf(result.matchedField, LOCATOR_MATCH_FIELDS)
+        ? result.matchedField
+        : null;
+      const destinationAsset =
+        destination === null ? null : 'assetId' in destination ? destination : destination.assetRef;
+      const destinationMatchesRow =
+        destinationAsset !== null &&
+        row?.assetRef !== undefined &&
+        destinationAsset.assetId === row.assetRef.assetId &&
+        destinationAsset.assetType === row.assetRef.assetType &&
+        destinationAsset.nativeUnitRef === row.assetRef.nativeUnitRef &&
+        destinationAsset.adapterIdentity === row.assetRef.adapterIdentity &&
+        destinationAsset.nativeOwnership.kind === row.assetRef.nativeOwnership.kind &&
+        (destinationAsset.nativeOwnership.kind !== 'project' ||
+          row.assetRef.nativeOwnership.kind !== 'project' ||
+          destinationAsset.nativeOwnership.projectId === row.assetRef.nativeOwnership.projectId);
+      return row === null ||
+        destinationViewContext === null ||
+        destination === null ||
+        matchedField === null ||
+        !destinationMatchesRow
+        ? null
+        : {
+            ...row,
+            destinationViewContext,
+            destination:
+              'assetId' in destination
+                ? { kind: 'skillDetail' as const, assetRef: destination }
+                : { kind: 'unsupportedReadOnly' as const, ...destination },
+            matchedField,
+          };
+    });
+    return results.some((result) => result === null)
+      ? null
+      : {
+          assetType,
+          count,
+          results: results as GlobalLocatorSnapshot['groups'][number]['results'],
+        };
+  });
+  if (groups.some((group) => group === null)) return null;
+  if (!MVP_ASSET_TYPES.every((assetType, index) => groups[index]?.assetType === assetType))
+    return null;
+  const total = (groups as Array<{ count: number; results: readonly unknown[] }>).reduce(
+    (sum, group) => sum + group.count,
+    0,
+  );
+  if (
+    total !== aggregateTotalValue ||
+    (groups as Array<{ count: number; results: readonly unknown[] }>).some(
+      (group) => group.count !== group.results.length,
+    )
+  )
+    return null;
+  return {
+    kind: 'globalLocator',
+    groups: groups as GlobalLocatorSnapshot['groups'],
+    aggregateTotal: aggregateTotalValue,
+    readAt: value.readAt,
+  };
+}
+
 /**
  * 核对 response envelope 与顶层 payload tag，并把 snapshot 与 query 的封闭
  * 对应关系再验证一遍。任何不匹配返回 null（由调用方归一化）。
@@ -86,6 +603,18 @@ function normalizeResponse<Q extends Query>(
     const snapshot = payload.snapshot;
     if (!isRecord(snapshot) || snapshot.kind !== queryKind) {
       return null;
+    }
+    if (queryKind === 'workbench') {
+      const normalized = workbenchSnapshotFromWire(snapshot);
+      return normalized === null
+        ? null
+        : ({ kind: 'readSucceeded', snapshot: normalized } as ReadResult<SnapshotFor<Q>>);
+    }
+    if (queryKind === 'globalLocator') {
+      const normalized = locatorSnapshotFromWire(snapshot);
+      return normalized === null
+        ? null
+        : ({ kind: 'readSucceeded', snapshot: normalized } as ReadResult<SnapshotFor<Q>>);
     }
     return { kind: 'readSucceeded', snapshot: snapshot as unknown as SnapshotFor<Q> };
   }

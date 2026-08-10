@@ -13,18 +13,34 @@
  * provider 下 reloadSession 不重启应用进程，进程级样本只能靠多次 run）。
  */
 import type { Options } from '@wdio/types';
-import { cpSync, mkdtempSync, rmSync } from 'node:fs';
+import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 // 拉入 webdriverio 的全局 WebdriverIO namespace 类型
 import type {} from 'webdriverio';
+// @ts-expect-error runtime helper is a plain Node ESM module.
+import { HarnessPeakRssSampler } from '../scripts/orchestrator/pf01-resource.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, '..');
 const appBinary = join(repoRoot, 'src-tauri/target/debug/agent-config-manager');
 
 let fixtureSandbox: string | null = null;
+let resourceSampler: InstanceType<typeof HarnessPeakRssSampler> | null = null;
+
+function appendResourceRun(outputDir: string, run: unknown): void {
+  const resourcePath = join(outputDir, 'l3-resource-runs.json');
+  const existing = existsSync(resourcePath)
+    ? (JSON.parse(readFileSync(resourcePath, 'utf8')) as { runs?: unknown[] })
+    : null;
+  const payload = {
+    schemaVersion: 1,
+    metric: 'pf01.l3.peak_rss_bytes',
+    runs: [...(existing?.runs ?? []), run],
+  };
+  writeFileSync(resourcePath, `${JSON.stringify(payload, null, 2)}\n`, 'utf8');
+}
 
 // 与 tests/l3/wdio.conf.ts 相同的 Options.Testrunner 类型断言补齐。
 export const config = {
@@ -61,12 +77,31 @@ export const config = {
     const nativeRoot = join(fixtureSandbox, 'native-root');
     cpSync(join(repoRoot, 'fixtures/fx-01/native-root'), nativeRoot, { recursive: true });
     process.env.ACM_NATIVE_ROOT = nativeRoot;
+    process.env.PF01_HARNESS_LIFECYCLE_PATH = join(fixtureSandbox, 'harness-lifecycle.json');
+    resourceSampler = new HarnessPeakRssSampler({
+      lifecyclePath: process.env.PF01_HARNESS_LIFECYCLE_PATH,
+    });
+    resourceSampler.start();
   },
-  onComplete: () => {
+  onComplete: async () => {
+    if (process.env.PF01_OUTPUT_DIR !== undefined && resourceSampler !== null) {
+      try {
+        appendResourceRun(process.env.PF01_OUTPUT_DIR, await resourceSampler.finalize());
+      } catch (error) {
+        appendResourceRun(process.env.PF01_OUTPUT_DIR, {
+          harnessPid: null,
+          samples: [],
+          normalExit: false,
+          inconclusive: error instanceof Error ? error.message : 'resource sampler failed',
+        });
+      }
+    }
+    resourceSampler = null;
     if (fixtureSandbox !== null) {
       rmSync(fixtureSandbox, { recursive: true, force: true });
       fixtureSandbox = null;
     }
     delete process.env.ACM_NATIVE_ROOT;
+    delete process.env.PF01_HARNESS_LIFECYCLE_PATH;
   },
 } as Options.Testrunner;

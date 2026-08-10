@@ -31,6 +31,20 @@ import {
   type PerfCatalog,
   type PerfProfile,
 } from './perf-catalog';
+import {
+  AGENT_ORDER,
+  canonicalizeWorkbenchFilters,
+  MVP_ASSET_TYPES,
+  DEFAULT_LIST_PRESENTATION,
+  type GlobalLocatorSnapshot,
+  projectWorkbenchProjection,
+  type ReadOnlyAssetRef,
+  type ReadOnlyRow,
+  type SkillTargetState,
+  type ViewContext,
+  type WorkbenchActualReadSnapshot,
+  type WorkbenchQuery,
+} from '../workbench/read-only-model';
 import type { FrontendGateway, ObserveHandle } from '../contract/gateway';
 import type {
   Anomaly,
@@ -138,6 +152,60 @@ function maskInspectorData(inspector: InspectorData): InspectorData {
   };
 }
 
+function toReadOnlyAssetRef(asset: AssetRef): ReadOnlyAssetRef {
+  if (asset.assetType === 'hook') {
+    throw new Error('Hook is outside the FE-01 locator surface');
+  }
+  return {
+    assetId: asset.assetId,
+    assetType: asset.assetType,
+    nativeUnitRef: asset.nativeUnitRef,
+    adapterIdentity: asset.adapterIdentity,
+    nativeOwnership: asset.nativeOwnership,
+  };
+}
+
+/**
+ * ScriptedMock 不是 Unicode case-fold 的权威实现。Rust locator 才是唯一
+ * authoritative matcher；此处只保存 FE-01 已登记 fixture/vector 的预计算
+ * canonical facts，避免把 `toLowerCase` 误宣称为 default case-fold。
+ */
+const REGISTERED_LOCATOR_CANONICAL_FACTS: Readonly<Record<string, string>> = {
+  'Café Straße': 'café strasse',
+  café: 'café',
+  CAFÉ: 'café',
+  Straße: 'strasse',
+  straße: 'strasse',
+  STRASSE: 'strasse',
+  'é S': 'é s',
+};
+
+function mockCanonicalLocatorFact(value: string): string {
+  const nfc = value.trim().normalize('NFC');
+  const registered = REGISTERED_LOCATOR_CANONICAL_FACTS[nfc];
+  if (registered !== undefined) return registered;
+  // 仅普通 ASCII fixture 的非权威便利匹配；未知 Unicode 事实保持 NFC 原样。
+  return Array.from(nfc).every((character) => character.codePointAt(0)! <= 0x7f)
+    ? nfc.toLowerCase()
+    : nfc;
+}
+
+function mockLocatorMatchedField(
+  query: string,
+  row: ReadOnlyRow,
+): 'displayName' | 'assetType' | 'agent' | 'ownership' | 'projectHint' | 'redactedSummary' | null {
+  const needle = mockCanonicalLocatorFact(query);
+  if (needle === '') return null;
+  const contains = (value: string | undefined) =>
+    value === undefined ? false : mockCanonicalLocatorFact(value).includes(needle);
+  if (contains(row.displayName)) return 'displayName';
+  if (contains(row.assetRef.assetType)) return 'assetType';
+  if (row.agents?.some((agent) => contains(agent))) return 'agent';
+  if (contains(row.nativeOwnership?.kind)) return 'ownership';
+  if (contains(row.ownershipHint)) return 'projectHint';
+  return contains(row.redactedSummary) ? 'redactedSummary' : null;
+}
+
 export class ScriptedMockGateway implements FrontendGateway {
   private readonly listeners = new Set<(event: WorkspaceEvent) => void>();
   private readonly readCalls: RecordedReadCall[] = [];
@@ -151,6 +219,9 @@ export class ScriptedMockGateway implements FrontendGateway {
   private deferredObserveReady: { promise: Promise<void>; resolve: () => void } | null = null;
   private observeFailuresRemaining = 0;
   private textOverrides: FixtureTextOverrides = {};
+  private projectProjection: 'none' | 'single' | 'multiple' = 'none';
+  private skillCellFailure: 'unknown' | 'blocked' | null = null;
+  private unsupportedLocator = false;
   /** PF-01 perf-catalog scenario 的合成目录；null 时保持 FX-01 单资产语义 */
   private perfCatalog: PerfCatalog | null = null;
 
@@ -171,6 +242,12 @@ export class ScriptedMockGateway implements FrontendGateway {
     switch (query.kind) {
       case 'assetList':
         return this.readSucceeded(this.buildAssetListSnapshot(query)) as ReadResult<SnapshotFor<Q>>;
+      case 'workbench':
+        return this.readWorkbench(query) as ReadResult<SnapshotFor<Q>>;
+      case 'globalLocator':
+        return this.readSucceeded(this.buildGlobalLocatorSnapshot(query.searchText)) as ReadResult<
+          SnapshotFor<Q>
+        >;
       case 'projectApplicability':
         // FE-07R only accepts FX-19 through the Rust/Tauri actual-read path; the
         // legacy scripted mock must not manufacture applicability facts.
@@ -282,13 +359,48 @@ export class ScriptedMockGateway implements FrontendGateway {
   applyScenario(scenario: string | null): void {
     switch (scenario) {
       case 'fail-list':
-        this.failNext('assetList', 'READ_FAILED');
+        this.failNext('workbench', 'READ_FAILED');
         break;
       case 'fail-detail':
         this.failNext('assetDetail', 'READ_FAILED');
         break;
       case 'stale-index':
         this.setIndexStatus('stale');
+        break;
+      case 'unknown-skill-cell':
+        this.skillCellFailure = 'unknown';
+        break;
+      case 'blocked-skill-cell':
+        this.skillCellFailure = 'blocked';
+        break;
+      case 'project-projection':
+        this.projectProjection = 'single';
+        break;
+      case 'multi-project-projection':
+        this.projectProjection = 'multiple';
+        break;
+      case 'fail-locator':
+        this.failNext('globalLocator', 'READ_FAILED');
+        break;
+      case 'unsupported-locator':
+        this.unsupportedLocator = true;
+        break;
+      case 'masked-text':
+        this.setFixtureTextOverrides({
+          displayName: 'SYNTHETIC-SECRET-mask-name',
+          pathHint: 'SYNTHETIC-SECRET-mask-path',
+          sourceTierLabel: 'SYNTHETIC-SECRET-mask-source',
+          readFailedMessage: 'SYNTHETIC-SECRET-mask-error',
+        });
+        break;
+      case 'masked-fail-list':
+        this.setFixtureTextOverrides({
+          displayName: 'SYNTHETIC-SECRET-mask-name',
+          pathHint: 'SYNTHETIC-SECRET-mask-path',
+          sourceTierLabel: 'SYNTHETIC-SECRET-mask-source',
+          readFailedMessage: 'SYNTHETIC-SECRET-mask-error',
+        });
+        this.failNext('workbench', 'READ_FAILED');
         break;
       default:
         break;
@@ -324,13 +436,34 @@ export class ScriptedMockGateway implements FrontendGateway {
     return this.perfCatalog.assets.filter((record) => matchesPerfListQuery(record, query)).length;
   }
 
+  /** 当前默认单一分页窗口实际可见的行数（PF DOM 探针专用）。 */
+  perfWorkbenchVisibleCount(query: WorkbenchQuery): number | null {
+    if (this.perfCatalog === null) return null;
+    const projection = projectWorkbenchProjection(
+      this.buildPerfWorkbenchSnapshot(query),
+      DEFAULT_LIST_PRESENTATION,
+    );
+    return projection.segments.reduce((total, segment) => total + segment.rows.length, 0);
+  }
+
+  perfLocatorCount(searchText: string): number | null {
+    if (this.perfCatalog === null) return null;
+    return this.buildPerfLocatorSnapshot(searchText).aggregateTotal;
+  }
+
   // -------------------------------------------------------------------------
   // PF-01 perf-catalog 读取路径（只在 enablePerfCatalog 后可达）
   // -------------------------------------------------------------------------
 
   private readFromPerfCatalog(
     query: Query,
-  ): ReadResult<AssetListSnapshot | AssetDetailSnapshot | NativeFileSnapshot> {
+  ): ReadResult<
+    | AssetListSnapshot
+    | AssetDetailSnapshot
+    | NativeFileSnapshot
+    | WorkbenchActualReadSnapshot
+    | GlobalLocatorSnapshot
+  > {
     const catalog = this.perfCatalog;
     if (catalog === null) {
       return this.readFailed('READ_FAILED');
@@ -350,6 +483,10 @@ export class ScriptedMockGateway implements FrontendGateway {
         };
         return this.readSucceeded(snapshot);
       }
+      case 'workbench':
+        return this.readSucceeded(this.buildPerfWorkbenchSnapshot(query));
+      case 'globalLocator':
+        return this.readSucceeded(this.buildPerfLocatorSnapshot(query.searchText));
       case 'projectApplicability':
         return this.readFailed('UNSUPPORTED_CAPABILITY');
       case 'assetDetail': {
@@ -394,6 +531,154 @@ export class ScriptedMockGateway implements FrontendGateway {
         return this.readSucceeded(snapshot);
       }
     }
+  }
+
+  private buildPerfWorkbenchSnapshot(query: WorkbenchQuery): WorkbenchActualReadSnapshot {
+    let filters;
+    try {
+      filters = canonicalizeWorkbenchFilters(query.filters, query.viewContext);
+    } catch {
+      throw new Error('PF-01 received invalid workbench filters');
+    }
+    const matches = (record: PerfCatalog['assets'][number]) => {
+      const summary = record.summary;
+      if (summary.asset.assetType !== query.assetType) return false;
+      if (
+        filters?.agents !== undefined &&
+        !filters.agents.some((agent) => summary.agents.includes(agent))
+      )
+        return false;
+      if (filters?.sourceIds !== undefined && !filters.sourceIds.includes(summary.sourceTier.id))
+        return false;
+      if (
+        filters?.statuses !== undefined &&
+        !filters.statuses.some((status) => record.statuses.includes(status))
+      )
+        return false;
+      return true;
+    };
+    const rowsFor = (records: PerfCatalog['assets']) =>
+      records.filter(matches).map((record, authoritativeInputOrder): ReadOnlyRow => ({
+        assetRef: toReadOnlyAssetRef(record.summary.asset),
+        assetId: record.summary.asset.assetId,
+        displayName: record.summary.displayName,
+        sortBaseName: record.summary.displayName.normalize('NFC'),
+        authoritativeInputOrder,
+        nativeOwnership: record.summary.asset.nativeOwnership,
+        agents: record.summary.agents,
+        sourceTierId: record.summary.sourceTier.id,
+        statuses: record.statuses,
+        skillTargetStates:
+          query.assetType === 'skill'
+            ? AGENT_ORDER.map((agent) => ({
+                agent,
+                presence: record.summary.agents.includes(agent) ? 'present' : 'absent',
+                activation: record.summary.agents.includes(agent) ? 'enabled' : 'notApplicable',
+                applicability: 'resolved',
+              }))
+            : [],
+      }));
+    const catalog = this.perfCatalog;
+    if (catalog === null) throw new Error('PF-01 catalog unavailable');
+    const projectRecords = new Map<string, PerfCatalog['assets']>();
+    for (const record of catalog.assets) {
+      if (record.summary.asset.nativeOwnership.kind !== 'project') continue;
+      const records = projectRecords.get(record.summary.asset.nativeOwnership.projectId) ?? [];
+      records.push(record);
+      projectRecords.set(record.summary.asset.nativeOwnership.projectId, records);
+    }
+    const global = rowsFor(
+      catalog.assets.filter((record) => record.summary.asset.nativeOwnership.kind === 'global'),
+    );
+    const projectSegments = [...projectRecords.entries()]
+      .sort(([left], [right]) => left.localeCompare(right, 'zh-CN'))
+      .map(([projectId, records]) => ({
+        id: `segment-pf01-project-${projectId}`,
+        source: 'projectNative' as const,
+        displayLabel: projectId,
+        projectId,
+        rows: rowsFor(records).filter(() =>
+          query.viewContext.kind !== 'all' || filters?.projectIds === undefined
+            ? true
+            : filters.projectIds.includes(projectId),
+        ),
+      }))
+      .filter((segment) => segment.rows.length > 0);
+    const globalSegment = {
+      id: 'segment-pf01-global-applicable',
+      source: 'globalApplicable' as const,
+      displayLabel: 'Global',
+      rows: global,
+    };
+    const selectedProjectId =
+      query.viewContext.kind === 'project' ? query.viewContext.projectId : null;
+    const segments =
+      query.viewContext.kind === 'global'
+        ? global.length === 0
+          ? []
+          : [globalSegment]
+        : query.viewContext.kind === 'project'
+          ? projectSegments.filter((segment) => segment.projectId === selectedProjectId)
+          : [...(global.length === 0 ? [] : [globalSegment]), ...projectSegments];
+    const aggregateTotal = segments.reduce((total, segment) => total + segment.rows.length, 0);
+    return {
+      kind: 'workbench',
+      query: { ...query, ...(filters === undefined ? {} : { filters }) },
+      authoritativeReadRevision: `rev-pf01-${catalog.profile}`,
+      segments,
+      effectiveContexts: [],
+      findings: [],
+      aggregateTotal,
+      indexStatus: this.indexStatus,
+      readAt: new Date().toISOString(),
+    };
+  }
+
+  private buildPerfLocatorSnapshot(searchText: string): GlobalLocatorSnapshot {
+    const catalog = this.perfCatalog;
+    if (catalog === null) throw new Error('PF-01 catalog unavailable');
+    const needle = mockCanonicalLocatorFact(searchText);
+    const groups = MVP_ASSET_TYPES.map((assetType) => {
+      const results =
+        needle === ''
+          ? []
+          : catalog.assets
+              .filter((record) => record.summary.asset.assetType === assetType)
+              .filter((record) =>
+                mockCanonicalLocatorFact(record.summary.displayName).includes(needle),
+              )
+              .map((record, authoritativeInputOrder) => ({
+                assetRef: toReadOnlyAssetRef(record.summary.asset),
+                assetId: record.summary.asset.assetId,
+                displayName: record.summary.displayName,
+                sortBaseName: record.summary.displayName.normalize('NFC'),
+                authoritativeInputOrder,
+                nativeOwnership: record.summary.asset.nativeOwnership,
+                agents: record.summary.agents,
+                sourceTierId: record.summary.sourceTier.id,
+                statuses: record.statuses,
+                skillTargetStates: [],
+                destinationViewContext:
+                  record.summary.asset.nativeOwnership.kind === 'global'
+                    ? ({ kind: 'global' } as ViewContext)
+                    : ({
+                        kind: 'project',
+                        projectId: record.summary.asset.nativeOwnership.projectId,
+                      } as ViewContext),
+                destination: {
+                  kind: 'skillDetail' as const,
+                  assetRef: toReadOnlyAssetRef(record.summary.asset),
+                },
+                matchedField: 'displayName' as const,
+              }));
+      return { assetType, count: results.length, results };
+    });
+    return {
+      kind: 'globalLocator',
+      groups,
+      aggregateTotal: groups.reduce((total, group) => total + group.count, 0),
+      readAt: new Date().toISOString(),
+    };
   }
 
   // -------------------------------------------------------------------------
@@ -453,6 +738,243 @@ export class ScriptedMockGateway implements FrontendGateway {
       sourceTier: { id: fixture.sourceTier.id, label: fixture.sourceTier.label },
       availability: { kind: 'allowed' },
     });
+  }
+
+  private summaryOwnershipHint(): string {
+    const hint = this.assetSummary().contextHint;
+    return hint.kind === 'path' ? hint.pathHint : hint.projectName;
+  }
+
+  /** FE-01 B2 workbench 的同次权威只读 projection。 */
+  private readWorkbench(query: WorkbenchQuery): ReadResult<WorkbenchActualReadSnapshot> {
+    let filters;
+    try {
+      filters = canonicalizeWorkbenchFilters(query.filters, query.viewContext);
+    } catch {
+      return this.readFailed('READ_FAILED');
+    }
+    const queriedAt = new Date().toISOString();
+    const row: ReadOnlyRow = {
+      assetRef: toReadOnlyAssetRef(this.assetRef()),
+      assetId: this.assetRef().assetId,
+      displayName: this.assetSummary().displayName,
+      sortBaseName: this.assetSummary().displayName.normalize('NFC'),
+      authoritativeInputOrder: 0,
+      nativeOwnership: { kind: 'global' },
+      agents: ['claude-code'],
+      sourceTierId: fixture.sourceTier.id,
+      sourceTierLabel: this.assetSummary().sourceTier.label,
+      redactedSummary: '结构化只读 Skill 摘要',
+      ownershipHint: this.summaryOwnershipHint(),
+      statuses: this.derivedStatuses(),
+      skillTargetStates: this.skillTargetStates(),
+    };
+    const matches =
+      query.assetType === 'skill' &&
+      (filters?.agents === undefined || filters.agents.includes('claude-code')) &&
+      (filters?.sourceIds === undefined || filters.sourceIds.includes(fixture.sourceTier.id)) &&
+      (filters?.statuses === undefined ||
+        filters.statuses.some((status) => this.derivedStatuses().includes(status)));
+    const globalRows = matches ? [row] : [];
+    const projectIds =
+      this.projectProjection === 'multiple'
+        ? ['project-fx01-opaque', 'project-fx01-second-opaque']
+        : this.projectProjection === 'single'
+          ? ['project-fx01-opaque']
+          : [];
+    const projectRows =
+      query.assetType === 'skill'
+        ? projectIds
+            .filter(
+              (projectId) =>
+                filters?.projectIds === undefined || filters.projectIds.includes(projectId),
+            )
+            .map((projectId, authoritativeInputOrder): ReadOnlyRow => ({
+              assetRef: {
+                assetId: `asset-fx01-project-native-${projectId}`,
+                assetType: 'skill',
+                nativeUnitRef: `nunit-fx01-project-native-${projectId}`,
+                adapterIdentity: fixture.asset.adapterIdentity,
+                nativeOwnership: { kind: 'project', projectId },
+              },
+              assetId: `asset-fx01-project-native-${projectId}`,
+              displayName: `Project Native Skill ${projectId}`,
+              sortBaseName: `Project Native Skill ${projectId}`,
+              authoritativeInputOrder,
+              nativeOwnership: { kind: 'project', projectId },
+              agents: ['codex'],
+              sourceTierId: 'project-fx01-root',
+              sourceTierLabel: 'Project root (synthetic)',
+              redactedSummary: '结构化只读项目 Skill 摘要',
+              ownershipHint: projectId,
+              statuses: ['readOnly', 'normal'],
+              skillTargetStates: AGENT_ORDER.map((agent) => ({
+                agent,
+                presence: agent === 'codex' ? 'present' : 'absent',
+                activation: agent === 'codex' ? 'enabled' : 'notApplicable',
+                applicability: 'resolved',
+              })),
+            }))
+        : [];
+    const selectedProjectId =
+      query.viewContext.kind === 'project' ? query.viewContext.projectId : undefined;
+    const projectRowsForView = projectRows.filter((row) => {
+      const ownership = row.assetRef.nativeOwnership;
+      return (
+        selectedProjectId === undefined ||
+        (ownership.kind === 'project' && ownership.projectId === selectedProjectId)
+      );
+    });
+    const globalAllowedInProject =
+      query.viewContext.kind !== 'project' || projectIds.includes(query.viewContext.projectId);
+    const globalSegment = {
+      id: 'segment-fx01-global-applicable',
+      source: 'globalApplicable' as const,
+      displayLabel: 'Global',
+      rows: globalRows,
+    };
+    const projectSegments = projectRowsForView.flatMap((row) => {
+      const ownership = row.assetRef.nativeOwnership;
+      if (ownership.kind !== 'project') return [];
+      return [
+        {
+          id: `segment-fx01-project-native-${ownership.projectId}`,
+          source: 'projectNative' as const,
+          displayLabel: ownership.projectId,
+          projectId: ownership.projectId,
+          rows: [row],
+        },
+      ];
+    });
+    const segments =
+      query.viewContext.kind === 'global'
+        ? globalRows.length === 0
+          ? []
+          : [globalSegment]
+        : query.viewContext.kind === 'project'
+          ? [
+              ...projectSegments,
+              ...(globalRows.length === 0 || !globalAllowedInProject ? [] : [globalSegment]),
+            ]
+          : [...(globalRows.length === 0 ? [] : [globalSegment]), ...projectSegments];
+    const snapshot: WorkbenchActualReadSnapshot = {
+      kind: 'workbench',
+      query: { ...query, ...(filters === undefined ? {} : { filters }) },
+      authoritativeReadRevision: this.currentRevision(),
+      segments,
+      effectiveContexts: projectIds.map((projectId) => ({
+        asset: row.assetRef,
+        assetId: row.assetId,
+        projectId,
+        projectDisplayName: projectId,
+        resolution: 'resolved' as const,
+      })),
+      findings: [],
+      aggregateTotal: segments.reduce((total, segment) => total + segment.rows.length, 0),
+      indexStatus: this.indexStatus,
+      readAt: queriedAt,
+    };
+    return this.readSucceeded(snapshot);
+  }
+
+  /** global locator 只使用 redacted row facts；没有写入 side effect。 */
+  private buildGlobalLocatorSnapshot(searchText: string): GlobalLocatorSnapshot {
+    const skillRow: ReadOnlyRow = {
+      assetRef: toReadOnlyAssetRef(this.assetRef()),
+      assetId: this.assetRef().assetId,
+      displayName: this.assetSummary().displayName,
+      sortBaseName: this.assetSummary().displayName.normalize('NFC'),
+      authoritativeInputOrder: 0,
+      nativeOwnership: { kind: 'global' },
+      agents: ['claude-code'],
+      sourceTierId: fixture.sourceTier.id,
+      sourceTierLabel: this.assetSummary().sourceTier.label,
+      redactedSummary: '结构化只读 Skill 摘要',
+      ownershipHint: this.summaryOwnershipHint(),
+      statuses: this.derivedStatuses(),
+      skillTargetStates: this.skillTargetStates(),
+    };
+    const row: ReadOnlyRow = this.unsupportedLocator
+      ? {
+          assetRef: {
+            assetId: 'instruction-fx01-read-only',
+            assetType: 'longTermInstruction',
+            nativeUnitRef: 'nunit-instruction-fx01-read-only',
+            adapterIdentity: this.assetRef().adapterIdentity,
+            nativeOwnership: { kind: 'global' },
+          },
+          assetId: 'instruction-fx01-read-only',
+          displayName: 'Read-only Instruction',
+          sortBaseName: 'Read-only Instruction',
+          authoritativeInputOrder: 0,
+          nativeOwnership: { kind: 'global' },
+          agents: ['codex'],
+          redactedSummary: '结构化只读长期指令摘要',
+          ownershipHint: 'global',
+          statuses: ['readOnly', 'normal'],
+        }
+      : skillRow;
+    const matchedField = mockLocatorMatchedField(searchText, row);
+    const groups = MVP_ASSET_TYPES.map((assetType) => ({
+      assetType,
+      count: assetType === row.assetRef.assetType && matchedField !== null ? 1 : 0,
+      results:
+        assetType === row.assetRef.assetType && matchedField !== null
+          ? [
+              {
+                ...row,
+                destinationViewContext: { kind: 'global' as const },
+                destination:
+                  row.assetRef.assetType === 'skill'
+                    ? { kind: 'skillDetail' as const, assetRef: row.assetRef }
+                    : {
+                        kind: 'unsupportedReadOnly' as const,
+                        assetRef: row.assetRef,
+                        reasonCode: 'UNSUPPORTED_CAPABILITY',
+                      },
+                matchedField,
+              },
+            ]
+          : [],
+    }));
+    return {
+      kind: 'globalLocator',
+      groups,
+      aggregateTotal: matchedField === null ? 0 : 1,
+      readAt: new Date().toISOString(),
+    };
+  }
+
+  private skillTargetStates(): SkillTargetState[] {
+    const failure = this.indexStatus === 'stale' ? 'stale' : this.skillCellFailure;
+    return AGENT_ORDER.map((agent) =>
+      failure !== null
+        ? {
+            agent,
+            presence: failure,
+            activation: failure,
+            applicability: failure,
+            stableReason:
+              failure === 'stale'
+                ? 'INDEX_STALE'
+                : failure === 'blocked'
+                  ? 'READ_ONLY_POLICY'
+                  : 'UNKNOWN_FIELD_PRESERVED',
+          }
+        : agent === 'claude-code'
+          ? {
+              agent,
+              presence: 'present',
+              activation: 'enabled',
+              applicability: 'resolved',
+            }
+          : {
+              agent,
+              presence: 'absent',
+              activation: 'notApplicable',
+              applicability: 'resolved',
+            },
+    );
   }
 
   private derivedStatuses(): AssetStatusFilter[] {
