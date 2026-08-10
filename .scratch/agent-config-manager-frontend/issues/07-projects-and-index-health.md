@@ -1,34 +1,41 @@
-# FE-07 — 项目纳入与索引健康
+# FE-07 — 项目纳入、停止管理与索引健康
 
-**What to build:** 用户能够显式纳入候选项目、停止管理项目，并理解授权范围、项目可用性和搜索索引健康状态。
+**Acceptance state: Frozen (2026-08-10; planning acceptance only)**
+
+**What to build:** 用户逐个纳入候选项目或停止管理已纳入项目，并可理解项目可用性及索引的 fresh、stale、rebuilding、failed 状态。
 
 **Blocked by:** FE-04 — 审查与安全应用闭环
 
-**Status:** blocked
+**Status:** `blocked`
 
-**Primary contract fixtures:** `FX-07 stale-index-projects`
+**Primary contract fixture:** `FX-07 stale-index-projects`
 
-**Accepted technical plan:** `docs/architecture/Agent_Config_Manager_MVP_技术方案_v0.1.md`（2026-07-27）
+## 范围与安全边界
 
-- [ ] 自动发现仅展示标准全局目录和用户选择父目录下的候选项目；
-- [ ] 候选项目必须由用户逐个确认纳入；
-- [ ] 纳入项目与停止管理项目均为管理变更：先通过 `prepare` 呈现范围、风险和确认依据，再通过 `apply` 生效；候选展示、索引状态和项目可用性继续只经 `read`；
-- [ ] 规范化路径用于候选去重，符号链接不会扩大授权范围；
-- [ ] 移除项目只停止扫描、监听和管理，不删除或移动原生资产；
-- [ ] 项目路径消失或移动时标记不可用，不自动重建或猜测位置；
-- [ ] 列表和搜索显示 fresh、stale、rebuilding 或 failed 索引状态；
-- [ ] stale 状态保留最近结果和更新时间，但所有写入仍重新读取磁盘；
-- [ ] workspace event 只触发失效和 `read`，不直接替换事实；
-- [ ] 索引重建不向用户暴露新旧混合结果；
+- [ ] 只展示标准全局目录和用户选择父目录下的候选项目；候选项目必须由用户逐个确认纳入，规范化路径去重且符号链接不得扩大授权范围。
+- [ ] 纳入与停止管理均是管理变更，必须完整经过 `prepare` → review → confirm → `apply`，不得跳过 review；候选、项目可用性和索引状态只经 `read`。
+- [ ] 停止管理只停止扫描、监听和管理，绝不删除、移动或重新创建原生资产；路径消失或移动时标记不可用，不猜测位置或自动恢复。
+- [ ] 列表与搜索显示 fresh、stale、rebuilding 或 failed。stale 保留最近结果和更新时间，但任何写入前必须重新读取磁盘；重建不显示新旧混合结果。
+- [ ] workspace event 只触发失效，随后 authoritative reread；event 本身不得直接替换事实。
+- [ ] 复用 FE-07R 的 frozen projection types；本票据只拥有 `FX-07` 项目 lifecycle/index 责任，不夺取 FX-19 或 read-resolver 主归属，也不把其证据用于本票据。
 - [ ] 不增加全盘扫描、后台自动纳入或越权恢复入口。
 
-## 验证命令契约
+## 计划验证契约
 
-**状态：** `planned / unverified`
+**状态：** `planned / unverified`。计划统一入口为 `npm run verify:ticket -- FE-07`；该命令未运行，不能作为 ticket closure 或 runtime evidence。
 
-- **统一入口：** `npm run verify:ticket -- FE-07`；这是实现后的计划命令，尚未运行。
-- **前置条件：** FE-04 已有 `done` 证据；bootstrap、生成 wire 类型和 `FX-07` 安全 fixture 可用；L3 使用专用 Tauri 测试构建与每次新建的合成临时项目/索引根，不扫描或管理真实项目。
-- **预计层级：** L0 检查变更源码、类型、格式、lint 与 wire/schema drift；L1 检查规范化路径/符号链接授权边界、纳入与停止管理的 prepare/apply、stale 保留与写前重读、event 失效后 authoritative reread、重建不混合结果；L2 以 scripted mock `FrontendGateway` 跑 `FX-07`；L3 只跑一次隔离临时项目的索引事件 → 失效 → 重读 → 重建 tracer；PF-05 记录合成 index-events descriptor 的索引、事件合并、重读和重建测量及 fixture digest。
-- **通过判据：** 用户逐个纳入、停止管理不删除原生资产、路径失效不猜测恢复，且 `FX-07` 的状态和可用动作符合本票据；L3 只在临时项目上证明 command/event 与索引事实链；PF-05 留存原始样本、运行环境与 baseline/预算冻结记录，出现 `inconclusive` 不得计通过。
-- **失败证据：** 脱敏日志、WebDriver trace、截图或 DOM dump、层级与 fixture 标识写入 `.artifacts/verification/FE-07/<run-id>/`。
-- **Provenance 边界：** L2 mock PASS 不取得真实 IPC、文件或索引写入 credit；L3 只证明该临时项目的 event-rebuild 路径，不证明真实用户项目、全盘扫描或真实 adapter 全回归；PF-05 数据不替代行为或发布证据。
+**前置条件：** FE-04 的审查与安全应用闭环已有其自身可复验的前置证据；bootstrap、生成 wire 类型和 `FX-07` 安全 fixture 可用。L3 使用专用 Tauri 测试构建及每次新建的 synthetic temporary project/index root，不扫描或管理真实项目。
+
+**预计层级：**
+
+- L0：检查变更源码、类型、格式、lint 与 wire/schema drift。
+- L1：检查规范化路径/符号链接授权边界、纳入/停止管理的 `prepare` → review → confirm → `apply` → authoritative reread，以及不得跳过 review 的负向断言、stale 保留与写前重读、event 失效后的 authoritative reread 和重建不混合结果。
+- L2：以 scripted mock `FrontendGateway` 跑 `FX-07`，验证纳入/停止管理的 `prepare` → review → confirm → `apply` 与不得跳过 review 的负向断言。
+- L3：只在 isolated temporary project 上先执行 include 与 stop-management 的 `prepare` → review → confirm → `apply` → authoritative reread，断言不得跳过 review，再执行 index event → invalidation → authoritative reread → rebuild tracer。
+- PF-05：记录 synthetic index-events descriptor 的索引、事件合并、重读和重建测量及 fixture digest；`inconclusive` 不计通过。
+
+**通过判据：** 用户逐个纳入；纳入与停止管理均完整经过 `prepare` → review → confirm → `apply`，不得跳过 review；停止管理不删除原生资产，路径失效不猜测恢复，且 `FX-07` 的状态与可用动作符合本票据。L3 只在临时项目上保留 command/event 与索引事实链。
+
+**失败证据：** 计划以脱敏日志、WebDriver trace、截图或 DOM dump，并附层级和 fixture 标识，写入 `.artifacts/verification/FE-07/<run-id>/`。
+
+**Provenance 边界：** L2 mock PASS 不取得真实 IPC、文件或索引写入 credit。L3 即便穿过真实 WebView/Core/IPC，也只证明 isolated synthetic input，不证明真实用户项目、全盘扫描或 production artifact；PF-05 不替代行为或发布证据。

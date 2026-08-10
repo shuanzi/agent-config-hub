@@ -64,3 +64,20 @@ transfer。影响限于未来的只读 query/projection、Rust-first DTO delta �
 文档、Mock、OpenSpec 与 static 检查不是 runtime 或 ticket closure evidence；本记录不改变
 tracker frontier、DAG、FE acceptance、`TICKET_REGISTRY`、manifest、wire、Gateway/Adapter、
 UI 或 runtime。后续仅按 task 1.10–1.23 的实际完成情况更新或重算这些对象。
+
+## 2026-08-10：v0.2 tracker planning recomputation
+
+**Status:** closed（维持不变；仅 planning record）。
+
+task 1.10–1.21 的 planning artifacts 可以记录 acceptance、DAG、fixture owner、验证命令契约与
+候选实现顺序，但这些 artifacts 本身不是 direct blocker evidence。本门禁维持 closed；每次
+candidate/frontier 的重算只可使用 closed gate record，或直接前置 ticket 的 `done` 状态及其
+provenance-appropriate 完成证据。
+
+在当前直接证据下，FE-07R 没有 ticket blocker，故是 candidate/frontier；其 Frozen acceptance
+只定义 FX-19 的只读范围，不等同 `done`。FE-01 只有在 FE-07R `done` 并具 actual-read
+evidence 后才可能成为 candidate。其余 tickets 继续按各自直接 DAG blocker 重算，不能由
+planning、static 检查、Mock 或文档冻结提前解除。
+
+本记录不声明 task 1.10–1.21 的任何 runtime、actual-read、测试、ticket closure 或发布已完成，
+也不改写 2026-07-27 的历史关闭事实。

@@ -1,39 +1,31 @@
 # FE-10 — FX-12 工作台可访问性集成旅程
 
-**What to build:** 用户能够在已交付的只读工作台详情中，以键盘、窄窗口和减少动态效果完成 `FX-12 sensitive-narrow-keyboard` 的单一集成旅程。
+**Acceptance state:** `Frozen (2026-08-10; planning acceptance only)`
 
-**Blocked by:** FE-02 — 原生详情与多文件资产
+**Ticket Status:** `blocked`（不是 `done`；等待 FE-02 的 `done` 与 provenance-appropriate evidence）
 
-**Status:** blocked
+**Blocked by:** FE-02 — 原生详情与多文件资产。
 
-**Primary contract fixtures:** `FX-12 sensitive-narrow-keyboard`
+**Primary contract fixture:** `FX-12 sensitive-narrow-keyboard`
 
-**Accepted technical plan:** `docs/architecture/Agent_Config_Manager_MVP_技术方案_v0.1.md`（2026-07-27）
+**Source of truth:** `docs/frontend/Agent_Config_Manager_前端契约_v0.2.md` §§4、6、7、9；本票据仅冻结只读 responsive/a11y 验收，不接管写入或真实 Adapter 回归。
 
-- [ ] `FX-12` 通过 mock `FrontendGateway` 完成一条只读详情集成旅程；真实 adapter 全回归不在本票据内；
-- [ ] 旅程只组合已由 FE-01/02 交付的资产列表、单个文本详情、文件树、原生内容和检查器，不重新验收其他 fixture；
-- [ ] 资产列表、文件树、原生内容和检查器遵守已确认下限、上限、默认比例与栏宽记忆；
-- [ ] “恢复默认栏宽”只作用于当前一级资产类型，共享栏宽记忆恢复为默认比例，不预先确认，也不影响其他类型；结果提示提供撤销并精确恢复操作前栏宽和记忆；
-- [ ] 恢复栏宽的非模态提示位于工作区底部居中，默认显示 8 秒；悬停或键盘焦点进入时暂停计时，离开后继续；减少动态效果时直接切换结果；
-- [ ] 可拖拽分隔线具有 1 px 视觉线、8 px 命中区及完整键盘调宽行为；
-- [ ] 窄窗口按检查器后资产列表的顺序收拢，并按逆序和 64 px 回差恢复；
-- [ ] 覆盖式浮层保持单实例、正确停靠、三种关闭方式和焦点恢复；
-- [ ] 聚焦只能由内容工具栏显式进入和退出；进入时保留当前资产、文件路径、作用域、关键安全状态与多文件树，退出时恢复进入前布局以及当前资产、文件、草稿和检查器上下文；
-- [ ] 聚焦、浮层和轻量反馈使用 160 ms 局部动效，减少动态效果时直接切换；
-- [ ] 正文、焦点和非文本对比达到已确认目标，颜色不是唯一状态线索；
-- [ ] 关键操作带可见文字，纯图标次要操作具有完整无障碍名称；
-- [ ] 敏感内容默认遮蔽，显式临时查看的 `view` grant 在到期、切换资产或 revision 变化后失效，且明文不会进入缓存、索引、日志、事件或 fixture；
-- [ ] 正常状态保持中性，当前只读旅程中的禁用原因和敏感状态在邻近位置可解释；
-- [ ] 没有新增产品范围、替代工作台、批量操作或技术方案外依赖。
-- [ ] 本票据只验证 FX-12；FX-01 至 FX-11、FX-13 至 FX-18 的主旅程，真实 adapter 全回归、构建、打包和发布负向范围检查只由 `RELEASE-GATE` 汇总验收。
+- [ ] 宽/中屏保留三类 type-specific read surface；窄屏遵循 `type → scope → list → detail/edit` 单表面栈和原返回路径，但本票据只验证 read behaviour，不触发编辑、草稿、`prepare` 或 `apply`。
+- [ ] 列表 presentation 严格为 `pageSize` 20/50/100（默认 20）、`nameSort` asc/desc 与单一全局分页。filter、type、scope、sort 或 page size 改变时原子 reset 至第 1 页；翻页滚至顶部并把焦点交给新页第一行；empty 时聚焦 empty-state heading。
+- [ ] locator 对查询 trim，空查询给稳定提示；非空查询按 NFC、Unicode default case-fold 与 redacted 字段的 code-point substring 匹配。关闭未提交时恢复 return focus，失效时回到全局搜索按钮；destination 成功聚焦详情主标题，失败聚焦错误标题。locator 不读取敏感明文且不改变 query、草稿、transaction 或权限。
+- [ ] 路径、contexts、来源/覆盖、兼容/漂移、最近变更、恢复点和关键安全状态可访问且可用键盘操作；辅助信息按 type-specific disclosure/就近状态条承载，不要求固定第四 inspector 或其栏宽、浮层、收拢和动效合同。
+- [ ] Skills 四个固定 Agent 状态单元格有可读语义、键盘可达性和 stable reason；normal、read-only、incompatible、unknown/blocked/stale 与敏感遮蔽不能只依赖颜色。Hook 始终没有 MVP UI destination。
+- [ ] sensitive `view` grant 必须 revision-bound 且短生命周期；grant 超时、资产切换或 revision 变化后立即失效并重新遮蔽，明文不得进入缓存、索引、事件、日志或 fixture。
+- [ ] reduced-motion 一律直接切换到最终状态；正文、焦点与非文本对比度满足冻结的可访问性要求，非文字控件均有可访问名称。上述要求不恢复任何旧 inspector 布局参数。
+- [ ] `ReadFailed`、empty、stale、遮蔽与 locator destination failure 都有稳定、可访问的 failure path；不以截图、mock 调用数或静态文件替代行为断言。
+- [ ] 本票据不验收 FE-03–FE-09 的编辑、prepare/review/confirm/apply、转换、删除、恢复或任何真实 Adapter 行为。
 
 ## 验证命令契约
 
-**状态：** `planned / unverified`
+**状态：** `planned / unverified`；不得在本 planning slice 运行 closure。计划统一入口为 `npm run verify:ticket -- FE-10`，未来失败证据路径为 `.artifacts/verification/FE-10/<run-id>/`。
 
-- **统一入口：** `npm run verify:ticket -- FE-10`；这是实现后的计划命令，尚未运行。
-- **前置条件：** FE-02 已有 `done` 证据；bootstrap、生成 wire 类型与 `FX-12` 安全 fixture 可用；browser-mode runner 可注入 scripted mock `FrontendGateway`，不启动 Tauri 测试构建。
-- **预计层级：** L0 检查变更源码、类型、格式、lint 与 wire/schema drift；L1 检查栏宽记忆/撤销、64 px 回差、焦点布局恢复和敏感 `view` grant 失效等 session 不变量；L2 以 scripted mock `FrontendGateway` 跑唯一的 `FX-12 sensitive-narrow-keyboard`，覆盖键盘、窄窗口、减少动态效果、浮层与焦点、敏感遮蔽和可见禁用原因；无 L3，且无新增 PF。
-- **通过判据：** `FX-12` 在真实 browser event 下完成既有只读组合旅程，栏宽恢复、布局收拢/回弹、焦点和 grant 失效符合本票据；只接受 L0/L1/L2 的聚焦证据，不以测试文件、截图或 mock 调用数替代行为断言。
-- **失败证据：** 脱敏日志、WebDriver trace、截图或 DOM dump、层级与 fixture 标识写入 `.artifacts/verification/FE-10/<run-id>/`。
-- **Provenance 边界：** L2 mock PASS 不取得真实 IPC、磁盘、Keychain、Tauri lifecycle 或写入 credit；本票据刻意不运行 L3、不产生新的 PF 证据，也不接管真实 adapter 全回归、构建、打包或发布负向检查，这些仍属 `RELEASE-GATE`。
+**计划前置条件：** FE-02 已 `done` 且有其自身证据；bootstrap、`FX-12` fixture 和 browser-mode scripted mock `FrontendGateway` 可用，不启动 Tauri 测试构建。
+
+**计划证据分层：** 只运行 L0（静态/类型/生成一致性）、L1（列表状态、焦点、locator、四 Agent 语义、`view` grant 失效/重新遮蔽、reduced-motion、对比度与控件名称）与 L2（宽/中/窄只读 `FX-12` browser journey，覆盖同一 grant/a11y 状态）。**无 L3、无 PF。**
+
+**计划通过与 provenance 边界：** 未来 L2 必须证明真实 browser event 下的只读 focus/return、列表 reset、搜索遮蔽和 type-specific surface；mock PASS 不取得 IPC、磁盘、Keychain、Tauri lifecycle、写入、真实 Adapter、production artifact 或 L4 credit。尚未运行前所有层级均为 `planned / unverified`。

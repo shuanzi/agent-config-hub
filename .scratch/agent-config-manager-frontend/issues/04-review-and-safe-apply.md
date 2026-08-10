@@ -1,45 +1,31 @@
 # FE-04 — 审查与安全应用闭环
 
-**What to build:** 用户能够把一个脏草稿准备为可审查差异，明确确认后安全应用，并处理阻断、冲突、失败、回滚和恢复点。
+**Acceptance state:** `Frozen (2026-08-10; planning acceptance only)`
 
-**Blocked by:** FE-03 — 本地草稿编辑
+**Ticket Status:** `blocked`（不是 `done`；等待 FE-03 的 `done` 与 provenance-appropriate evidence）
 
-**Status:** blocked
+**Blocked by:** FE-03 — 本地草稿编辑。
 
 **Primary contract fixtures:** `FX-05 review-git-drift-conflict`、`FX-16 asset-write-result-branches`、`FX-18 gateway-prepare-unavailable`
 
-**Accepted technical plan:** `docs/architecture/Agent_Config_Manager_MVP_技术方案_v0.1.md`（2026-07-27）
+**Source of truth:** `docs/frontend/Agent_Config_Manager_前端契约_v0.2.md` §§3.2–3.3、4.3、5–7、9；本文件冻结未来 transaction 计划，不宣称已经写入。
 
-- [ ] “审查更改”调用 `prepare`，且准备过程不创建快照或写入磁盘；
-- [ ] `prepare` 的 transport/protocol failure 返回 `PrepareFailed(GATEWAY_UNAVAILABLE)`；保留草稿、目标、当前文件、文件树、检查器和展开上下文，不产生 prepared ID、token、差异或 `apply`，且只有显式重试才能再次准备；
-- [ ] 审查在同一内容主区展示统一差异、资产级摘要和文件级增删量；
-- [ ] 统一差异的敏感变化只显示遮蔽标记，所有默认可见差异、摘要、finding、结果和测试证据均不含敏感明文；
-- [ ] 多文件审查复用真实文件树，长未变区段可原位展开；
-- [ ] 用户可返回此前草稿且不丢失文件、展开和检查器上下文；
-- [ ] “应用更改”进入聚焦确认，核对目标、路径、Git 状态和恢复点；
-- [ ] `apply` 携带 prepared operation 与其 revision-bound `OperationConcurrencyToken`；
-- [ ] 外部变化可安全合并时重新准备，不能证明安全时进入三方冲突；
-- [ ] 旧 `preparedOperationId` 或 revision 因外部变化失效时，用户可保留草稿并以最新磁盘事实重新执行 `prepare`；重新审查前不得 `apply` 过期 prepared operation；
-- [ ] 应用成功原位展示结果和恢复点，阻断、失败和回滚结果同样原位可解释；
-- [ ] Git 状态只提供风险上下文，流程不执行任何 Git 操作；
-- [ ] 结果未知时前端不自行重试或宣称取消成功；
-- [ ] prepare 的 Conflict 子场景验证当前事实的三方差异及保留/解决/放弃，解决后重新 prepare；apply 的 Applied 子场景验证实际目标、变更摘要与可用恢复点，Blocked 子场景验证原因码和恢复动作，Failed 子场景验证 `notNeeded`、`succeeded` 或 `failed` 的 rollback 结果和适用的恢复点。
-- [ ] 测试覆盖四类 `PrepareResult`、三类 `OperationResult` 及 reprepare；FX-18 由 mock 与真实 adapter 复用同一契约断言，不把 mock 返回当作已发生 transport failure 或磁盘写入的证据。
+- [ ] 所有写入走 `prepare → review → confirm → apply` 单资产、单目标安全事务；`prepare` 无副作用，review/confirm 必须展示目标、native location、mapping/capability、diff、Git 风险上下文、恢复点与所有 resolved affected contexts。
+- [ ] `PrepareFailed(GATEWAY_UNAVAILABLE)` 必须保留草稿、目标、文件、展开与辅助信息上下文，不产生 prepared ID、token、diff 或 `apply`；只有显式 retry 可重试。Conflict、Blocked、Failed、rollback/recovery 及 apply 成功后 reread 失败均保留稳定、可解释 failure/result path，前端不得乐观改写事实或自行重试。
+- [ ] target scope 或 native location 无论在首次 `prepare` 前或已 prepared 后变化，均先对新 target authoritative reread presence、activation 与 applicability，重新 remap；旧 mapping、prepared operation、review 与 confirm 全部失效，必须重新 prepare/review 后才可 apply。
+- [ ] 外部磁盘 revision 或 target occupancy 变化同样使旧 operation、`OperationConcurrencyToken`、review 与 confirm 失效并返回 `REPREPARE_REQUIRED`；保留草稿，必须重新 `prepare → review → confirm`。prepared operation 是 single-use，且流程只读取 Git 风险上下文，不执行 Git 操作。
+- [ ] 必要恢复点的创建或持久化失败必须在触碰原生资产前阻断；不得生成可 apply 的 operation 或以缺失恢复点继续写入。
+- [ ] 项目视图中适用的 global asset 始终以 global `AssetRef`/`NativeOwnership` 原生写回；展示所有 resolved affected contexts，绝不创建项目副本。unknown/blocked/stale 一律 fail-closed。
+- [ ] Skill `present + disabled` 的重新启用、`present + enabled` 的停用，只有已验证 native activation semantics 才映射 `editAsset`；其他情况 disabled/blocked，永不 `prepare`/`apply`，也绝不回落为 delete。absence 的 install/convert 与 delete 保持各自独立票据边界。
+- [ ] locator context switch 若在 prepared/reviewing/confirming/reprepareRequired，必须先显式退出事务并使旧事务失效；applying 或结果未知时必须阻断切换并显示稳定原因。允许切换时也不得把旧 operation/diff/summary 带入新 `AssetRef`/context。
+- [ ] 敏感 diff、summary、finding、result 与测试证据持续遮蔽；关键安全状态在就近表面可见，不恢复固定第四 inspector。
 
 ## 验证命令契约
 
-**状态：** `planned / unverified`。统一入口为 `npm run verify:ticket -- FE-04`；失败证据写入 `.artifacts/verification/FE-04/<run-id>/`。
+**状态：** `planned / unverified`；不得在本 planning slice 运行 closure。计划统一入口为 `npm run verify:ticket -- FE-04`，未来失败证据路径为 `.artifacts/verification/FE-04/<run-id>/`。
 
-**前置条件：** FE-03 已完成并留存本地草稿证据；`FX-05 review-git-drift-conflict`、`FX-16 asset-write-result-branches`、`FX-18 gateway-prepare-unavailable` 及其敏感占位值可在每次运行新建的隔离临时原生单元中复现。不得触碰用户项目、真实 Git 工作树或 Agent 配置。
+**计划前置条件：** FE-03 已 `done` 且有其自身证据；三个 fixture 和敏感占位值可在每次运行新建的隔离临时 native unit 中复现，不得触碰真实用户项目、Git worktree 或 Agent 配置。
 
-**预计层级：**
+**计划证据分层：** L0/L1 覆盖事务、重验、四类 `PrepareResult`、三类 `OperationResult`、native activation mapping、diff/summary/finding/result/evidence 的敏感遮蔽断言，以及外部 revision/target occupancy 变化的 `REPREPARE_REQUIRED`、single-use prepared operation 和恢复点 pre-write 阻断；L2 以 scripted mock 跑 review/confirm/conflict/result 与上述失效/阻断 journey，并断言所有可见 diff/summary/finding/result/evidence 均遮蔽；L3 在 isolated temp 输入上跑 prepare/apply/conflict/recovery、外部 revision/occupancy 变化和恢复点持久化失败，并断言实际结果与收集的 evidence 同样遮蔽；PF-04 `review-conflict` 记录 prepare、diff 与 conflict surface 的原始样本并在实际校准后冻结预算。
 
-- L0：本切片相关的静态、类型与生成产物一致性门禁；
-- L1：四类 `PrepareResult`、三类 `OperationResult`、reprepare 与 FX-05/FX-16/FX-18 的共享 `FrontendGatewayContract` 断言；
-- L2：以 scripted mock `FrontendGateway` 驱动三项 fixture 的审查、确认、冲突与结果浏览器旅程；
-- L3：专用 Tauri 测试构建在隔离临时原生单元中执行 prepare 无副作用、apply revision 重校验、冲突及恢复点 tracer；
-- PF-04：以 `review-conflict` descriptor 校准 prepare、统一差异、未变区段展开和冲突 surface 的首条 baseline。
-
-**通过判据：** 命令在上述前置条件下退出成功；三项 fixture 覆盖的原因码、遮蔽、无 prepared operation 的 `PrepareFailed`、reprepare、确认前不写入、Applied/Blocked/Failed 与 rollback/恢复点均符合票据；L3 记录真实 command/event、隔离文件事实和恢复结果；PF-04 留存 fixture digest、运行环境和原始样本，数值预算只在实际校准后生效。
-
-**Provenance 边界：** FX-18 的 mock PASS 只证明共享契约，不证明 transport failure 或磁盘写入；实际 IPC/write credit 仅来自 L3 的真实 WebView/Core 路径，且只限隔离临时原生单元。L3 不等同生产签名、DMG 或 L4，未实际运行前，本命令与 PF-04 均保持 `planned / unverified`。
+**计划通过与 provenance 边界：** 未来验证必须保留 FX-05/16/18 的 failure/recovery、scope/location reread-remap、global native writeback 与 no-delete fallback，并在适用 L1/L2/L3 断言和通过判据中证明 diff、summary、finding、result 与 evidence 均不含敏感明文。L2 mock 仅证明 journey；actual runtime/write credit 只可来自 L3 穿过真实 WebView/Core/IPC 的隔离输入，仍不证明真实用户项目、配置、production artifact、签名、DMG 或 L4。所有层级和 PF 目前均为 `planned / unverified`。
