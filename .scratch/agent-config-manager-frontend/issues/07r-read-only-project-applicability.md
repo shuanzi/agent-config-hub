@@ -2,7 +2,7 @@
 
 **Acceptance state:** Frozen — 2026-08-10
 
-**Ticket Status:** done — evidence run `20260810T065951Z`
+**Ticket Status:** done — evidence run `20260810T071547Z`
 
 **What to build:** 为 FX-19 建立最小、只读的 project applicability vertical slice：从 authoritative
 read 投影 opaque `projectId`、Adapter identity/version 与明确的 `builtIn` 或 `activePackage`
@@ -30,7 +30,7 @@ actual-read 已运行、runtime evidence 或 `RELEASE-GATE` credit。
 
 ## 验证命令契约
 
-**状态：** `verified / pass`。统一入口 `npm run verify:ticket -- FE-07R` 已实际运行；动态 evidence 位于 `.artifacts/verification/FE-07R/20260810T065951Z/`，manifest 的 `runId` 与目录一致。
+**状态：** `verified / pass`。统一入口 `npm run verify:ticket -- FE-07R` 已实际运行；动态 evidence 位于 `.artifacts/verification/FE-07R/20260810T071547Z/`，final manifest 的 `runId` 与目录一致，绑定 commit `bcd06f41e83308b814a86eba271e51cd65fdb412`，且 `worktreeDirty=false`。
 
 **前置条件：** `ARCH-GATE` 保持 closed；最小 bootstrap/harness、`FX-19` 合成 fixture、隔离测试数据根和测试构建均已就绪。不得读取、管理或写入真实用户项目或 Agent 配置。
 
@@ -43,4 +43,4 @@ actual-read 已运行、runtime evidence 或 `RELEASE-GATE` credit。
 
 **通过判据：** L0/L1/L3 均为 `pass`；FX-19 `fixture.json` digest 为 `7a9d47c3f452f6ab6c46bcb80e0e03145f0e676705deb8b87e73e3c934dfa127`。manifest 仅含 L0/L1/L3 actual-read steps，不含 L2、PF step、PF descriptor 或 PF budget metadata。L3 只证明隔离输入穿过真实 WebView／IPC／Rust core／磁盘 read 边界后的 actual-read，不证明真实用户项目、生产 app、DMG、签名或发布。
 
-**Provenance 边界：** run `20260810T065951Z` 的 L1 覆盖 8 类 provenance/revision drift，L3 以临时复制的 synthetic FX-19 实际验证 mismatch fail-closed。独立只读复审已处理全部 P1/P2 finding，第二轮无 P0–P3。该 evidence 绝不能借给 FE-01 closure；FE-01 仍须保留自身 L0/L1/L2/L3/PF-01 evidence。
+**Provenance 边界：** run `20260810T071547Z` 的 L1 覆盖 8 类 provenance/revision drift，L3 以临时复制的 synthetic FX-19 实际验证 mismatch fail-closed。独立只读复审已处理全部 P1/P2 finding，第二轮无 P0–P3。该 evidence 绝不能借给 FE-01 closure；FE-01 仍须保留自身 L0/L1/L2/L3/PF-01 evidence。
