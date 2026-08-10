@@ -6,11 +6,13 @@
  * verify:static 在临时目录重新生成并逐字节比对，任何手工编辑都会造成漂移失败。
  */
 
-export const GATEWAY_WIRE_VERSION = 1 as const;
+export const GATEWAY_WIRE_VERSION = 2 as const;
 
 export type AssetTypeWire = "skill" | "longTermInstruction" | "subagent" | "hook";
 export type AgentIdWire = "claude-code" | "codex" | "gemini-cli" | "opencode";
 export type AssetScopeWire = "global" | "project";
+export type ApplicabilityResolutionWire = "resolved" | "unknown" | "blocked" | "stale";
+export type ProjectApplicabilitySegmentKindWire = "projectNative" | "globalApplicable";
 export type ReasonCodeWire = "UNKNOWN_AGENT_VERSION" | "INCOMPATIBLE_STRUCTURE" | "UNSUPPORTED_CAPABILITY" | "READ_ONLY_POLICY" | "PERMISSION_DENIED" | "OUTSIDE_MANAGED_SCOPE" | "PROJECT_UNAVAILABLE" | "UNKNOWN_FIELD_PRESERVED" | "NON_TEXT_UNPREVIEWABLE" | "VALIDATION_FAILED" | "EXECUTABLE_CONTENT_RISK" | "INDEX_STALE" | "EXTERNAL_CHANGE" | "REPREPARE_REQUIRED" | "MERGE_CONFLICT" | "TARGET_NAME_CONFLICT" | "CONVERSION_DEGRADED" | "CONVERSION_BLOCKED" | "READ_FAILED" | "SNAPSHOT_REQUIRED" | "SNAPSHOT_FAILED" | "SECURE_STORAGE_UNAVAILABLE" | "DISK_FULL" | "WRITE_FAILED" | "ROLLBACK_FAILED" | "RECOVERY_TARGET_OCCUPIED" | "ADAPTER_SIGNATURE_INVALID" | "ADAPTER_COMPATIBILITY_MISMATCH" | "ADAPTER_REGRESSION_FAILED" | "IMPORT_SOURCE_UNAVAILABLE" | "EXPORT_DESTINATION_INVALID" | "GATEWAY_UNAVAILABLE";
 export type IndexStatusWire = "fresh" | "stale" | "rebuilding" | "failed";
 export type CompatibilityStatusWire = "verifiedWritable" | "recognizedReadOnly" | "incompatibleBlocked";
@@ -24,7 +26,10 @@ export type FileKindWire = "text" | "nonText" | "unknown";
 export type RecoveryActionWire = { "kind": "retryRead" };
 export type DisabledAvailabilityWire = { reasonCode: ReasonCodeWire, recoveryAction?: RecoveryActionWire, };
 export type ActionAvailabilityWire = { "kind": "allowed" } | { "kind": "disabled" } & DisabledAvailabilityWire;
-export type AssetRefWire = { assetId: string, assetType: AssetTypeWire, nativeUnitRef: string, adapterIdentity: string, };
+export type GlobalNativeOwnershipWire = Record<string, never>;
+export type ProjectNativeOwnershipWire = { projectId: string, };
+export type NativeOwnershipWire = { "kind": "global" } & GlobalNativeOwnershipWire | { "kind": "project" } & ProjectNativeOwnershipWire;
+export type AssetRefWire = { assetId: string, assetType: AssetTypeWire, nativeUnitRef: string, adapterIdentity: string, nativeOwnership: NativeOwnershipWire, };
 export type AnomalyWire = { kind: AnomalyKindWire, reasonCode: ReasonCodeWire, message: string, };
 export type ProjectContextHintWire = { projectName: string, };
 export type PathContextHintWire = { pathHint: string, };
@@ -36,7 +41,12 @@ export type AssetListFiltersWire = { agents?: Array<AgentIdWire>, projects?: Arr
 export type AssetListQueryWire = { scope: AssetListScopeWire, searchText?: string, filters?: AssetListFiltersWire, };
 export type AssetDetailQueryWire = { asset: AssetRefWire, };
 export type NativeFileQueryWire = { asset: AssetRefWire, fileId: string, };
-export type ReadRequestPayload = { "kind": "assetList" } & AssetListQueryWire | { "kind": "assetDetail" } & AssetDetailQueryWire | { "kind": "nativeFile" } & NativeFileQueryWire;
+export type AllProjectApplicabilityViewWire = Record<string, never>;
+export type GlobalProjectApplicabilityViewWire = Record<string, never>;
+export type ProjectProjectApplicabilityViewWire = { projectId: string, };
+export type ProjectApplicabilityViewWire = { "kind": "all" } & AllProjectApplicabilityViewWire | { "kind": "global" } & GlobalProjectApplicabilityViewWire | { "kind": "project" } & ProjectProjectApplicabilityViewWire;
+export type ProjectApplicabilityQueryWire = { view: ProjectApplicabilityViewWire, };
+export type ReadRequestPayload = { "kind": "assetList" } & AssetListQueryWire | { "kind": "projectApplicability" } & ProjectApplicabilityQueryWire | { "kind": "assetDetail" } & AssetDetailQueryWire | { "kind": "nativeFile" } & NativeFileQueryWire;
 export type ReadRequestEnvelope = { wireVersion: number, requestId: string, payload: ReadRequestPayload, };
 export type AssetSummaryWire = { asset: AssetRefWire, displayName: string, anomalies: Array<AnomalyWire>, agents: Array<AgentIdWire>, scope: AssetScopeWire, contextHint: AssetContextHintWire, sourceTier: SourceTierWire, availability: ActionAvailabilityWire, };
 export type AssetListSnapshotWire = { assets: Array<AssetSummaryWire>, indexStatus: IndexStatusWire, scope: AssetListScopeWire, 
@@ -48,6 +58,15 @@ queriedAt: string,
  * ISO 8601
  */
 indexUpdatedAt: string, };
+export type BuiltInProvenanceSourceWire = Record<string, never>;
+export type ActivePackageProvenanceSourceWire = { packageIdentity: string, packageVersion: string, };
+export type ProvenanceSourceWire = { "kind": "builtIn" } & BuiltInProvenanceSourceWire | { "kind": "activePackage" } & ActivePackageProvenanceSourceWire;
+export type AdapterProvenanceWire = { identity: string, version: string, source: ProvenanceSourceWire, };
+export type RuleProvenanceWire = { identity: string, version: string, source: ProvenanceSourceWire, };
+export type EffectiveProjectContextWire = { asset: AssetRefWire, projectId: string, projectDisplayName: string, adapter: AdapterProvenanceWire, rule: RuleProvenanceWire, authoritativeReadRevision: string, sourceTierId: string, loadOrder: number, priority: number, overrideRelation?: OverrideRelationWire, resolution: ApplicabilityResolutionWire, reasonCode?: ReasonCodeWire, };
+export type ApplicabilityFindingWire = { asset: AssetRefWire, context: EffectiveProjectContextWire, };
+export type ProjectApplicabilitySegmentWire = { id: string, kind: ProjectApplicabilitySegmentKindWire, displayLabel: string, projectId?: string, assets: Array<AssetSummaryWire>, };
+export type ProjectApplicabilitySnapshotWire = { query: ProjectApplicabilityQueryWire, authoritativeReadRevision: string, segments: Array<ProjectApplicabilitySegmentWire>, findings: Array<ApplicabilityFindingWire>, effectiveContexts: Array<EffectiveProjectContextWire>, aggregateTotal: number, readAt: string, };
 export type EffectiveContextWire = { agent: AgentIdWire, scope: AssetScopeWire, sourceTierLabel: string, precedence: number, };
 export type AssetCapabilitiesWire = { edit: ActionAvailabilityWire, convert: ActionAvailabilityWire, export: ActionAvailabilityWire, delete: ActionAvailabilityWire, };
 export type NativeFileRefWire = { fileId: string, name: string, relativePath: string, fileKind: FileKindWire, isPrimary: boolean, canPreview: ActionAvailabilityWire, canEdit: ActionAvailabilityWire, hasDraftChanges: boolean, };
@@ -69,7 +88,7 @@ export type NonTextMetadataContentWire = { fileKindLabel: string,
 sizeBytes: number, pathDisplay: string, reasonCode: ReasonCodeWire, reason: string, };
 export type NativeFileContentWire = { "kind": "source" } & SourceContentWire | { "kind": "nonTextMetadata" } & NonTextMetadataContentWire;
 export type NativeFileSnapshotWire = { file: NativeFileRefWire, revision: string, assetRevision: string, content: NativeFileContentWire, structuredView: ActionAvailabilityWire, };
-export type SnapshotWire = { "kind": "assetList" } & AssetListSnapshotWire | { "kind": "assetDetail" } & AssetDetailSnapshotWire | { "kind": "nativeFile" } & NativeFileSnapshotWire;
+export type SnapshotWire = { "kind": "assetList" } & AssetListSnapshotWire | { "kind": "projectApplicability" } & ProjectApplicabilitySnapshotWire | { "kind": "assetDetail" } & AssetDetailSnapshotWire | { "kind": "nativeFile" } & NativeFileSnapshotWire;
 export type ReadSucceededWire = { snapshot: SnapshotWire, };
 export type ReadFailedWire = { reasonCode: ReasonCodeWire, message: string, recoveryAction?: RecoveryActionWire, };
 export type ReadResponsePayload = { "kind": "readSucceeded" } & ReadSucceededWire | { "kind": "readFailed" } & ReadFailedWire;

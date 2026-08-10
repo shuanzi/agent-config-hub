@@ -2,7 +2,7 @@
 
 **Status:** blocked
 
-**Direct blockers:** FE-07R（foundation/read）与 FE-01 至 FE-10（10 张行为 tickets）全部为 `done` 并附完成证据。冻结的 v0.2 契约、acceptance 或 planning 不是 `done` evidence；`ARCH-GATE` 维持 closed。
+**Direct blockers:** FE-01 至 FE-10（10 张行为 tickets）全部为 `done` 并附完成证据。FE-07R 已由 run `20260810T065951Z` 的 L0/L1/L3 actual-read evidence 关闭；冻结的 v0.2 契约、acceptance 或 planning 不是 `done` evidence；`ARCH-GATE` 维持 closed。
 
 ## 目的与边界
 
@@ -10,7 +10,7 @@
 
 ## 验证命令契约
 
-**状态：** `planned / unverified`。当前已有 `package.json` 根级命令面，但 FE-07R 的 registry/orchestration 仍须到 OpenSpec task 2.3 才可创建或调整；当前也没有可运行 production app、签名产物或本门禁的实际命令证据。
+**状态：** `planned / unverified`。当前已有 `package.json` 根级命令面和 FE-07R 建立的 ticket-driven registry/orchestration；当前仍没有可运行 production app、签名产物或本门禁的实际命令证据。
 
 **统一入口：** `npm run verify:release`
 
@@ -50,7 +50,7 @@
 
 ## 关闭条件
 
-- [ ] FE-07R 已以自身 L0/L1/L3 actual-read evidence 完成 FX-19；无 L2、无 PF，且其 evidence 未被计入 FE-01 closure；
+- [x] FE-07R 已以自身 L0/L1/L3 actual-read evidence 完成 FX-19；无 L2、无 PF，且其 evidence 未被计入 FE-01 closure；
 - [ ] 所有 FX-01 至 FX-19 都由各自主票据完成并保留其范围对应的聚焦 evidence；FX-19 仍无 L2 UI journey；
 - [ ] mock 与真实 `FrontendGateway` adapter 在已建立的同一契约测试上完成全回归；
 - [ ] 技术方案中已经实际运行并标记为“已验证可运行”的构建与打包命令通过；

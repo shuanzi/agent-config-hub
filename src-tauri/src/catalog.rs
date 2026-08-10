@@ -23,8 +23,9 @@ use crate::domain::{
     AssetDetailSnapshot, AssetGroupBy, AssetListFilters, AssetListQuery, AssetListScope,
     AssetListSnapshot, AssetRef, AssetScope, AssetStatusFilter, AssetSummary, AssetType,
     CompatibilityStatus, EffectiveContext, FileKind, IndexStatus, InspectorData,
-    MaskedSourceContent, NativeFileContent, NativeFileRef, NativeFileSnapshot, NativeUnitKind,
-    ReasonCode, SensitiveDisplayState, SensitiveSegmentRef, SourceAnchor, SourceTier,
+    MaskedSourceContent, NativeFileContent, NativeFileRef, NativeFileSnapshot, NativeOwnership,
+    NativeUnitKind, ReasonCode, SensitiveDisplayState, SensitiveSegmentRef, SourceAnchor,
+    SourceTier,
 };
 
 /// 与 fixtures/sensitive-masking.ts 相同的固定遮蔽标记。
@@ -177,6 +178,7 @@ impl LoadedSkill {
             asset_type: AssetType::Skill,
             native_unit_ref: self.native_unit_ref(),
             adapter_identity: ADAPTER_IDENTITY.to_string(),
+            native_ownership: NativeOwnership::Global,
         }
     }
 

@@ -2,8 +2,8 @@
 /**
  * verify:ticket（票据关闭入口，ARC-06c §3.17）。
  *
- * 封闭 registry：FE-01 = toolchain(L0) + static(L0) + rust(L1) + frontend(L1)
- *   + ui(L2) + tauri(L3) + perf(PF-01)。未知 ticket id 退出 1。
+ * 封闭 registry 的每个 ticket 自带步骤、fixture、可选 PF 与 artifact 配置；
+ * 未知 ticket id 退出 1。
  * 顺序执行；前序失败仍跑完后续独立步骤，但总体 fail。
  *
  * 状态模型：step 退出码映射 0=pass / 2=inconclusive / 其余=fail；
@@ -13,7 +13,7 @@
  * evidence：.artifacts/verification/<scope>/<run-id>/
  *   manifest.json
  *   steps/<step-id>/{stdout.log,stderr.log,meta.json}
- *   performance/{samples.json,l3-samples.json,summary.json,proposed-budgets.json}
+ *   performance/{...}（仅 registry 声明 PF 的 ticket）
  * 所有写入先脱敏（$HOME → <HOME>）再扫描（占位敏感值/个人路径），
  * 扫描命中 → 状态 inconclusive 并在 manifest 说明。
  */
@@ -32,14 +32,7 @@ import {
   scanEvidenceText,
   writeJson,
 } from './lib.mjs';
-
-const PROVENANCE = {
-  L0: '本地静态/工具链门禁；不产生行为 credit',
-  L1: 'Vitest node-mode / cargo test；无浏览器、无 IPC',
-  L2: 'mock renderer 旅程（scripted mock gateway + headless Chrome）；不取得真实 IPC/事件/磁盘 credit',
-  L3: 'test harness 隔离构建（debug profile、独立 identifier、隔离临时 fixture 根）；不等同生产签名/DMG/L4',
-  PF: 'PF-01 首条 baseline 采集（L2 mock renderer + L3 test-harness debug 冷启动，均非 release-like）；预算未冻结（budget-not-frozen → inconclusive）',
-};
+import { TICKET_REGISTRY, ticketConfig } from './ticket-registry.mjs';
 
 /** step 退出码 → 状态映射（ARC-06c §3.17）：0=pass，2=inconclusive，其余=fail */
 function stepStatusOf(exitCode) {
@@ -50,67 +43,11 @@ function stepStatusOf(exitCode) {
 
 const STATUS_LABEL = { pass: 'PASS', inconclusive: 'INCONCLUSIVE', fail: 'FAIL' };
 
-/** 版本控制预算文件存在与否 → budgetState（FE-01 预期 budget-not-frozen） */
-function budgetState() {
-  return fs.existsSync(path.join(REPO_ROOT, 'performance/budgets/pf-01.budgets.json'))
-    ? 'budget-frozen（performance/budgets/pf-01.budgets.json）'
-    : 'budget-not-frozen（FE-01 不冻结数值预算）';
+function budgetState(performance) {
+  return fs.existsSync(path.join(REPO_ROOT, performance.budgetPath))
+    ? performance.frozenLabel
+    : performance.unfrozenLabel;
 }
-
-/** 封闭票据层级 registry；ticket 不能在自身实现中静默减少层级 */
-const TICKET_REGISTRY = {
-  'FE-01': [
-    {
-      id: 'toolchain',
-      layer: 'L0',
-      cmd: 'node',
-      args: ['scripts/orchestrator/verify-toolchain.mjs'],
-      timeoutMs: 300_000,
-    },
-    {
-      id: 'static',
-      layer: 'L0',
-      cmd: 'node',
-      args: ['scripts/orchestrator/verify-static.mjs'],
-      timeoutMs: 1_800_000,
-    },
-    {
-      id: 'rust',
-      layer: 'L1',
-      cmd: 'node',
-      args: ['scripts/orchestrator/test-rust.mjs'],
-      timeoutMs: 1_800_000,
-    },
-    {
-      id: 'frontend',
-      layer: 'L1',
-      cmd: 'corepack',
-      args: ['npm', 'run', 'test:frontend'],
-      timeoutMs: 600_000,
-    },
-    {
-      id: 'ui',
-      layer: 'L2',
-      cmd: 'corepack',
-      args: ['npm', 'run', 'test:ui'],
-      timeoutMs: 900_000,
-    },
-    {
-      id: 'tauri',
-      layer: 'L3',
-      cmd: 'node',
-      args: ['scripts/orchestrator/test-tauri.mjs'],
-      timeoutMs: 2_400_000,
-    },
-    {
-      id: 'perf',
-      layer: 'PF',
-      cmd: 'node',
-      args: ['scripts/orchestrator/perf.mjs', 'PF-01'],
-      timeoutMs: 2_400_000,
-    },
-  ],
-};
 
 async function toolchainInfo() {
   const node = await capture('node', ['--version']);
@@ -129,8 +66,8 @@ async function toolchainInfo() {
 
 async function main() {
   const ticketId = process.argv[2];
-  const registry = TICKET_REGISTRY[ticketId];
-  if (registry === undefined) {
+  const ticket = ticketConfig(ticketId);
+  if (ticket === undefined) {
     console.error(
       `未知 ticket ID: ${ticketId ?? '(未提供)'}；已登记: ${Object.keys(TICKET_REGISTRY).join(', ')}`,
     );
@@ -140,8 +77,9 @@ async function main() {
   const startAt = new Date().toISOString();
   const runId = makeRunId();
   const evidenceRoot = path.join(ARTIFACTS_ROOT, 'verification', ticketId, runId);
-  const performanceDir = path.join(evidenceRoot, 'performance');
-  fs.mkdirSync(performanceDir, { recursive: true });
+  const performanceDir =
+    ticket.performance === undefined ? null : path.join(evidenceRoot, 'performance');
+  if (performanceDir !== null) fs.mkdirSync(performanceDir, { recursive: true });
   console.log(`verify:ticket ${ticketId} run ${runId}`);
   console.log(`evidence: ${sanitizeText(evidenceRoot)}`);
 
@@ -163,13 +101,18 @@ async function main() {
   }
 
   const stepResults = [];
-  for (const step of registry) {
+  for (const step of ticket.steps) {
     console.log(`\n=== [${step.layer}] ${step.id}: ${step.cmd} ${step.args.join(' ')}`);
     const result = await runStep({
       cmd: step.cmd,
       args: step.args,
       timeoutMs: step.timeoutMs,
-      env: step.id === 'perf' ? { PERF_OUTPUT_DIR: performanceDir } : {},
+      env:
+        step.evidenceOutput === undefined
+          ? {}
+          : {
+              [step.evidenceOutput.env]: path.join(evidenceRoot, step.evidenceOutput.relativeDir),
+            },
     });
     const stepDir = path.join(evidenceRoot, 'steps', step.id);
     writeEvidenceText(path.join(stepDir, 'stdout.log'), result.stdout);
@@ -177,7 +120,7 @@ async function main() {
     const meta = {
       id: step.id,
       layer: step.layer,
-      provenance: PROVENANCE[step.layer],
+      provenance: step.provenance,
       command: [step.cmd, ...step.args],
       exitCode: result.exitCode,
       status: stepStatusOf(result.exitCode),
@@ -201,7 +144,7 @@ async function main() {
   const endAt = new Date().toISOString();
 
   // performance evidence 扫描（perf.mjs 已自行扫描其 summary/budgets；此处兜底）
-  if (fs.existsSync(performanceDir)) {
+  if (performanceDir !== null && fs.existsSync(performanceDir)) {
     for (const file of fs.readdirSync(performanceDir)) {
       const full = path.join(performanceDir, file);
       const scan = scanEvidenceText(fs.readFileSync(full, 'utf8'));
@@ -220,29 +163,44 @@ async function main() {
   const overallStatus = anyFailed ? 'fail' : anyInconclusive ? 'inconclusive' : 'pass';
 
   // harness artifact identity（test:tauri 写入；production 标 N/A）
-  const identityPath = path.join(ARTIFACTS_ROOT, 'test-harness/identity.json');
+  const identityPath = path.join(REPO_ROOT, ticket.artifact.identityPath);
   const artifactIdentity = fs.existsSync(identityPath)
-    ? { ...JSON.parse(fs.readFileSync(identityPath, 'utf8')), production: 'N/A（FE-01 不产出生产 artifact）' }
-    : { kind: 'test-harness', identifier: 'unknown', profile: 'unknown', production: 'N/A（FE-01 不产出生产 artifact）' };
+    ? {
+        ...JSON.parse(fs.readFileSync(identityPath, 'utf8')),
+        production: ticket.artifact.production,
+      }
+    : { ...ticket.artifact.fallback, production: ticket.artifact.production };
 
   const git = await gitInfo();
   const manifest = {
     schemaVersion: 1,
-    scope: ticketId,
+    runId,
+    scope: ticket.scope,
+    evidenceScope: ticket.evidenceScope,
     status: overallStatus,
-    budgetState: budgetState(),
     commit: git.commit,
     worktreeDirty: git.worktreeDirty,
     toolchain: await toolchainInfo(),
-    fixtureDigests: digestDirectory(path.join(REPO_ROOT, 'fixtures/fx-01')),
-    pfDescriptorDigest: pfDescriptorDigest(
-      path.join(REPO_ROOT, 'performance/descriptors/pf-01.catalog-browse.json'),
+    fixtureDigests: Object.fromEntries(
+      ticket.fixtures.map((fixture) => [
+        fixture.id,
+        digestDirectory(path.join(REPO_ROOT, fixture.root)),
+      ]),
     ),
     steps: stepResults,
     artifactIdentity,
     startAt,
     endAt,
   };
+  if (ticket.performance !== undefined) {
+    manifest.budgetState = budgetState(ticket.performance);
+    manifest.pfDescriptorDigest = pfDescriptorDigest(
+      path.join(REPO_ROOT, ticket.performance.descriptorPath),
+    );
+  }
+  if (ticket.uncoveredBoundaries !== undefined) {
+    manifest.uncoveredBoundaries = ticket.uncoveredBoundaries;
+  }
   if (evidenceContaminated) {
     manifest.contamination = {
       note: 'evidence 扫描命中占位敏感值或个人路径，状态记为 inconclusive',
@@ -250,6 +208,14 @@ async function main() {
     };
   }
   writeJson(path.join(evidenceRoot, 'manifest.json'), manifest);
+  if (ticket.manifestAssertions?.runIdMatchesEvidenceDirectory === true) {
+    const generatedManifest = JSON.parse(
+      fs.readFileSync(path.join(evidenceRoot, 'manifest.json'), 'utf8'),
+    );
+    if (generatedManifest.runId !== path.basename(evidenceRoot)) {
+      throw new Error('generated manifest runId does not match evidence directory');
+    }
+  }
 
   console.log(`\nverify:ticket ${ticketId}: ${manifest.status}`);
   console.log(`manifest: ${sanitizeText(path.join(evidenceRoot, 'manifest.json'))}`);

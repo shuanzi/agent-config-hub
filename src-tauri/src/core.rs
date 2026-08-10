@@ -5,14 +5,28 @@
 
 use crate::catalog::{mask_synthetic_secrets, Catalog};
 use crate::domain::{Query, ReadFailure, ReadResult, ReasonCode, RecoveryAction, Snapshot};
+use crate::{
+    adapter_registry::AdapterRegistry, project_applicability::ProjectApplicabilityResolver,
+};
 
 pub struct GatewayCore {
     catalog: Catalog,
+    adapter_registry: AdapterRegistry,
 }
 
 impl GatewayCore {
     pub fn new(catalog: Catalog) -> Self {
-        GatewayCore { catalog }
+        GatewayCore {
+            catalog,
+            adapter_registry: AdapterRegistry::from_env(),
+        }
+    }
+
+    pub fn with_adapter_registry(catalog: Catalog, adapter_registry: AdapterRegistry) -> Self {
+        GatewayCore {
+            catalog,
+            adapter_registry,
+        }
     }
 
     /// 唯一 verb（FE-01）。domain 失败统一为稳定原因码 + retryRead。
@@ -20,6 +34,13 @@ impl GatewayCore {
         match query {
             Query::AssetList(list_query) => {
                 ReadResult::Succeeded(Snapshot::AssetList(self.catalog.asset_list(list_query)))
+            }
+            Query::ProjectApplicability(query) => {
+                let resolver = ProjectApplicabilityResolver::new(self.adapter_registry.clone());
+                match resolver.read(query) {
+                    Ok(snapshot) => ReadResult::Succeeded(Snapshot::ProjectApplicability(snapshot)),
+                    Err(failure) => ReadResult::Failed(failure),
+                }
             }
             Query::AssetDetail(detail_query) => {
                 match self.catalog.asset_detail(&detail_query.asset) {

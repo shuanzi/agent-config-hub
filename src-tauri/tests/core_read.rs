@@ -6,7 +6,7 @@ use agent_config_manager_lib::catalog::Catalog;
 use agent_config_manager_lib::core::GatewayCore;
 use agent_config_manager_lib::domain::{
     AssetDetailQuery, AssetListQuery, AssetListScope, AssetRef, AssetType, NativeFileContent,
-    NativeFileQuery, Query, ReadResult, ReasonCode, RecoveryAction, Snapshot,
+    NativeFileQuery, NativeOwnership, Query, ReadResult, ReasonCode, RecoveryAction, Snapshot,
 };
 
 fn core() -> GatewayCore {
@@ -94,6 +94,7 @@ fn unknown_asset_id_fails_with_stable_reason() {
         asset_type: AssetType::Skill,
         native_unit_ref: "nunit-fx01-does-not-exist".to_string(),
         adapter_identity: "claude-code@fixture".to_string(),
+        native_ownership: NativeOwnership::Global,
     };
     let result = core.read(&Query::AssetDetail(AssetDetailQuery { asset: unknown }));
     let ReadResult::Failed(failure) = result else {

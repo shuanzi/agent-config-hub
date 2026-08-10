@@ -1,0 +1,186 @@
+{
+  "fixtureId": "FX-19",
+  "authoritativeReadRevision": "rev-fx19-20260810",
+  "globalAsset": {
+    "assetId": "asset-fx19-global-skill",
+    "nativeUnitRef": "nunit-fx19-global-skill",
+    "displayName": "FX-19 global applicability skill",
+    "sourceTierId": "source-fx19-global",
+    "sourceTierLabel": "FX-19 global root (synthetic)"
+  },
+  "projects": [
+    { "projectId": "project-same-a", "displayName": "Same project" },
+    { "projectId": "project-same-b", "displayName": "Same project" },
+    { "projectId": "project-provenance-drift", "displayName": "Drifted project" },
+    { "projectId": "project-unknown", "displayName": "Unknown project" },
+    { "projectId": "project-blocked", "displayName": "Blocked project" },
+    { "projectId": "project-stale", "displayName": "Stale project" }
+  ],
+  "contexts": [
+    {
+      "projectId": "project-same-a",
+      "adapter": "activePackage",
+      "rule": "activePackage",
+      "bound": {
+        "adapter": {
+          "identity": "claude-code",
+          "version": "2.1.0",
+          "source": {
+            "kind": "activePackage",
+            "packageIdentity": "fixture-adapter-package",
+            "packageVersion": "2.1.0"
+          }
+        },
+        "rule": {
+          "identity": "claude-skill-rule",
+          "version": "2.1.0",
+          "source": {
+            "kind": "activePackage",
+            "packageIdentity": "fixture-adapter-package",
+            "packageVersion": "2.1.0"
+          }
+        },
+        "authoritativeReadRevision": "rev-fx19-20260810"
+      },
+      "resolution": "resolved",
+      "loadOrder": 20,
+      "priority": 30
+    },
+    {
+      "projectId": "project-same-b",
+      "adapter": "builtIn",
+      "rule": "builtIn",
+      "bound": {
+        "adapter": {
+          "identity": "claude-code",
+          "version": "1.0.0",
+          "source": { "kind": "builtIn" }
+        },
+        "rule": {
+          "identity": "claude-skill-rule",
+          "version": "1.0.0",
+          "source": { "kind": "builtIn" }
+        },
+        "authoritativeReadRevision": "rev-fx19-20260810"
+      },
+      "resolution": "resolved",
+      "loadOrder": 10,
+      "priority": 20
+    },
+    {
+      "projectId": "project-provenance-drift",
+      "adapter": "builtIn",
+      "rule": "builtIn",
+      "bound": {
+        "adapter": {
+          "identity": "claude-code",
+          "version": "0.9.0",
+          "source": { "kind": "builtIn" }
+        },
+        "rule": {
+          "identity": "claude-skill-rule",
+          "version": "1.0.0",
+          "source": { "kind": "builtIn" }
+        },
+        "authoritativeReadRevision": "rev-fx19-20260810"
+      },
+      "resolution": "resolved",
+      "loadOrder": 25,
+      "priority": 20
+    },
+    {
+      "projectId": "project-unknown",
+      "adapter": "activePackage",
+      "rule": "activePackage",
+      "bound": {
+        "adapter": {
+          "identity": "claude-code",
+          "version": "2.1.0",
+          "source": {
+            "kind": "activePackage",
+            "packageIdentity": "fixture-adapter-package",
+            "packageVersion": "2.1.0"
+          }
+        },
+        "rule": {
+          "identity": "claude-skill-rule",
+          "version": "2.1.0",
+          "source": {
+            "kind": "activePackage",
+            "packageIdentity": "fixture-adapter-package",
+            "packageVersion": "2.1.0"
+          }
+        },
+        "authoritativeReadRevision": "rev-fx19-20260810"
+      },
+      "resolution": "unknown",
+      "reasonCode": "UNKNOWN_AGENT_VERSION",
+      "loadOrder": 30,
+      "priority": 10
+    },
+    {
+      "projectId": "project-blocked",
+      "adapter": "builtIn",
+      "rule": "builtIn",
+      "bound": {
+        "adapter": {
+          "identity": "claude-code",
+          "version": "1.0.0",
+          "source": { "kind": "builtIn" }
+        },
+        "rule": {
+          "identity": "claude-skill-rule",
+          "version": "1.0.0",
+          "source": { "kind": "builtIn" }
+        },
+        "authoritativeReadRevision": "rev-fx19-20260810"
+      },
+      "resolution": "blocked",
+      "reasonCode": "PERMISSION_DENIED",
+      "loadOrder": 40,
+      "priority": 10
+    },
+    {
+      "projectId": "project-stale",
+      "adapter": "activePackage",
+      "rule": "activePackage",
+      "bound": {
+        "adapter": {
+          "identity": "claude-code",
+          "version": "2.1.0",
+          "source": {
+            "kind": "activePackage",
+            "packageIdentity": "fixture-adapter-package",
+            "packageVersion": "2.1.0"
+          }
+        },
+        "rule": {
+          "identity": "claude-skill-rule",
+          "version": "2.1.0",
+          "source": {
+            "kind": "activePackage",
+            "packageIdentity": "fixture-adapter-package",
+            "packageVersion": "2.1.0"
+          }
+        },
+        "authoritativeReadRevision": "rev-fx19-20260810"
+      },
+      "resolution": "stale",
+      "reasonCode": "EXTERNAL_CHANGE",
+      "loadOrder": 50,
+      "priority": 10
+    }
+  ],
+  "adapterRegistry": {
+    "builtIn": {
+      "adapter": { "identity": "claude-code", "version": "1.0.0" },
+      "rule": { "identity": "claude-skill-rule", "version": "1.0.0" }
+    },
+    "activePackage": {
+      "packageIdentity": "fixture-adapter-package",
+      "packageVersion": "2.1.0",
+      "adapter": { "identity": "claude-code", "version": "2.1.0" },
+      "rule": { "identity": "claude-skill-rule", "version": "2.1.0" }
+    }
+  }
+}

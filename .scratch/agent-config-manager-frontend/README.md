@@ -1,7 +1,7 @@
 # Agent Config Manager 前端本地票据集
 
 > 契约状态：冻结的产品基线 v0.2 与前端契约 v0.2（2026-08-10）；`CR-FE-001` 保留为历史已确认条款
-> 当前 tracker 状态：FE-07R 为 `ready-for-agent`；FE-01 至 FE-10 为 `blocked`
+> 当前 tracker 状态：FE-07R 为 `done`；FE-01 为 `ready-for-agent`；FE-02 至 FE-10 为 `blocked`
 > 产品事实来源：`docs/product/Agent_Config_Manager_MVP_产品决策基线_v0.2.md`（Frozen）
 > 前端事实来源：`docs/frontend/Agent_Config_Manager_前端契约_v0.2.md`（Frozen）
 > 技术方案与影响复核：`docs/architecture/Agent_Config_Manager_MVP_技术方案_v0.1.md`（已验收，`ARCH-GATE` closed，2026-07-27）及 `docs/architecture/Agent_Config_Manager_MVP_技术方案_v0.1_影响复核_addendum_2026-08-10.md`
@@ -19,9 +19,9 @@
 ## 工作规则
 
 - 真相链依次为冻结产品基线 v0.2、冻结前端契约 v0.2、技术方案 v0.1 与其 2026-08-10 addendum、冻结 FE acceptance、实际 ticket evidence；上位冻结文档不能被当作 runtime、ticket closure 或 gate evidence。
-- `ARCH-GATE` 已关闭；当前唯一 frontier 是 FE-07R。它完成并具 actual-read 证据前，FE-01 继续 blocked；`RELEASE-GATE` 继续受 FE-07R 与 FE-01 至 FE-10 的完成证据阻塞。
-- 技术方案验收与 FE-07R acceptance 冻结均没有生成实现或运行证据。FE-07R 的最小 bootstrap/harness 及其验证命令实际运行并留下符合层级的 evidence 后，才可更新相应 ticket 状态。
-- 每张票据的正式关闭入口为 `npm run verify:ticket -- FE-XX`；当前全部为 `planned / unverified`。底层 Cargo、Vitest 或 WebdriverIO 命令只能用于定位，不能单独关闭票据。
+- `ARCH-GATE` 已关闭；FE-07R 已由 run `20260810T065951Z` 的 L0/L1/L3 actual-read evidence 和独立只读复审关闭，当前唯一 frontier 是 FE-01；`RELEASE-GATE` 继续受 FE-01 至 FE-10 的完成证据阻塞。
+- FE-07R 的最小 bootstrap/harness 已建立并实际运行；其 synthetic FX-19 actual-read evidence 不证明真实用户配置、生产 artifact、L2、PF 或写路径，也不得借给 FE-01 closure。
+- 每张票据的正式关闭入口为 `npm run verify:ticket -- FE-XX`；FE-07R 已验证，FE-01 至 FE-10 仍为 `planned / unverified`。底层 Cargo、Vitest 或 WebdriverIO 命令只能用于定位，不能单独关闭票据。
 - 验证证据写入 `.artifacts/verification/<FE-ID>/<run-id>/` 并保持 L0–L4 provenance；mock、test harness 与 production artifact 不能互相替代。
 - 每个 FE 票据必须在一个全新上下文中完成；FE-07R 是唯一 foundation/read slice，FE-01 至 FE-10 各自交付可演示用户行为，不拆横向组件、状态层或 API 封装任务。
 - 每个 fixture 只有一张主票据；其他票据可复用同一敏感或安全不变量，但不得夺取 fixture 的主归属。
@@ -33,8 +33,8 @@
 
 | Ticket | 切片 | Status | Direct blockers / evidence |
 |---|---|---|---|
-| FE-07R | foundation/read；FX-19 project applicability projection | ready-for-agent | 无 ticket；`ARCH-GATE` closed record（2026-07-27） |
-| FE-01 | 行为；FX-01 只读工作台 | blocked | FE-07R `done` 且具其 actual-read evidence |
+| FE-07R | foundation/read；FX-19 project applicability projection | done | `ARCH-GATE` closed；run `20260810T065951Z` L0/L1/L3 actual-read PASS；独立复审无 P0–P3 |
+| FE-01 | 行为；FX-01 只读工作台 | ready-for-agent | FE-07R `done`；actual-read evidence run `20260810T065951Z` |
 | FE-02 | 行为；FX-02、FX-03 | blocked | FE-01 `done` evidence |
 | FE-03 | 行为；FX-04 | blocked | FE-02 `done` evidence |
 | FE-04 | 行为；FX-05、FX-16、FX-18 | blocked | FE-03 `done` evidence |
@@ -94,4 +94,4 @@ flowchart LR
 
 ## Frontier
 
-当前唯一实现 frontier 是 FE-07R。FE-01 必须等待 FE-07R `done` 与其 provenance-appropriate actual-read evidence；FE-02 至 FE-10 的直接 blocker 同样尚未完成，继续保持 `blocked`；`RELEASE-GATE` 继续保持 `blocked`。
+当前唯一实现 frontier 是 FE-01。FE-07R 已 `done`，其 provenance-appropriate actual-read evidence 只解除 FE-01 的 direct blocker，不计入 FE-01 closure；FE-02 至 FE-10 的直接 blocker 尚未完成，继续保持 `blocked`；`RELEASE-GATE` 继续保持 `blocked`。

@@ -185,6 +185,8 @@ export function buildPerfCatalog(profile: PerfProfile): PerfCatalog {
         assetType,
         nativeUnitRef: `nunit-pf01-${pad4(index)}`,
         adapterIdentity: `${agents[0]}@pf01`,
+        nativeOwnership:
+          scope === 'global' ? { kind: 'global' } : { kind: 'project', projectId: projectName },
       },
       displayName: name,
       anomalies: buildAnomalies(combination.statuses),

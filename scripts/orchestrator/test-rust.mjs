@@ -5,10 +5,24 @@
  */
 import { runStep, SRC_TAURI } from './lib.mjs';
 
-const rounds = [
+const fullRounds = [
   { id: 'cargo test（默认 feature）', args: ['test'] },
   { id: 'cargo test（test-harness）', args: ['test', '--features', 'test-harness'] },
 ];
+
+const focusedRounds = {
+  'FE-07R': [
+    { id: 'cargo test（FE-07R resolver）', args: ['test', '--test', 'project_applicability'] },
+    { id: 'cargo test（FE-07R wire vectors）', args: ['test', '--test', 'wire_vectors'] },
+  ],
+};
+
+const ticketId = process.argv[2];
+const rounds = ticketId === undefined ? fullRounds : focusedRounds[ticketId];
+if (rounds === undefined) {
+  console.error(`未知 Rust focused ticket: ${ticketId}`);
+  process.exit(1);
+}
 
 let failed = 0;
 for (const round of rounds) {
