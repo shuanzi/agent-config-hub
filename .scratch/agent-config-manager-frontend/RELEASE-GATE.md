@@ -2,7 +2,7 @@
 
 **Status:** blocked
 
-**Direct blockers:** FE-01 至 FE-10（10 张行为 tickets）全部为 `done` 并附完成证据。FE-07R 已由 run `20260810T065951Z` 的 L0/L1/L3 actual-read evidence 关闭；冻结的 v0.2 契约、acceptance 或 planning 不是 `done` evidence；`ARCH-GATE` 维持 closed。
+**Direct blockers:** FE-01 至 FE-10（10 张行为 tickets）全部为 `done` 并附完成证据。FE-07R 已由 run `20260810T071547Z` 的 L0/L1/L3 actual-read evidence 关闭；冻结的 v0.2 契约、acceptance 或 planning 不是 `done` evidence；`ARCH-GATE` 维持 closed。
 
 ## 目的与边界
 

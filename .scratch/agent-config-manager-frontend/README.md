@@ -19,7 +19,7 @@
 ## 工作规则
 
 - 真相链依次为冻结产品基线 v0.2、冻结前端契约 v0.2、技术方案 v0.1 与其 2026-08-10 addendum、冻结 FE acceptance、实际 ticket evidence；上位冻结文档不能被当作 runtime、ticket closure 或 gate evidence。
-- `ARCH-GATE` 已关闭；FE-07R 已由 run `20260810T065951Z` 的 L0/L1/L3 actual-read evidence 和独立只读复审关闭，当前唯一 frontier 是 FE-01；`RELEASE-GATE` 继续受 FE-01 至 FE-10 的完成证据阻塞。
+- `ARCH-GATE` 已关闭；FE-07R 已由 run `20260810T071547Z` 的 L0/L1/L3 actual-read evidence 和独立只读复审关闭，当前唯一 frontier 是 FE-01；`RELEASE-GATE` 继续受 FE-01 至 FE-10 的完成证据阻塞。
 - FE-07R 的最小 bootstrap/harness 已建立并实际运行；其 synthetic FX-19 actual-read evidence 不证明真实用户配置、生产 artifact、L2、PF 或写路径，也不得借给 FE-01 closure。
 - 每张票据的正式关闭入口为 `npm run verify:ticket -- FE-XX`；FE-07R 已验证，FE-01 至 FE-10 仍为 `planned / unverified`。底层 Cargo、Vitest 或 WebdriverIO 命令只能用于定位，不能单独关闭票据。
 - 验证证据写入 `.artifacts/verification/<FE-ID>/<run-id>/` 并保持 L0–L4 provenance；mock、test harness 与 production artifact 不能互相替代。
@@ -33,8 +33,8 @@
 
 | Ticket | 切片 | Status | Direct blockers / evidence |
 |---|---|---|---|
-| FE-07R | foundation/read；FX-19 project applicability projection | done | `ARCH-GATE` closed；run `20260810T065951Z` L0/L1/L3 actual-read PASS；独立复审无 P0–P3 |
-| FE-01 | 行为；FX-01 只读工作台 | ready-for-agent | FE-07R `done`；actual-read evidence run `20260810T065951Z` |
+| FE-07R | foundation/read；FX-19 project applicability projection | done | `ARCH-GATE` closed；run `20260810T071547Z` L0/L1/L3 actual-read PASS；独立复审无 P0–P3 |
+| FE-01 | 行为；FX-01 只读工作台 | ready-for-agent | FE-07R `done`；actual-read evidence run `20260810T071547Z` |
 | FE-02 | 行为；FX-02、FX-03 | blocked | FE-01 `done` evidence |
 | FE-03 | 行为；FX-04 | blocked | FE-02 `done` evidence |
 | FE-04 | 行为；FX-05、FX-16、FX-18 | blocked | FE-03 `done` evidence |
