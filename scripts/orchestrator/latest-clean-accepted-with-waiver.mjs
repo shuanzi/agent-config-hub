@@ -4,11 +4,11 @@
  */
 import path from 'node:path';
 import {
-  FE01_PF01_WAIVER_ARTIFACT_SHA256,
-  FE01_PF01_WAIVER_PATH,
-  FE01_PF01_WAIVER_SHA256,
-} from './fe01-pf01-waiver.mjs';
-import { hasExactFe01ClosureSteps } from './fe01-ticket-waiver-verdict.mjs';
+  FE01_PF01_ACTIVE_WAIVER_ARTIFACT_SHA256,
+  FE01_PF01_ACTIVE_WAIVER_PATH,
+  FE01_PF01_ACTIVE_WAIVER_SHA256,
+} from './fe01-pf01-active-waiver.mjs';
+import { hasExactFe01ActiveWaiverClosureSteps } from './fe01-active-waiver-verdict.mjs';
 import {
   hasPhysicalPath,
   maybeAdvancePhysicalJsonIndex,
@@ -17,12 +17,12 @@ import {
   validCompletedAt,
 } from './clean-evidence-index.mjs';
 
-const WAIVER_PATH = FE01_PF01_WAIVER_PATH;
-const PERFORMANCE_COMMIT = '40009202e2e88e946dadf82a71816e10338da639';
+const WAIVER_PATH = FE01_PF01_ACTIVE_WAIVER_PATH;
+const PERFORMANCE_COMMIT = 'ef1fd9823d286616ed108576c543b6f4980b5fcd';
 const AUTOMATED_EXIT_SOURCE =
-  'authorized manual disposition + reproducible raw-samples/frozen-budget comparison; summary.json did not record exitCode/status';
+  'immutable active waiver artifact validation; no current perf sampling was started';
 const MANUAL_DISPOSITION_SOURCE =
-  '用户授权的 exact FE-01 PF-01 disposition；automated fail/exit 1 由 immutable artifact 的 raw samples 与 frozen budget 重算，非本次 perf sampling。';
+  '用户授权的 exact FE-01 PF-01 disposition；immutable active artifact 的 raw samples 与 frozen budget 重算，非本次 perf sampling。';
 
 function validProvenance(steps) {
   return (
@@ -38,17 +38,29 @@ function validProvenance(steps) {
   );
 }
 
+function exactHistoricalPerfStep(steps) {
+  const perf = steps?.find((step) => step?.id === 'perf');
+  return (
+    perf?.execution?.mode === 'historical-artifact-validation' &&
+    perf.execution.samplingRun === false &&
+    perf.execution.historicalRunId === '20260811T112008912Z-p30755-000' &&
+    perf.execution.initialWaiverValidation === 'valid' &&
+    perf.execution.finalWaiverValidation === 'valid' &&
+    perf.execution.bindingStable === true
+  );
+}
+
 function sameJson(left, right) {
   return JSON.stringify(left) === JSON.stringify(right);
 }
 
 function exactArtifactHashes(value) {
-  const expected = Object.keys(FE01_PF01_WAIVER_ARTIFACT_SHA256);
+  const expected = Object.keys(FE01_PF01_ACTIVE_WAIVER_ARTIFACT_SHA256);
   return (
     value !== null &&
     typeof value === 'object' &&
     sameJson(Object.keys(value).sort(), expected) &&
-    expected.every((file) => value[file] === FE01_PF01_WAIVER_ARTIFACT_SHA256[file])
+    expected.every((file) => value[file] === FE01_PF01_ACTIVE_WAIVER_ARTIFACT_SHA256[file])
   );
 }
 
@@ -57,27 +69,30 @@ function exactWaiverManifest(manifest) {
     manifest?.status === 'accepted-with-waiver' &&
     manifest?.manualDisposition?.status === 'accepted-with-waiver' &&
     manifest?.manualDisposition?.waiverValidation === 'valid' &&
+    manifest?.manualDisposition?.initialWaiverValidation === 'valid' &&
+    manifest?.manualDisposition?.finalWaiverValidation === 'valid' &&
+    manifest?.manualDisposition?.bindingStable === true &&
     manifest?.manualDisposition?.waiverPath === WAIVER_PATH &&
-    manifest?.manualDisposition?.waiverSha256 === FE01_PF01_WAIVER_SHA256 &&
+    manifest?.manualDisposition?.waiverSha256 === FE01_PF01_ACTIVE_WAIVER_SHA256 &&
     manifest?.manualDisposition?.source === MANUAL_DISPOSITION_SOURCE &&
     manifest?.pfAutomaticResult?.status === 'fail' &&
     manifest?.pfAutomaticResult?.exitCode === 1 &&
     manifest?.pfAutomaticResult?.automatedExitCode === 1 &&
     manifest?.pfAutomaticResult?.automatedExitCodeSource === AUTOMATED_EXIT_SOURCE &&
-    manifest?.pfAutomaticResult?.runId === '20260811T024255740Z-p14989-000' &&
+    manifest?.pfAutomaticResult?.runId === '20260811T112008912Z-p30755-000' &&
     manifest?.pfAutomaticResult?.run ===
-      '.artifacts/performance/PF-01/20260811T024255740Z-p14989-000' &&
+      '.artifacts/performance/PF-01/20260811T112008912Z-p30755-000' &&
     manifest?.pfAutomaticResult?.commit === PERFORMANCE_COMMIT &&
     manifest?.pfAutomaticResult?.worktreeDirty === false &&
     sameJson(manifest?.pfAutomaticResult?.violation, {
-      metric: 'pf01.l3.cold_start.first_snapshot',
-      statistic: 'p50',
-      observedMs: 612,
-      thresholdMs: 610,
-      deltaMs: 2,
+      metric: 'pf01.search.results_visible',
+      statistic: 'p95',
+      observedMs: 11.645,
+      thresholdMs: 10,
+      deltaMs: 1.645,
     }) &&
     manifest?.pfAutomaticResult?.artifactDirectory ===
-      '.artifacts/performance/PF-01/20260811T024255740Z-p14989-000' &&
+      '.artifacts/performance/PF-01/20260811T112008912Z-p30755-000' &&
     exactArtifactHashes(manifest?.pfAutomaticResult?.artifactSha256)
   );
 }
@@ -102,7 +117,8 @@ export async function maybeWriteLatestCleanAcceptedWithWaiver({
     typeof manifest.evidenceScope !== 'string' ||
     !validCompletedAt(manifest.completedAt) ||
     !validProvenance(manifest.steps) ||
-    !hasExactFe01ClosureSteps(manifest.steps) ||
+    !hasExactFe01ActiveWaiverClosureSteps(manifest.steps) ||
+    !exactHistoricalPerfStep(manifest.steps) ||
     !exactWaiverManifest(manifest)
   ) {
     return { updated: false };

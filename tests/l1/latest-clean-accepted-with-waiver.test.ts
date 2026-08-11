@@ -14,11 +14,11 @@ import { afterEach, describe, expect, it } from 'vitest';
 // @ts-expect-error runtime verifier module is a plain Node ESM module.
 import { maybeWriteLatestCleanAcceptedWithWaiver } from '../../scripts/orchestrator/latest-clean-accepted-with-waiver.mjs';
 // @ts-expect-error runtime waiver module is a plain Node ESM module.
-import { FE01_PF01_WAIVER_ARTIFACT_SHA256 } from '../../scripts/orchestrator/fe01-pf01-waiver.mjs';
+import { FE01_PF01_ACTIVE_WAIVER_ARTIFACT_SHA256 } from '../../scripts/orchestrator/fe01-pf01-active-waiver.mjs';
 // @ts-expect-error runtime waiver module is a plain Node ESM module.
-import { FE01_PF01_WAIVER_SHA256 } from '../../scripts/orchestrator/fe01-pf01-waiver.mjs';
+import { FE01_PF01_ACTIVE_WAIVER_SHA256 } from '../../scripts/orchestrator/fe01-pf01-active-waiver.mjs';
 // @ts-expect-error runtime verdict module is a plain Node ESM module.
-import { FE01_EXACT_CLOSURE_STEPS } from '../../scripts/orchestrator/fe01-ticket-waiver-verdict.mjs';
+import { FE01_ACTIVE_WAIVER_CLOSURE_STEPS } from '../../scripts/orchestrator/fe01-active-waiver-verdict.mjs';
 
 const roots: string[] = [];
 type ClosureStep = { id: string; status: string; exitCode: number };
@@ -34,10 +34,22 @@ const layers: Record<string, string> = {
 };
 
 function closureSteps() {
-  return (FE01_EXACT_CLOSURE_STEPS as ClosureStep[]).map((step: ClosureStep) => ({
+  return (FE01_ACTIVE_WAIVER_CLOSURE_STEPS as ClosureStep[]).map((step: ClosureStep) => ({
     ...step,
     layer: layers[step.id],
     provenance: 'actual test',
+    ...(step.id === 'perf'
+      ? {
+          execution: {
+            mode: 'historical-artifact-validation',
+            samplingRun: false,
+            historicalRunId: '20260811T112008912Z-p30755-000',
+            initialWaiverValidation: 'valid',
+            finalWaiverValidation: 'valid',
+            bindingStable: true,
+          },
+        }
+      : {}),
   }));
 }
 
@@ -65,28 +77,31 @@ function setup() {
       exitCode: 1,
       automatedExitCode: 1,
       automatedExitCodeSource:
-        'authorized manual disposition + reproducible raw-samples/frozen-budget comparison; summary.json did not record exitCode/status',
-      runId: '20260811T024255740Z-p14989-000',
-      run: '.artifacts/performance/PF-01/20260811T024255740Z-p14989-000',
-      commit: '40009202e2e88e946dadf82a71816e10338da639',
+        'immutable active waiver artifact validation; no current perf sampling was started',
+      runId: '20260811T112008912Z-p30755-000',
+      run: '.artifacts/performance/PF-01/20260811T112008912Z-p30755-000',
+      commit: 'ef1fd9823d286616ed108576c543b6f4980b5fcd',
       worktreeDirty: false,
       violation: {
-        metric: 'pf01.l3.cold_start.first_snapshot',
-        statistic: 'p50',
-        observedMs: 612,
-        thresholdMs: 610,
-        deltaMs: 2,
+        metric: 'pf01.search.results_visible',
+        statistic: 'p95',
+        observedMs: 11.645,
+        thresholdMs: 10,
+        deltaMs: 1.645,
       },
-      artifactDirectory: '.artifacts/performance/PF-01/20260811T024255740Z-p14989-000',
-      artifactSha256: { ...FE01_PF01_WAIVER_ARTIFACT_SHA256 },
+      artifactDirectory: '.artifacts/performance/PF-01/20260811T112008912Z-p30755-000',
+      artifactSha256: { ...FE01_PF01_ACTIVE_WAIVER_ARTIFACT_SHA256 },
     },
     manualDisposition: {
       status: 'accepted-with-waiver',
       waiverValidation: 'valid',
-      waiverPath: 'performance/waivers/fe-01-pf-01-l3-cold-start.json',
-      waiverSha256: FE01_PF01_WAIVER_SHA256,
+      initialWaiverValidation: 'valid',
+      finalWaiverValidation: 'valid',
+      bindingStable: true,
+      waiverPath: 'performance/waivers/fe-01-pf-01-search-results-active.json',
+      waiverSha256: FE01_PF01_ACTIVE_WAIVER_SHA256,
       source:
-        '用户授权的 exact FE-01 PF-01 disposition；automated fail/exit 1 由 immutable artifact 的 raw samples 与 frozen budget 重算，非本次 perf sampling。',
+        '用户授权的 exact FE-01 PF-01 disposition；immutable active artifact 的 raw samples 与 frozen budget 重算，非本次 perf sampling。',
     },
   };
   return { root, evidenceRoot, acceptedIndexPath, passIndexPath, manifest };
@@ -136,6 +151,37 @@ describe('latest clean accepted-with-waiver evidence index', () => {
       {
         ...manifest,
         manualDisposition: { ...manifest.manualDisposition, waiverSha256: 'a'.repeat(64) },
+      },
+      {
+        ...manifest,
+        manualDisposition: {
+          ...manifest.manualDisposition,
+          finalWaiverValidation: 'invalid',
+        },
+      },
+      {
+        ...manifest,
+        manualDisposition: {
+          ...manifest.manualDisposition,
+          waiverPath: 'performance/waivers/fe-01-pf-01-l3-cold-start.json',
+        },
+      },
+      {
+        ...manifest,
+        steps: manifest.steps.map((step: ClosureStep & { execution?: unknown }) =>
+          step.id === 'perf' ? { ...step, execution: undefined } : step,
+        ),
+      },
+      {
+        ...manifest,
+        steps: manifest.steps.map((step: ClosureStep & { execution?: Record<string, unknown> }) =>
+          step.id === 'perf'
+            ? {
+                ...step,
+                execution: { ...step.execution, finalWaiverValidation: 'invalid' },
+              }
+            : step,
+        ),
       },
     ];
     for (const invalid of rejected) {

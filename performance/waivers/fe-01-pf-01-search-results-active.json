@@ -1,0 +1,103 @@
+{
+  "schemaVersion": 1,
+  "kind": "fe-01-pf-01-active-exact-performance-waiver",
+  "recordDigest": {
+    "algorithm": "sha256",
+    "canonicalization": "JSON.stringify(record with recordDigest.value set to an empty string) plus newline",
+    "value": "be5f659f446df7888abc58167f84921fc132cb486b466bd0fb0aa804103c04ea"
+  },
+  "ticket": "FE-01",
+  "performance": "PF-01",
+  "manualDisposition": "accepted-with-waiver",
+  "scope": "本次继续授权性能通过，仅该精确失败 accepted-with-waiver，不泛化、不改自动FAIL/预算/阈值/方法、不重采样。",
+  "automaticResult": {
+    "status": "fail",
+    "exitCode": 1,
+    "runId": "20260811T112008912Z-p30755-000",
+    "run": ".artifacts/performance/PF-01/20260811T112008912Z-p30755-000",
+    "commit": "ef1fd9823d286616ed108576c543b6f4980b5fcd",
+    "worktreeDirty": false,
+    "violation": {
+      "metric": "pf01.search.results_visible",
+      "statistic": "p95",
+      "observedMs": 11.645,
+      "thresholdMs": 10,
+      "deltaMs": 1.645
+    }
+  },
+  "budget": {
+    "path": "performance/budgets/pf-01.budgets.json",
+    "sha256": "fb188a8a32e27d69bed2a2920262e527121ca1578f290608cf0219a09fbc349a"
+  },
+  "baseline": {
+    "runId": "20260811T110951832Z-p22774-000",
+    "run": ".artifacts/performance/PF-01/20260811T110951832Z-p22774-000",
+    "commit": "a5f6a640e0d0b7a560461e40d45ce2e06557e06d",
+    "artifact": {
+      "declaredBinarySha256": "df276a9be237e4f9b9454f0baed09a3ac38096eda75094586f7617a60fa0309b",
+      "actualBinarySha256": "df276a9be237e4f9b9454f0baed09a3ac38096eda75094586f7617a60fa0309b"
+    }
+  },
+  "current": {
+    "artifact": {
+      "declaredBinarySha256": "f27507f683d36b6d50e3a5e7bd6bd4e2e03f7c65fe556c82514b8029135d0e6c",
+      "actualBinarySha256": "f27507f683d36b6d50e3a5e7bd6bd4e2e03f7c65fe556c82514b8029135d0e6c"
+    }
+  },
+  "attestation": {
+    "descriptorDigest": "ac6354a0976831863eeec8c50a523843e42f4084b3be49d417e586013f004c39",
+    "fixture": {
+      "path": "fixtures/fx-01/native-root",
+      "sha256": "ccaaf3161f651e22968d2ff6b32f4e0d06d108a18ed63977930a4ff27eab9519"
+    },
+    "buildInputs": {
+      "schemaVersion": 2,
+      "algorithm": "pf01-l3-harness-build-inputs-v2",
+      "digest": "83a541cb9674b51e31726e1d82de9ea1faa9d109df7a15bef00a7b2a490d8d0e",
+      "entryCount": 43
+    },
+    "measurementInputs": {
+      "schemaVersion": 2,
+      "algorithm": "pf01-measurement-inputs-v2",
+      "digest": "1421b2eba2043f8098454e0d7d7e2178ce5d2c0b16f0260125a2f878b21de1d7",
+      "entryCount": 33,
+      "l2DevModuleGraph": {
+        "schemaVersion": 1,
+        "algorithm": "pf01-l2-vite-dev-module-graph-v1",
+        "entry": "tests/l2/workbench.html",
+        "moduleCount": 12,
+        "declaredEqualsActual": true,
+        "evidenceSha256": "3ea6cafc107cb11c0f0e92e625dfbbbac4f3fc5fd463d10f1b1efac625985ff7"
+      }
+    },
+    "runner": {
+      "node": "v24.18.0",
+      "npm": "11.16.0",
+      "platform": "darwin",
+      "release": "25.6.0",
+      "macosProductVersion": "26.6.1",
+      "arch": "arm64"
+    },
+    "toolchain": {
+      "cargo": "cargo 1.97.1 (c980f4866 2026-06-30)",
+      "rustc": "rustc 1.97.1 (8bab26f4f 2026-07-14)"
+    },
+    "buildEnvironment": {
+      "policy": "no ambient VITE_/TAURI_/CARGO_/Rust/SDK/Node build overrides or root .env files",
+      "overrides": []
+    },
+    "resources": {
+      "metric": "pf01.l3.peak_rss_bytes",
+      "normalExitCount": 3,
+      "rawPeakCount": 3
+    }
+  },
+  "artifactSha256": {
+    "l2-dev-module-graph.json": "3ea6cafc107cb11c0f0e92e625dfbbbac4f3fc5fd463d10f1b1efac625985ff7",
+    "l3-resource-runs.json": "a8af3901d504462af8a8f37cb05eb33b78e0c79a81edb31f6ac8070750840fd8",
+    "l3-samples.json": "65069f18ed9bc7e51d77017fb8f1e097ef6cf64e63da0d263e1fcca8cf6ab40a",
+    "proposed-budgets.json": "c1601e7d2abe704a45b25f332838c13babd85523cb6a935dad85e9ec48600d83",
+    "samples.json": "357f3a69a90e7db2b15c2bc1b8e6627a06866fbee3d29d47c5ad2ffb5be4806e",
+    "summary.json": "2bcc9c6322cc89e5a2e238abbbe4911428e45722f6435fa8abc5eecb2e7934b3"
+  }
+}
