@@ -82,6 +82,68 @@ describe('FX-01 只读 workbench L2 journey', () => {
     expect(await ownership.map((item) => item.getText())).toContain('全局');
   });
 
+  it('换页后回到列表顶端并聚焦该页首个 authoritative 行', async () => {
+    await browser.setWindowSize(1280, 560);
+    await openWorkbench('perf-catalog');
+    await $('[role="option"]').waitForDisplayed();
+    expect(await $('nav[aria-label="全局分页"]').getText()).toContain('第 1 /');
+
+    const scrolled = await browser.execute(() => {
+      const list = document.querySelector<HTMLElement>('.list-pane');
+      if (list === null) return 0;
+      list.scrollTop = list.scrollHeight;
+      return list.scrollTop;
+    });
+    expect(scrolled).toBeGreaterThan(0);
+
+    await $("//nav[@aria-label='全局分页']//button[normalize-space()='下一页']").click();
+    await browser.waitUntil(() =>
+      browser.execute(() =>
+        document.querySelector('nav[aria-label="全局分页"] span')?.textContent?.includes('第 2 /'),
+      ),
+    );
+    const afterPageChange = await browser.execute(() => {
+      const list = document.querySelector<HTMLElement>('.list-pane');
+      const firstRow = document.querySelector<HTMLButtonElement>('[role="option"]');
+      return {
+        scrollTop: list?.scrollTop ?? -1,
+        firstRowFocused: document.activeElement === firstRow,
+      };
+    });
+    expect(afterPageChange.scrollTop).toBe(0);
+    expect(afterPageChange.firstRowFocused).toBe(true);
+  });
+
+  it('authoritative 空结果聚焦可编程空标题', async () => {
+    await openWorkbench();
+    await $('#filter-agent').selectByAttribute('value', 'codex');
+    const heading = await $('[data-testid="workbench-empty-heading"]');
+    await heading.waitForDisplayed();
+    expect(
+      await browser.execute(() => document.activeElement?.getAttribute('data-testid')),
+    ).toEqual('workbench-empty-heading');
+  });
+
+  it('PF startup 不在首屏代表性列表行隐藏时记点', async () => {
+    await browser.setWindowSize(1440, 900);
+    await browser.url(`${ENTRY}?scenario=perf-catalog&startupRowsHidden=1`);
+    await $('.read-only-workbench').waitForDisplayed();
+    await browser.pause(100);
+    expect(await browser.execute(() => window.__pf01?.getStartupMs())).toBeNull();
+
+    await browser.execute(() =>
+      document.querySelector('[data-testid="pf01-startup-hidden"]')?.remove(),
+    );
+    await browser.pause(200);
+    await browser.waitUntil(async () => {
+      const [rowVisible, startupMs] = await browser.execute(() => [
+        document.querySelector<HTMLElement>('[role="option"]')?.offsetParent !== null,
+        window.__pf01?.getStartupMs(),
+      ]);
+      return rowVisible === true && startupMs !== null;
+    });
+  });
+
   it('多个 Project 入口的 pressed state 必须按 opaque projectId 区分', async () => {
     await openWorkbench('multi-project-projection');
     const first = await $('button=项目 project-fx01-opaque');
@@ -109,6 +171,53 @@ describe('FX-01 只读 workbench L2 journey', () => {
     expect(
       await browser.execute(() => document.activeElement?.getAttribute('data-testid')),
     ).toEqual('skill-detail-heading');
+  });
+
+  it('workspace event 使打开的 locator 立即失效并以相同 searchText 重读', async () => {
+    await openWorkbench();
+    await $('button=全局搜索').click();
+    await $('#global-locator-input').setValue('Demo');
+    await $('[data-testid="locator-result"]').waitForDisplayed();
+    const immediate = await browser.execute(() => {
+      const before = (window.__fx01?.getCalls() ?? []).filter(
+        (call) => call.queryKind === 'globalLocator',
+      ).length;
+      window.__fx01?.emitWorkspaceInvalidation();
+      return { before, locator: window.__fx01?.getLocator() };
+    });
+    expect(immediate.locator).toMatchObject({ kind: 'open', searchText: 'Demo', snapshot: null });
+
+    await browser.waitUntil(async () => {
+      const current = await browser.execute(() => ({
+        locator: window.__fx01?.getLocator(),
+        locatorReads: (window.__fx01?.getCalls() ?? []).filter(
+          (call) => call.queryKind === 'globalLocator',
+        ).length,
+      }));
+      return (
+        current.locatorReads === immediate.before + 1 &&
+        current.locator?.kind === 'open' &&
+        current.locator.snapshot !== null
+      );
+    });
+    expect(await $('#global-locator-input').getValue()).toEqual('Demo');
+  });
+
+  it('locator 项目结果只显示安全摘要与项目展示提示，并为零结果保留稳定空态', async () => {
+    await openWorkbench('project-projection');
+    await $('button=全局搜索').click();
+    await $('#global-locator-input').setValue('Project Native Skill');
+    const result = await $('[data-testid="locator-result"]');
+    await result.waitForDisplayed();
+    const text = await result.getText();
+    expect(text).toContain('结构化只读项目 Skill 摘要');
+    expect(text).toContain('项目 Fixture project（只读）');
+    expect(text).not.toContain('project-fx01-opaque');
+
+    await $('#global-locator-input').setValue('no-locator-match');
+    const empty = await $('[data-testid="locator-empty"]');
+    await empty.waitForDisplayed();
+    expect(await empty.getText()).toEqual('没有匹配的资产。');
   });
 
   it('⌘K 与右上按钮打开同一 locator，Escape 返回触发按钮', async () => {

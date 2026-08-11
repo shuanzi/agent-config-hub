@@ -11,6 +11,8 @@ import { formatPf01BudgetJson, freezePf01Budget, migratePf01BudgetV2 } from '../
 // @ts-expect-error runtime verifier module is a plain Node ESM module.
 import { computePf01L3HarnessBuildInputsDigest } from '../../scripts/orchestrator/pf01-build-inputs.mjs';
 
+const HISTORICAL_BUDGET_PATH = 'performance/budgets/history/pf-01.budgets.20260810T124356Z.json';
+
 function baselineBuildInputs(): Record<string, unknown> {
   const entries = [{ path: 'src/main.tsx', sha256: 'c'.repeat(64) }];
   return {
@@ -114,11 +116,10 @@ describe('PF-01 frozen representative budget', () => {
           }),
         ),
       );
-      const prettier = spawnSync(
-        'corepack',
-        ['npm', 'exec', '--', 'prettier', '--check', budgetPath],
-        { cwd: process.cwd(), encoding: 'utf8' },
-      );
+      const prettier = spawnSync('npm', ['exec', '--', 'prettier', '--check', budgetPath], {
+        cwd: process.cwd(),
+        encoding: 'utf8',
+      });
       expect(prettier.status, prettier.stderr).toBe(0);
     } finally {
       rmSync(root, { recursive: true, force: true });
@@ -126,9 +127,10 @@ describe('PF-01 frozen representative budget', () => {
   });
 
   it('迁移器拒绝把非 PF-01 legacy budget 伪装成新的 frozen provenance', () => {
-    const legacy = JSON.parse(
-      readFileSync(resolve('performance/budgets/pf-01.budgets.json'), 'utf8'),
-    ) as Record<string, unknown>;
+    const legacy = JSON.parse(readFileSync(resolve(HISTORICAL_BUDGET_PATH), 'utf8')) as Record<
+      string,
+      unknown
+    >;
     legacy.descriptorId = 'PF-02';
     expect(() =>
       migratePf01BudgetV2({
@@ -139,9 +141,10 @@ describe('PF-01 frozen representative budget', () => {
   });
 
   it('生成路径可幂等刷新已迁移 budget 的格式与 Git-object provenance', () => {
-    const current = JSON.parse(
-      readFileSync(resolve('performance/budgets/pf-01.budgets.json'), 'utf8'),
-    ) as Record<string, unknown>;
+    const current = JSON.parse(readFileSync(resolve(HISTORICAL_BUDGET_PATH), 'utf8')) as Record<
+      string,
+      unknown
+    >;
     const refreshed = migratePf01BudgetV2({
       budget: current,
       baselineBuildInputs: baselineBuildInputs(),
@@ -153,9 +156,10 @@ describe('PF-01 frozen representative budget', () => {
   });
 
   it('迁移器拒绝 canonical entries 与声明 digest 不一致的 provenance', () => {
-    const current = JSON.parse(
-      readFileSync(resolve('performance/budgets/pf-01.budgets.json'), 'utf8'),
-    ) as Record<string, unknown>;
+    const current = JSON.parse(readFileSync(resolve(HISTORICAL_BUDGET_PATH), 'utf8')) as Record<
+      string,
+      unknown
+    >;
     const invalidInputs = baselineBuildInputs();
     invalidInputs.digest = 'd'.repeat(64);
     expect(() =>

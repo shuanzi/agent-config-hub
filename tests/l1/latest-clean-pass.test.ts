@@ -1,4 +1,12 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -116,6 +124,56 @@ describe('latest clean-pass evidence index', () => {
         manifest: { ...manifest, commit: 'b'.repeat(40) },
       }),
     ).toEqual({ updated: false });
+    expect(existsSync(indexPath)).toBe(false);
+  });
+
+  it('拒绝 symlink manifest 或 index，只接受 lstat 为 regular file 的物理 JSON', async () => {
+    const { root, evidenceRoot, indexPath, manifest } = setup();
+    const physicalManifest = join(root, 'physical-manifest.json');
+    writeFileSync(physicalManifest, `${JSON.stringify(manifest)}\n`, 'utf8');
+    mkdirSync(evidenceRoot, { recursive: true });
+    symlinkSync(physicalManifest, join(evidenceRoot, 'manifest.json'));
+    await expect(
+      maybeWriteLatestCleanPass({ root, evidenceRoot, ticketId: 'FE-01', manifest }),
+    ).resolves.toEqual({ updated: false });
+    expect(existsSync(indexPath)).toBe(false);
+
+    rmSync(join(evidenceRoot, 'manifest.json'));
+    writeManifest(evidenceRoot, manifest);
+    const physicalIndex = join(root, 'physical-index.json');
+    writeFileSync(
+      physicalIndex,
+      `${JSON.stringify({ completedAt: '2026-08-11T00:00:00.000Z' })}\n`,
+    );
+    symlinkSync(physicalIndex, indexPath);
+    await expect(
+      maybeWriteLatestCleanPass({ root, evidenceRoot, ticketId: 'FE-01', manifest }),
+    ).resolves.toEqual({ updated: false });
+    expect(JSON.parse(readFileSync(physicalIndex, 'utf8'))).toEqual({
+      completedAt: '2026-08-11T00:00:00.000Z',
+    });
+  });
+
+  it('拒绝 symlink evidence run 或其任一已有父目录，即使 manifest 本身是 regular file', async () => {
+    const { root, evidenceRoot, indexPath, manifest } = setup();
+    const verificationRoot = join(root, '.artifacts/verification');
+    const physicalRun = join(root, 'physical-run');
+    writeManifest(physicalRun, manifest);
+    mkdirSync(join(verificationRoot, 'FE-01'), { recursive: true });
+    symlinkSync(physicalRun, evidenceRoot);
+    await expect(
+      maybeWriteLatestCleanPass({ root, evidenceRoot, ticketId: 'FE-01', manifest }),
+    ).resolves.toEqual({ updated: false });
+    expect(existsSync(indexPath)).toBe(false);
+
+    rmSync(evidenceRoot);
+    const physicalTicket = join(root, 'physical-ticket');
+    writeManifest(join(physicalTicket, manifest.runId), manifest);
+    rmSync(join(verificationRoot, 'FE-01'), { recursive: true });
+    symlinkSync(physicalTicket, join(verificationRoot, 'FE-01'));
+    await expect(
+      maybeWriteLatestCleanPass({ root, evidenceRoot, ticketId: 'FE-01', manifest }),
+    ).resolves.toEqual({ updated: false });
     expect(existsSync(indexPath)).toBe(false);
   });
 

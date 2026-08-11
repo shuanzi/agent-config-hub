@@ -375,7 +375,7 @@ fn workbench_from_applicability(
                     ),
                     skill_target_states: unknown_skill_target_states(),
                     summary,
-                    redacted_summary: None,
+                    redacted_summary: Some("结构化只读 Skill 摘要".to_string()),
                 })
                 .collect();
             WorkbenchSegment {
@@ -465,6 +465,13 @@ fn unknown_skill_target_states() -> Vec<SkillTargetState> {
         presence: SkillPresence::Unknown,
         activation: SkillActivation::Unknown,
         applicability: ApplicabilityResolution::Unknown,
+        enable_availability: crate::domain::SkillCellAvailability::Disabled {
+            reason_code: ReasonCode::UnknownFieldPreserved,
+        },
+        disable_availability: crate::domain::SkillCellAvailability::Disabled {
+            reason_code: ReasonCode::UnknownFieldPreserved,
+        },
+        pending: None,
         stable_reason: Some("UNKNOWN_FIELD_PRESERVED".to_string()),
     })
     .collect()

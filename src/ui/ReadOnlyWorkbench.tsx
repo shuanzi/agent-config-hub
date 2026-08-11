@@ -30,9 +30,15 @@ function stateLabel(state: ReadOnlyWorkbenchState): string {
 function SegmentList({
   session,
   state,
+  listPaneRef,
+  emptyHeadingRef,
+  firstRowRef,
 }: {
   session: ReadOnlyWorkbenchSession;
   state: ReadOnlyWorkbenchState;
+  listPaneRef: RefObject<HTMLDivElement>;
+  emptyHeadingRef: RefObject<HTMLHeadingElement>;
+  firstRowRef: RefObject<HTMLButtonElement>;
 }) {
   const snapshot =
     state.loadState.kind === 'ready' ||
@@ -53,9 +59,17 @@ function SegmentList({
       ownership.kind === 'project' ? ownership.projectId : '',
     ].join('\u0000');
   };
+  const firstRowIdentity = projection.segments[0]?.rows[0]
+    ? rowIdentity(projection.segments[0].rows[0])
+    : null;
   return (
-    <div className="readonly-segment-list list-pane" aria-label="只读资产列表">
+    <div ref={listPaneRef} className="readonly-segment-list list-pane" aria-label="只读资产列表">
       <p aria-label="结果总数">共 {projection.aggregateTotal} 项</p>
+      {projection.aggregateTotal === 0 && (
+        <h2 ref={emptyHeadingRef} tabIndex={-1} data-testid="workbench-empty-heading">
+          当前范围内没有匹配的资产。
+        </h2>
+      )}
       {snapshot.findings.map((finding) => (
         <p key={`${finding.assetId}-${finding.reasonCode}`} role="status">
           适用性未解析：{finding.reasonCode}
@@ -68,6 +82,7 @@ function SegmentList({
             {segment.rows.map((row) => (
               <li key={rowIdentity(row)}>
                 <button
+                  ref={rowIdentity(row) === firstRowIdentity ? firstRowRef : undefined}
                   type="button"
                   role="option"
                   aria-selected={
@@ -119,6 +134,10 @@ function SkillCells({
 }) {
   if (row.skillTargetStates === undefined) return null;
   const cells = new Map(row.skillTargetStates.map((cell) => [cell.agent, cell]));
+  const availabilityLabel = (availability: { kind: string; reasonCode?: string }) =>
+    availability.reasonCode === undefined
+      ? availability.kind
+      : `${availability.kind}（${availability.reasonCode}）`;
   return (
     <section className="skill-target-cells" aria-label="Skill Agent 状态（只读）">
       <h2 ref={headingRef} tabIndex={-1} data-testid="skill-detail-heading">
@@ -132,12 +151,27 @@ function SkillCells({
           const applicability = cell?.applicability ?? 'unknown';
           const stableReason =
             cell?.stableReason ?? (cell === undefined ? 'UNKNOWN_FIELD_PRESERVED' : undefined);
+          const enableAvailability = cell?.enableAvailability ?? {
+            kind: 'disabled',
+            reasonCode: 'UNKNOWN_FIELD_PRESERVED',
+          };
+          const disableAvailability = cell?.disableAvailability ?? {
+            kind: 'disabled',
+            reasonCode: 'UNKNOWN_FIELD_PRESERVED',
+          };
           return (
             <article key={agent} aria-label={`${agent} 状态`}>
               <h3>{agent}</h3>
               <p>存在：{presence}</p>
               <p>激活：{activation}</p>
               <p>适用性：{applicability}</p>
+              <p>开启可用性：{availabilityLabel(enableAvailability)}</p>
+              <p>关闭可用性：{availabilityLabel(disableAvailability)}</p>
+              {cell?.pending !== undefined && (
+                <p>
+                  Pending：{cell.pending.operationId}（{cell.pending.phase}）
+                </p>
+              )}
               {stableReason !== undefined && <p>原因：{stableReason}</p>}
             </article>
           );
@@ -187,6 +221,11 @@ function Locator({
         </section>
       )}
       {state.locator.searchText.trim() === '' && <p>输入搜索词</p>}
+      {state.locator.searchText.trim() !== '' && state.locator.snapshot?.aggregateTotal === 0 && (
+        <p role="status" data-testid="locator-empty">
+          没有匹配的资产。
+        </p>
+      )}
       {state.locator.snapshot?.groups.map((group) => (
         <section key={group.assetType} aria-label={typeLabel[group.assetType]}>
           <h2>
@@ -205,11 +244,11 @@ function Locator({
               }
             >
               <span>{row.displayName}</span>
-              {row.redactedSummary !== undefined && <small>{row.redactedSummary}</small>}
+              <small>{row.redactedSummary}</small>
               <small>
                 {row.assetRef.nativeOwnership.kind === 'global'
                   ? '全局'
-                  : `项目 ${row.assetRef.nativeOwnership.projectId}`}
+                  : `项目 ${row.ownershipHint}`}
               </small>
               <small>{row.agents?.join('、')}</small>
             </button>
@@ -234,6 +273,11 @@ export function ReadOnlyWorkbench({ session }: { session: ReadOnlyWorkbenchSessi
   const detailHeadingRef = useRef<HTMLHeadingElement>(null!);
   const detailErrorHeadingRef = useRef<HTMLHeadingElement>(null!);
   const locatorErrorHeadingRef = useRef<HTMLHeadingElement>(null!);
+  const listPaneRef = useRef<HTMLDivElement>(null!);
+  const emptyHeadingRef = useRef<HTMLHeadingElement>(null!);
+  const firstRowRef = useRef<HTMLButtonElement>(null!);
+  const focusedPageRef = useRef<number | null>(null);
+  const focusedSnapshotRef = useRef<unknown>(null);
   const openLocator = () => {
     locatorReturnTargetRef.current =
       document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -252,8 +296,10 @@ export function ReadOnlyWorkbench({ session }: { session: ReadOnlyWorkbenchSessi
     });
   };
   useEffect(() => {
-    if (state.selected?.assetRef?.assetType === 'skill') detailHeadingRef.current?.focus();
-  }, [state.selected?.assetRef?.assetId, state.selected?.assetRef?.nativeUnitRef]);
+    if (state.selected?.assetRef?.assetType === 'skill') {
+      detailHeadingRef.current?.focus({ preventScroll: true });
+    }
+  }, [state.selected]);
   useEffect(() => {
     if (state.locator.kind === 'open' && state.locator.error !== undefined) {
       locatorErrorHeadingRef.current?.focus();
@@ -262,6 +308,32 @@ export function ReadOnlyWorkbench({ session }: { session: ReadOnlyWorkbenchSessi
   useEffect(() => {
     if (state.detailError !== null) detailErrorHeadingRef.current?.focus();
   }, [state.detailError]);
+  useEffect(() => {
+    if (
+      state.loadState.kind !== 'ready' &&
+      state.loadState.kind !== 'empty' &&
+      state.loadState.kind !== 'stale'
+    ) {
+      return;
+    }
+    const projection = projectWorkbenchProjection(state.loadState.snapshot, state.presentation);
+    const hasPreviousProjection = focusedSnapshotRef.current !== null;
+    const pageChanged = hasPreviousProjection && focusedPageRef.current !== projection.page;
+    if (
+      focusedSnapshotRef.current === state.loadState.snapshot &&
+      focusedPageRef.current === projection.page
+    ) {
+      return;
+    }
+    focusedSnapshotRef.current = state.loadState.snapshot;
+    focusedPageRef.current = projection.page;
+    const shouldFocusEmpty = projection.aggregateTotal === 0 && state.detailError === null;
+    if (pageChanged || shouldFocusEmpty) listPaneRef.current?.scrollTo({ top: 0 });
+    queueMicrotask(() => {
+      if (shouldFocusEmpty) emptyHeadingRef.current?.focus({ preventScroll: true });
+      else if (pageChanged) firstRowRef.current?.focus({ preventScroll: true });
+    });
+  }, [state.detailError, state.loadState, state.presentation]);
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.metaKey && event.key.toLowerCase() === 'k') {
@@ -392,7 +464,13 @@ export function ReadOnlyWorkbench({ session }: { session: ReadOnlyWorkbenchSessi
         </p>
       )}
       <div className="workbench-main">
-        <SegmentList session={session} state={state} />
+        <SegmentList
+          session={session}
+          state={state}
+          listPaneRef={listPaneRef}
+          emptyHeadingRef={emptyHeadingRef}
+          firstRowRef={firstRowRef}
+        />
         <aside className="detail-panel" aria-label="资产详情">
           {state.detailError !== null ? (
             <section role="alert" aria-label="只读详情错误">

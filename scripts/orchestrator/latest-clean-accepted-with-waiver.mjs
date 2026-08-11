@@ -30,6 +30,41 @@ function validCompletedAt(value) {
   return typeof value === 'string' && !Number.isNaN(Date.parse(value));
 }
 
+function readPhysicalJson(filePath) {
+  let stats;
+  try {
+    stats = fs.lstatSync(filePath);
+  } catch {
+    return null;
+  }
+  if (!stats.isFile() || stats.isSymbolicLink()) return null;
+  try {
+    return JSON.parse(fs.readFileSync(filePath, 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
+/** 证据与 index 均须位于逐级 lstat 的物理目录中；不得让父目录 symlink 改写写入目标。 */
+function hasPhysicalPath(root, target) {
+  const relative = relativeFrom(root, target);
+  if (relative === null) return false;
+  let current = path.resolve(root);
+  try {
+    const rootStats = fs.lstatSync(current);
+    if (!rootStats.isDirectory() || rootStats.isSymbolicLink()) return false;
+    for (const segment of relative.split('/')) {
+      if (segment === '') continue;
+      current = path.join(current, segment);
+      const stats = fs.lstatSync(current);
+      if (stats.isSymbolicLink()) return false;
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function validProvenance(steps) {
   return (
     Array.isArray(steps) &&
@@ -142,13 +177,15 @@ export async function maybeWriteLatestCleanAcceptedWithWaiver({
   const expectedEvidence = path.join(root, '.artifacts', 'verification', ticketId, manifest.runId);
   if (path.resolve(expectedEvidence) !== path.resolve(evidenceRoot)) return { updated: false };
   const absoluteManifestPath = path.join(evidenceRoot, 'manifest.json');
-  if (!fs.existsSync(absoluteManifestPath)) return { updated: false };
-  let writtenManifest;
-  try {
-    writtenManifest = JSON.parse(fs.readFileSync(absoluteManifestPath, 'utf8'));
-  } catch {
+  if (
+    !hasPhysicalPath(root, evidenceRoot) ||
+    !hasPhysicalPath(root, absoluteManifestPath) ||
+    !hasPhysicalPath(root, path.dirname(expectedEvidence))
+  ) {
     return { updated: false };
   }
+  const writtenManifest = readPhysicalJson(absoluteManifestPath);
+  if (writtenManifest === null) return { updated: false };
   if (JSON.stringify(writtenManifest) !== JSON.stringify(manifest)) return { updated: false };
   const manifestPath = relativeFrom(root, absoluteManifestPath);
   if (manifestPath === null) return { updated: false };
@@ -160,15 +197,15 @@ export async function maybeWriteLatestCleanAcceptedWithWaiver({
     ticketId,
     'latest-clean-accepted-with-waiver.json',
   );
+  if (!hasPhysicalPath(root, path.dirname(indexPath))) return { updated: false };
   fs.mkdirSync(path.dirname(indexPath), { recursive: true });
   const lockHandle = await acquireIndexLock(`${indexPath}.lock`);
   if (lockHandle === null) return { updated: false };
   try {
     let existing = null;
     if (fs.existsSync(indexPath)) {
-      try {
-        existing = JSON.parse(fs.readFileSync(indexPath, 'utf8'));
-      } catch {
+      existing = readPhysicalJson(indexPath);
+      if (existing === null) {
         return { updated: false };
       }
     }

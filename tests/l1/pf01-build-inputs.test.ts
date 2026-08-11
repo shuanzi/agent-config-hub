@@ -31,10 +31,10 @@ const EXPECTED_VITE_MODULES = [
 ];
 
 describe('PF-01 L3 harness build-input digest v2', () => {
-  it('从 immutable baseline Git objects 与 clean checkout 得到同一版本化输入摘要', () => {
+  it('从 immutable baseline Git objects 与当前实现分别得到可追溯摘要，并暴露 output-affecting drift', () => {
     const baseline = collectPf01L3HarnessBuildInputsFromGit({ commit: BASELINE_COMMIT });
-    // 当前 TDD 修改本身不属于 output-affecting input set；这里注入已确认的
-    // clean-status，单独的下一例覆盖真实 status 含 untracked 时 fail-closed。
+    // 注入 clean-status 仅覆盖 digest 算法；当前实现改动了 mock/UI/wire 等实际
+    // harness 输入，不能借用旧 baseline digest。
     const current = collectPf01L3HarnessBuildInputs({ gitStatus: '' });
 
     expect(baseline).toMatchObject({
@@ -47,8 +47,8 @@ describe('PF-01 L3 harness build-input digest v2', () => {
       algorithm: 'pf01-l3-harness-build-inputs-v2',
       source: { kind: 'clean-tracked-checkout' },
     });
-    expect(current.digest).toBe(baseline.digest);
-    expect(current.entries).toEqual(baseline.entries);
+    expect(current.digest).not.toBe(baseline.digest);
+    expect(current.entries).not.toEqual(baseline.entries);
   });
 
   it('只纳入实际 L3 Vite module closure，并拒绝未来未登记 import', async () => {

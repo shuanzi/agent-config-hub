@@ -43,24 +43,33 @@ function snapshot() {
                 presence: 'present',
                 activation: 'enabled',
                 applicability: 'resolved',
+                enableAvailability: { kind: 'allowed' },
+                disableAvailability: { kind: 'allowed' },
+                pending: { operationId: 'pending-read-only', phase: 'reread' },
               },
               {
                 agent: 'codex',
                 presence: 'absent',
                 activation: 'notApplicable',
                 applicability: 'resolved',
+                enableAvailability: { kind: 'allowed' },
+                disableAvailability: { kind: 'disabled', reasonCode: 'UNSUPPORTED_CAPABILITY' },
               },
               {
                 agent: 'gemini-cli',
                 presence: 'absent',
                 activation: 'notApplicable',
                 applicability: 'resolved',
+                enableAvailability: { kind: 'blocked', reasonCode: 'READ_ONLY_POLICY' },
+                disableAvailability: { kind: 'disabled', reasonCode: 'UNSUPPORTED_CAPABILITY' },
               },
               {
                 agent: 'opencode',
                 presence: 'absent',
                 activation: 'notApplicable',
                 applicability: 'resolved',
+                enableAvailability: { kind: 'allowed' },
+                disableAvailability: { kind: 'disabled', reasonCode: 'UNSUPPORTED_CAPABILITY' },
               },
             ],
           },
@@ -76,7 +85,8 @@ function snapshot() {
 }
 
 function locatorSnapshot() {
-  const row = snapshot().segments[0].rows[0];
+  const baseRow = snapshot().segments[0].rows[0];
+  const row = { ...baseRow, redactedSummary: '只读遮蔽摘要' };
   return {
     kind: 'globalLocator',
     groups: [
@@ -118,6 +128,11 @@ describe('Tauri workbench wire decode', () => {
     if (result.kind === 'readSucceeded') {
       expect(result.snapshot.segments[0].rows[0].skillTargetStates).toHaveLength(4);
       expect(result.snapshot.segments[0].rows[0].skillTargetStates?.[0]?.presence).toBe('present');
+      expect(result.snapshot.segments[0].rows[0].skillTargetStates?.[0]).toMatchObject({
+        enableAvailability: { kind: 'allowed' },
+        disableAvailability: { kind: 'allowed' },
+        pending: { operationId: 'pending-read-only', phase: 'reread' },
+      });
     }
   });
 
@@ -206,6 +221,46 @@ describe('Tauri workbench wire decode', () => {
     expect(result).toMatchObject({ kind: 'readFailed', reasonCode: 'GATEWAY_UNAVAILABLE' });
   });
 
+  it('breaking wire V3 ingress 明确拒绝前一版 V2 response envelope', async () => {
+    invokeMock.mockImplementation(
+      async (_command: string, args: { request: { requestId: string } }) => ({
+        wireVersion: 2,
+        requestId: args.request.requestId,
+        payload: { kind: 'readSucceeded', snapshot: snapshot() },
+      }),
+    );
+    const result = await createTauriGateway().read({
+      kind: 'workbench',
+      assetType: 'skill',
+      viewContext: { kind: 'all' },
+    });
+    expect(result).toMatchObject({ kind: 'readFailed', reasonCode: 'GATEWAY_UNAVAILABLE' });
+  });
+
+  it('缺少或伪造 Skill cell action availability/pending 时封闭为 GATEWAY_UNAVAILABLE', async () => {
+    invokeMock.mockImplementation(
+      async (_command: string, args: { request: { requestId: string } }) => {
+        const malformed = snapshot();
+        delete (malformed.segments[0].rows[0].skillTargetStates[0] as Record<string, unknown>)
+          .enableAvailability;
+        (
+          malformed.segments[0].rows[0].skillTargetStates[1] as Record<string, unknown>
+        ).disableAvailability = { kind: 'allowed', reasonCode: 'READ_ONLY_POLICY' };
+        return {
+          wireVersion: GATEWAY_WIRE_VERSION,
+          requestId: args.request.requestId,
+          payload: { kind: 'readSucceeded', snapshot: malformed },
+        };
+      },
+    );
+    const result = await createTauriGateway().read({
+      kind: 'workbench',
+      assetType: 'skill',
+      viewContext: { kind: 'all' },
+    });
+    expect(result).toMatchObject({ kind: 'readFailed', reasonCode: 'GATEWAY_UNAVAILABLE' });
+  });
+
   it('缺少完整 AssetRef 的任一 identity 字段时封闭为 GATEWAY_UNAVAILABLE', async () => {
     invokeMock.mockImplementation(
       async (_command: string, args: { request: { requestId: string } }) => {
@@ -255,6 +310,8 @@ describe('Tauri workbench wire decode', () => {
         nativeOwnership: { kind: 'global' },
       });
       expect(locator.matchedField).toBe('displayName');
+      expect(locator).toMatchObject({ redactedSummary: '只读遮蔽摘要' });
+      expect(locator.ownershipHint).toBe('~/…/skills/skill/SKILL.md');
     }
 
     invokeMock.mockImplementation(
@@ -274,5 +331,26 @@ describe('Tauri workbench wire decode', () => {
       assetTypes: ['skill', 'longTermInstruction', 'subagent'],
     });
     expect(rejected).toMatchObject({ kind: 'readFailed', reasonCode: 'GATEWAY_UNAVAILABLE' });
+
+    invokeMock.mockImplementation(
+      async (_command: string, args: { request: { requestId: string } }) => {
+        const malformed = locatorSnapshot();
+        delete (malformed.groups[0].results[0].row as Record<string, unknown>).redactedSummary;
+        return {
+          wireVersion: GATEWAY_WIRE_VERSION,
+          requestId: args.request.requestId,
+          payload: { kind: 'readSucceeded', snapshot: malformed },
+        };
+      },
+    );
+    const redactedSummaryRejected = await createTauriGateway().read({
+      kind: 'globalLocator',
+      searchText: 'Skill',
+      assetTypes: ['skill', 'longTermInstruction', 'subagent'],
+    });
+    expect(redactedSummaryRejected).toMatchObject({
+      kind: 'readFailed',
+      reasonCode: 'GATEWAY_UNAVAILABLE',
+    });
   });
 });

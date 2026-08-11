@@ -575,6 +575,10 @@ export class ScriptedMockGateway implements FrontendGateway {
                 presence: record.summary.agents.includes(agent) ? 'present' : 'absent',
                 activation: record.summary.agents.includes(agent) ? 'enabled' : 'notApplicable',
                 applicability: 'resolved',
+                enableAvailability: { kind: 'allowed' as const },
+                disableAvailability: record.summary.agents.includes(agent)
+                  ? { kind: 'allowed' as const }
+                  : { kind: 'disabled' as const, reasonCode: 'UNSUPPORTED_CAPABILITY' },
               }))
             : [],
       }));
@@ -656,6 +660,11 @@ export class ScriptedMockGateway implements FrontendGateway {
                 nativeOwnership: record.summary.asset.nativeOwnership,
                 agents: record.summary.agents,
                 sourceTierId: record.summary.sourceTier.id,
+                redactedSummary: '结构化只读资产摘要',
+                ownershipHint:
+                  record.summary.asset.nativeOwnership.kind === 'global'
+                    ? 'global'
+                    : record.summary.asset.nativeOwnership.projectId,
                 statuses: record.statuses,
                 skillTargetStates: [],
                 destinationViewContext:
@@ -813,6 +822,11 @@ export class ScriptedMockGateway implements FrontendGateway {
                 presence: agent === 'codex' ? 'present' : 'absent',
                 activation: agent === 'codex' ? 'enabled' : 'notApplicable',
                 applicability: 'resolved',
+                enableAvailability: { kind: 'allowed' as const },
+                disableAvailability:
+                  agent === 'codex'
+                    ? { kind: 'allowed' as const }
+                    : { kind: 'disabled' as const, reasonCode: 'UNSUPPORTED_CAPABILITY' },
               })),
             }))
         : [];
@@ -894,6 +908,27 @@ export class ScriptedMockGateway implements FrontendGateway {
       statuses: this.derivedStatuses(),
       skillTargetStates: this.skillTargetStates(),
     };
+    const projectLocatorRow: ReadOnlyRow = {
+      assetRef: {
+        assetId: 'asset-fx01-project-native-project-fx01-opaque',
+        assetType: 'skill',
+        nativeUnitRef: 'nunit-fx01-project-native-project-fx01-opaque',
+        adapterIdentity: this.assetRef().adapterIdentity,
+        nativeOwnership: { kind: 'project', projectId: 'project-fx01-opaque' },
+      },
+      assetId: 'asset-fx01-project-native-project-fx01-opaque',
+      displayName: 'Project Native Skill',
+      sortBaseName: 'Project Native Skill',
+      authoritativeInputOrder: 0,
+      nativeOwnership: { kind: 'project', projectId: 'project-fx01-opaque' },
+      agents: ['codex'],
+      sourceTierId: 'project-fx01-root',
+      sourceTierLabel: 'Project root (synthetic)',
+      redactedSummary: '结构化只读项目 Skill 摘要',
+      ownershipHint: 'Fixture project（只读）',
+      statuses: ['readOnly', 'normal'],
+      skillTargetStates: this.skillTargetStates(),
+    };
     const row: ReadOnlyRow = this.unsupportedLocator
       ? {
           assetRef: {
@@ -913,8 +948,14 @@ export class ScriptedMockGateway implements FrontendGateway {
           ownershipHint: 'global',
           statuses: ['readOnly', 'normal'],
         }
-      : skillRow;
+      : this.projectProjection === 'none'
+        ? skillRow
+        : projectLocatorRow;
     const matchedField = mockLocatorMatchedField(searchText, row);
+    const { redactedSummary, ownershipHint } = row;
+    if (redactedSummary === undefined || ownershipHint === undefined) {
+      throw new Error('locator requires redacted display facts');
+    }
     const groups = MVP_ASSET_TYPES.map((assetType) => ({
       assetType,
       count: assetType === row.assetRef.assetType && matchedField !== null ? 1 : 0,
@@ -923,7 +964,15 @@ export class ScriptedMockGateway implements FrontendGateway {
           ? [
               {
                 ...row,
-                destinationViewContext: { kind: 'global' as const },
+                redactedSummary,
+                ownershipHint,
+                destinationViewContext:
+                  row.assetRef.nativeOwnership.kind === 'global'
+                    ? ({ kind: 'global' } as ViewContext)
+                    : ({
+                        kind: 'project',
+                        projectId: row.assetRef.nativeOwnership.projectId,
+                      } as ViewContext),
                 destination:
                   row.assetRef.assetType === 'skill'
                     ? { kind: 'skillDetail' as const, assetRef: row.assetRef }
@@ -954,6 +1003,24 @@ export class ScriptedMockGateway implements FrontendGateway {
             presence: failure,
             activation: failure,
             applicability: failure,
+            enableAvailability: {
+              kind: 'disabled',
+              reasonCode:
+                failure === 'stale'
+                  ? 'INDEX_STALE'
+                  : failure === 'blocked'
+                    ? 'READ_ONLY_POLICY'
+                    : 'UNKNOWN_FIELD_PRESERVED',
+            },
+            disableAvailability: {
+              kind: 'disabled',
+              reasonCode:
+                failure === 'stale'
+                  ? 'INDEX_STALE'
+                  : failure === 'blocked'
+                    ? 'READ_ONLY_POLICY'
+                    : 'UNKNOWN_FIELD_PRESERVED',
+            },
             stableReason:
               failure === 'stale'
                 ? 'INDEX_STALE'
@@ -967,12 +1034,16 @@ export class ScriptedMockGateway implements FrontendGateway {
               presence: 'present',
               activation: 'enabled',
               applicability: 'resolved',
+              enableAvailability: { kind: 'allowed' },
+              disableAvailability: { kind: 'allowed' },
             }
           : {
               agent,
               presence: 'absent',
               activation: 'notApplicable',
               applicability: 'resolved',
+              enableAvailability: { kind: 'allowed' },
+              disableAvailability: { kind: 'disabled', reasonCode: 'UNSUPPORTED_CAPABILITY' },
             },
     );
   }

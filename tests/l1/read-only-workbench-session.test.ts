@@ -49,6 +49,8 @@ function snapshot(activation: 'enabled' | 'disabled'): WorkbenchActualReadSnapsh
                 presence: 'present',
                 activation,
                 applicability: 'resolved',
+                enableAvailability: { kind: 'allowed' },
+                disableAvailability: { kind: 'allowed' },
               },
             ],
           },
@@ -131,6 +133,8 @@ function locatorSnapshot(
   },
   resultRow = snapshot('enabled').segments[0].rows[0],
 ): GlobalLocatorSnapshot {
+  const redactedSummary = resultRow.redactedSummary ?? '只读遮蔽摘要';
+  const ownershipHint = resultRow.ownershipHint ?? 'global';
   return {
     kind: 'globalLocator',
     groups: [
@@ -140,6 +144,8 @@ function locatorSnapshot(
         results: [
           {
             ...resultRow,
+            redactedSummary,
+            ownershipHint,
             destinationViewContext: { kind: 'global' },
             destination,
             matchedField: 'displayName',
@@ -302,6 +308,64 @@ describe('ReadOnlyWorkbenchSession', () => {
     gateway.resolveNext({ kind: 'readSucceeded', snapshot: snapshot('disabled') });
     const reread = await waitFor((state) => state.loadState.kind === 'ready', session);
     expect(reread.loadState).toMatchObject({ kind: 'ready' });
+    session.dispose();
+  });
+
+  it('workspace event keeps a non-empty open locator loading, rereads it authoritatively, and discards its old in-flight result', async () => {
+    const gateway = new DeferredReadGateway();
+    const session = new ReadOnlyWorkbenchSession(gateway);
+    await waitForPending(gateway);
+    gateway.resolveNext({ kind: 'readSucceeded', snapshot: snapshot('enabled') });
+    await waitFor((state) => state.loadState.kind === 'ready', session);
+
+    session.dispatch({ kind: 'openLocator' });
+    session.dispatch({ kind: 'setLocatorSearch', searchText: 'Skill' });
+    await waitForPending(gateway);
+
+    gateway.invalidate();
+    expect(session.getSnapshot()).toMatchObject({
+      loadState: { kind: 'loading' },
+      locator: { kind: 'open', searchText: 'Skill', snapshot: null },
+      selected: null,
+    });
+
+    await waitForPending(gateway, 3);
+    gateway.resolveNext({ kind: 'readSucceeded', snapshot: locatorSnapshot() });
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(session.getSnapshot().locator).toMatchObject({
+      kind: 'open',
+      searchText: 'Skill',
+      snapshot: null,
+    });
+
+    gateway.resolveNext({ kind: 'readSucceeded', snapshot: snapshot('disabled') });
+    await waitFor((state) => state.loadState.kind === 'ready', session);
+    gateway.resolveNext({ kind: 'readSucceeded', snapshot: locatorSnapshot() });
+    const reread = await waitFor(
+      (state) => state.locator.kind === 'open' && state.locator.snapshot !== null,
+      session,
+    );
+    expect(reread.locator).toMatchObject({ kind: 'open', searchText: 'Skill' });
+    session.dispose();
+  });
+
+  it('workspace event does not add locator reads for a closed or empty locator', async () => {
+    const gateway = new DeferredReadGateway();
+    const session = new ReadOnlyWorkbenchSession(gateway);
+    await waitForPending(gateway);
+    gateway.resolveNext({ kind: 'readSucceeded', snapshot: snapshot('enabled') });
+    await waitFor((state) => state.loadState.kind === 'ready', session);
+
+    gateway.invalidate();
+    await waitForPending(gateway);
+    expect(gateway.pendingCount).toBe(1);
+    gateway.resolveNext({ kind: 'readSucceeded', snapshot: snapshot('disabled') });
+    await waitFor((state) => state.loadState.kind === 'ready', session);
+
+    session.dispatch({ kind: 'openLocator' });
+    gateway.invalidate();
+    await waitForPending(gateway);
+    expect(gateway.pendingCount).toBe(1);
     session.dispose();
   });
 

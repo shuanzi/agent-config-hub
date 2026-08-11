@@ -11,8 +11,12 @@
 import { createRoot } from 'react-dom/client';
 import { ScriptedMockGateway, type RecordedReadCall } from '../../src/gateway/mock';
 import type { AgentId, AssetScope, AssetStatusFilter } from '../../src/contract/types';
-import { ReadOnlyWorkbenchSession } from '../../src/session/ReadOnlyWorkbenchSession';
+import {
+  ReadOnlyWorkbenchSession,
+  type ReadOnlyWorkbenchState,
+} from '../../src/session/ReadOnlyWorkbenchSession';
 import { App } from '../../src/App';
+import { canRecordPf01Startup } from './pf01-startup-eligibility';
 import '../../src/ui/workbench.css';
 
 interface Pf01ListCondition {
@@ -38,6 +42,8 @@ declare global {
     __fx01?: {
       getCalls: () => RecordedReadCall[];
       getObserveCallCount: () => number;
+      emitWorkspaceInvalidation: () => void;
+      getLocator: () => ReadOnlyWorkbenchState['locator'];
     };
     __pf01?: Pf01Bridge;
   }
@@ -45,22 +51,86 @@ declare global {
 
 const params = new URLSearchParams(window.location.search);
 const scenario = params.get('scenario');
+const startupRowsHidden = params.get('startupRowsHidden') === '1';
+const PF01_STARTUP_ROW_SELECTOR = '.list-pane [role="option"]';
+
+function firstScreenStartupRowIsVisible(): boolean {
+  const row = document.querySelector<HTMLElement>(PF01_STARTUP_ROW_SELECTOR);
+  if (row === null || !row.isConnected) return false;
+  const style = window.getComputedStyle(row);
+  if (
+    style.display === 'none' ||
+    style.visibility === 'hidden' ||
+    style.visibility === 'collapse' ||
+    style.opacity === '0'
+  ) {
+    return false;
+  }
+  const rect = row.getBoundingClientRect();
+  return (
+    rect.width > 0 &&
+    rect.height > 0 &&
+    rect.top < window.innerHeight &&
+    rect.bottom > 0 &&
+    rect.left < window.innerWidth &&
+    rect.right > 0
+  );
+}
 
 const mock = new ScriptedMockGateway();
+let session: ReadOnlyWorkbenchSession;
 let startupMs: number | null = null;
 
 if (scenario === 'perf-catalog') {
+  if (startupRowsHidden) {
+    const style = document.createElement('style');
+    style.dataset.testid = 'pf01-startup-hidden';
+    style.textContent = '.list-pane [role="option"] { display: none !important; }';
+    document.head.append(style);
+  }
   // User Timing 起点：入口模块求值时刻（navigation 之后的最早可记点）
   const entryAt = performance.now();
   mock.enablePerfCatalog(params.get('perfProfile') === 'stress' ? 'stress' : 'representative');
-  const session = new ReadOnlyWorkbenchSession(mock);
-  const unsubscribe = session.subscribe(() => {
-    const loadState = session.getSnapshot().loadState;
-    if ((loadState.kind === 'ready' || loadState.kind === 'stale') && startupMs === null) {
+  session = new ReadOnlyWorkbenchSession(mock);
+  let startupFrame: number | null = null;
+  let startupTimer: number | null = null;
+  let unsubscribeStartup = () => {};
+  const clearScheduledStartupCheck = () => {
+    if (startupFrame !== null) cancelAnimationFrame(startupFrame);
+    if (startupTimer !== null) window.clearTimeout(startupTimer);
+    startupFrame = null;
+    startupTimer = null;
+  };
+  const scheduleStartupVisibilityCheck = () => {
+    if (startupMs !== null || startupFrame !== null || startupTimer !== null) return;
+    const checkStartupVisibility = () => {
+      clearScheduledStartupCheck();
+      const loadState = session.getSnapshot().loadState;
+      const aggregateTotal =
+        loadState.kind === 'ready' || loadState.kind === 'stale'
+          ? loadState.snapshot.aggregateTotal
+          : 0;
+      if (
+        !canRecordPf01Startup({
+          loadState: loadState.kind,
+          aggregateTotal,
+          representativeRowVisible: firstScreenStartupRowIsVisible(),
+        })
+      ) {
+        if ((loadState.kind === 'ready' || loadState.kind === 'stale') && aggregateTotal > 0) {
+          scheduleStartupVisibilityCheck();
+        }
+        return;
+      }
       startupMs = performance.now() - entryAt;
-      unsubscribe();
-    }
-  });
+      unsubscribeStartup();
+    };
+    startupFrame = requestAnimationFrame(checkStartupVisibility);
+    // WDIO 会并发运行浏览器；后台页的 rAF 可被无限期节流。计时器仍只在
+    // `firstScreenStartupRowIsVisible` 判真后写入，避免因此放宽首屏可见语义。
+    startupTimer = window.setTimeout(checkStartupVisibility, 50);
+  };
+  unsubscribeStartup = session.subscribe(scheduleStartupVisibilityCheck);
   window.__pf01 = {
     getStartupMs: () => startupMs,
     countList: (condition) =>
@@ -81,7 +151,7 @@ if (scenario === 'perf-catalog') {
   mount(session);
 } else {
   mock.applyScenario(scenario);
-  const session = new ReadOnlyWorkbenchSession(mock);
+  session = new ReadOnlyWorkbenchSession(mock);
   mount(session);
 }
 
@@ -96,4 +166,9 @@ function mount(session: ReadOnlyWorkbenchSession): void {
 window.__fx01 = {
   getCalls: () => mock.getCallLog(),
   getObserveCallCount: () => mock.getObserveCallCount(),
+  emitWorkspaceInvalidation: () => {
+    mock.simulateExternalChange();
+    mock.emitEvent({ kind: 'assetsInvalidated', assetType: 'skill' });
+  },
+  getLocator: () => session.getSnapshot().locator,
 };

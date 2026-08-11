@@ -95,6 +95,17 @@ export function pfDescriptorDigest(descriptorPath) {
   return sha256Text(canonical);
 }
 
+/** descriptor 的声明 digest 必须与当前原始字节复算值完全一致。 */
+export function assertCurrentPfDescriptorDigest(descriptorPath) {
+  const descriptor = JSON.parse(fs.readFileSync(descriptorPath, 'utf8'));
+  const declared = descriptor?.digest?.value;
+  const digest = pfDescriptorDigest(descriptorPath);
+  if (declared !== digest) {
+    throw new Error(`PF-01 descriptor digest 不一致: 实算 ${digest} != 声明 ${String(declared)}`);
+  }
+  return { descriptor, digest };
+}
+
 export function writeJson(filePath, value) {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   fs.writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
@@ -203,6 +214,20 @@ export async function gitInfo() {
     commit: head.exitCode === 0 ? head.stdout.trim() : 'unknown',
     worktreeDirty: status.exitCode === 0 ? status.stdout.trim().length > 0 : null,
   };
+}
+
+/** PF/verify 的开始与结束必须来自同一 commit 且拥有相同 clean state。 */
+export function sameGitIdentity(start, end) {
+  return (
+    start !== null &&
+    typeof start === 'object' &&
+    end !== null &&
+    typeof end === 'object' &&
+    typeof start.commit === 'string' &&
+    typeof end.commit === 'string' &&
+    start.commit === end.commit &&
+    start.worktreeDirty === end.worktreeDirty
+  );
 }
 
 export { require };

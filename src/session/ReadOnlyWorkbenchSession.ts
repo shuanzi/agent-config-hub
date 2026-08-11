@@ -304,14 +304,28 @@ export class ReadOnlyWorkbenchSession {
   private invalidateAndReread(): void {
     // event 不携带事实：到达瞬间先失效旧 snapshot/cells，后续仅接受新 read。
     this.workbenchGeneration += 1;
+    // locator snapshot 同样不是权威事实；若用户正在搜索，保留输入和 open state，
+    // 立即清空旧结果并用同一 searchText 发起新的 authoritative read。
+    const locatorSearchText =
+      this.state.locator.kind === 'open' && this.state.locator.searchText.trim() !== ''
+        ? this.state.locator.searchText
+        : null;
+    const locatorGeneration = ++this.locatorGeneration;
     this.pendingRereadSelection = this.state.selected;
     this.update({
       loadState: { kind: 'loading' },
       selected: null,
       detailError: null,
       availableProjectIds: [],
+      locator:
+        locatorSearchText === null
+          ? this.state.locator.kind === 'open'
+            ? { kind: 'open', searchText: '', snapshot: null }
+            : { kind: 'closed' }
+          : { kind: 'open', searchText: locatorSearchText, snapshot: null },
     });
     this.refresh(false);
+    if (locatorSearchText !== null) this.readLocator(locatorSearchText, locatorGeneration);
   }
 
   private readLocator(searchText: string, generation: number): void {

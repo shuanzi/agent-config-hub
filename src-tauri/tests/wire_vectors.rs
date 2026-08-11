@@ -40,12 +40,12 @@ fn fx19_core() -> GatewayCore {
 fn valid_request_vectors_decode() {
     let vectors = [
         json!({
-            "wireVersion": 2,
+            "wireVersion": 3,
             "requestId": "req-list-1",
             "payload": { "kind": "assetList", "scope": { "kind": "allAssets" } }
         }),
         json!({
-            "wireVersion": 2,
+            "wireVersion": 3,
             "requestId": "req-list-2",
             "payload": {
                 "kind": "assetList",
@@ -60,7 +60,7 @@ fn valid_request_vectors_decode() {
             }
         }),
         json!({
-            "wireVersion": 2,
+            "wireVersion": 3,
             "requestId": "req-detail-1",
             "payload": {
                 "kind": "assetDetail",
@@ -74,7 +74,7 @@ fn valid_request_vectors_decode() {
             }
         }),
         json!({
-            "wireVersion": 2,
+            "wireVersion": 3,
             "requestId": "req-file-1",
             "payload": {
                 "kind": "nativeFile",
@@ -89,7 +89,7 @@ fn valid_request_vectors_decode() {
             }
         }),
         json!({
-            "wireVersion": 2,
+            "wireVersion": 3,
             "requestId": "req-fx19-project",
             "payload": {
                 "kind": "projectApplicability",
@@ -97,7 +97,7 @@ fn valid_request_vectors_decode() {
             }
         }),
         json!({
-            "wireVersion": 2,
+            "wireVersion": 3,
             "requestId": "req-workbench",
             "payload": {
                 "kind": "workbench",
@@ -107,7 +107,7 @@ fn valid_request_vectors_decode() {
             }
         }),
         json!({
-            "wireVersion": 2,
+            "wireVersion": 3,
             "requestId": "req-locator",
             "payload": {
                 "kind": "globalLocator",
@@ -223,6 +223,11 @@ fn workbench_and_locator_are_read_only_wire_variants() {
         locator_result["destination"]["assetRef"],
         locator_result["row"]["summary"]["asset"]
     );
+    assert_eq!(
+        locator_result["row"]["redactedSummary"],
+        json!("结构化只读 Skill 摘要"),
+        "FE-07R actual locator must export the safe, redacted display summary"
+    );
 }
 
 #[test]
@@ -303,7 +308,7 @@ fn negative_vectors_are_rejected_at_decode() {
         }),
         // project view 的 opaque identity shape 不可扩展
         json!({
-            "wireVersion": 2, "requestId": "r",
+            "wireVersion": 3, "requestId": "r",
             "payload": {
                 "kind": "projectApplicability",
                 "view": { "kind": "project", "projectId": "project-same-b", "bogus": true }
@@ -351,9 +356,9 @@ fn assert_normalized_gateway_unavailable(response: &Value, request_id: &str) {
 fn wire_faults_normalize_to_gateway_unavailable() {
     let core = core();
     let cases: Vec<Value> = vec![
-        // 错误 wireVersion
+        // breaking bump 的精确前一版 V2：ingress 不协商、不 fallback。
         json!({
-            "wireVersion": 1, "requestId": "r1",
+            "wireVersion": 2, "requestId": "r1",
             "payload": { "kind": "assetList", "scope": { "kind": "allAssets" } }
         }),
         // 未知 tag
@@ -380,7 +385,7 @@ fn wire_faults_normalize_to_gateway_unavailable() {
 
     // 超限 payload
     let huge = json!({
-        "wireVersion": 2,
+        "wireVersion": 3,
         "requestId": "r1",
         "payload": {
             "kind": "assetList",
@@ -396,7 +401,7 @@ fn wire_faults_normalize_to_gateway_unavailable() {
 fn oversized_search_text_over_limit_is_rejected_but_normal_request_passes() {
     let core = core();
     let ok = json!({
-        "wireVersion": 2,
+        "wireVersion": 3,
         "requestId": "r-ok",
         "payload": { "kind": "assetList", "scope": { "kind": "allAssets" } }
     });
@@ -615,7 +620,7 @@ fn fx19_all_projection_wire_keeps_registry_provenance_and_stable_findings() {
 fn response_envelope_serializes_to_golden_json() {
     let core = core();
     let request = json!({
-        "wireVersion": 2,
+        "wireVersion": 3,
         "requestId": "req-golden-1",
         "payload": {
             "kind": "assetDetail",
@@ -699,7 +704,7 @@ fn response_envelope_serializes_to_golden_json() {
 fn masked_native_file_response_matches_fixture_golden() {
     let core = core();
     let request = json!({
-        "wireVersion": 2,
+        "wireVersion": 3,
         "requestId": "req-golden-2",
         "payload": {
             "kind": "nativeFile",
@@ -750,7 +755,7 @@ fn event_envelope_serializes_to_golden_json() {
     let text = serde_json::to_string(&envelope).unwrap();
     assert_eq!(
         text,
-        r#"{"wireVersion":2,"event":{"kind":"assetsInvalidated","assetType":"skill"}}"#
+        r#"{"wireVersion":3,"event":{"kind":"assetsInvalidated","assetType":"skill"}}"#
     );
 
     // 不带 assetType 时字段省略（skip_serializing_if），不序列化 null。
@@ -763,7 +768,7 @@ fn event_envelope_serializes_to_golden_json() {
     let text = serde_json::to_string(&envelope).unwrap();
     assert_eq!(
         text,
-        r#"{"wireVersion":2,"event":{"kind":"assetsInvalidated"}}"#
+        r#"{"wireVersion":3,"event":{"kind":"assetsInvalidated"}}"#
     );
 
     // 事件往返解码，未知 tag 被拒绝。

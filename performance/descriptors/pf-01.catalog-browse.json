@@ -39,7 +39,9 @@
     {
       "id": "pf01.startup.first_list_visible",
       "surface": "冷启动与初始读取",
-      "definition": "测试入口模块求值（User Timing 起点）→ 首屏资产列表首次 ready 可见",
+      "definition": "测试入口模块求值（User Timing 起点）→ 首屏代表性 `.list-pane [role=\"option\"]` DOM 行真正可见",
+      "layer": "L2 mock renderer（headless Chrome + Vite dev server；非 release-like artifact）",
+      "selector": ".list-pane [role=\"option\"]",
       "minSamples": 5,
       "sampling": "每次 fresh load（重新 browser.url，页面上下文重置）"
     },
@@ -77,10 +79,10 @@
     }
   ],
   "budgetStatus": "formula-authorized / clean-manifest-gated",
-  "budgetNote": "用户已授权：完整 clean representative baseline 首次运行按公式生成版本化预算，但该次仍为 budget-not-frozen/inconclusive；后续独立 clean rerun 才可比较。仅 descriptor digest、完整 provenance 与 schema 均匹配的 manifest 才是 frozen。旧 20260810T124356Z 仅 preliminary/inconclusive，禁止追补 provenance 或作为冻结来源。",
+  "budgetNote": "完整 clean representative baseline 首次运行只收集样本，保持 budget-not-frozen/inconclusive，绝不生成版本化预算；须独立人工审核后才可冻结与比较。仅 descriptor digest、完整 provenance 与 schema 均匹配的 manifest 才是 frozen。旧 20260810T124356Z 仅 preliminary/inconclusive，禁止追补 provenance 或作为冻结来源。",
   "digest": {
     "algorithm": "sha256",
     "canonicalization": "将本文件 digest.value 置为空字符串后对文件原始字节求 sha256；由 scripts/orchestrator/lib.mjs 的 pfDescriptorDigest 复算",
-    "value": "f7dda0b93f894e87051682ecac0b73a44ff102c5454455c7ad81edea2644a8e5"
+    "value": "176da9697dcf604559edd68a85fe813a89c0e67967a52fbf14809d8a7193aa6b"
   }
 }

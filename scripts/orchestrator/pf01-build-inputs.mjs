@@ -20,7 +20,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { build } from 'vite';
-import { REPO_ROOT } from './lib.mjs';
+import { ARTIFACTS_ROOT, REPO_ROOT } from './lib.mjs';
 
 export const PF01_L3_BUILD_INPUTS = {
   schemaVersion: 2,
@@ -417,4 +417,44 @@ export function assertPf01L3BuildEnvironment(env = process.env, repoRoot = REPO_
     policy: 'no ambient VITE_/TAURI_/CARGO_/Rust/SDK/Node build overrides or root .env files',
     overrides: [],
   };
+}
+
+/** PF/verify 入口不得继承会改变 fixture、profile 或 evidence 目的地的 ambient override。 */
+export function assertPf01VerificationEnvironment(env = process.env) {
+  const keys = Object.keys(env).filter(
+    (key) => key === 'PERF_OUTPUT_DIR' || key.startsWith('PF01_') || key.startsWith('ACM_'),
+  );
+  if (keys.length > 0) {
+    throw new Error(`PF/verify ambient environment override rejected: ${keys.join(', ')}`);
+  }
+  return {
+    policy: 'no ambient PERF_OUTPUT_DIR/PF01_*/ACM_* overrides',
+    overrides: [],
+  };
+}
+
+/** PF evidence 只能写入 repo-local artifacts，且已存在的任一父目录不得为 symlink。 */
+export function assertPf01OutputDirectory(outputDir, { artifactsRoot = ARTIFACTS_ROOT } = {}) {
+  if (typeof outputDir !== 'string' || outputDir.trim() === '') {
+    throw new Error('PF-01 artifact output directory missing');
+  }
+  const root = path.resolve(artifactsRoot);
+  const resolved = path.resolve(outputDir);
+  const relative = path.relative(root, resolved);
+  if (relative === '' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+    throw new Error(`PF-01 artifact output directory outside artifacts root: ${outputDir}`);
+  }
+  for (let current = resolved; ; current = path.dirname(current)) {
+    if (fs.existsSync(current)) {
+      const stats = fs.lstatSync(current);
+      if (stats.isSymbolicLink()) {
+        throw new Error(`PF-01 artifact output directory symlink rejected: ${current}`);
+      }
+      if (!stats.isDirectory()) {
+        throw new Error(`PF-01 artifact output directory parent must be a directory: ${current}`);
+      }
+    }
+    if (current === root) break;
+  }
+  return resolved;
 }

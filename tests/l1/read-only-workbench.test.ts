@@ -49,6 +49,28 @@ describe('FE-01 read-only workbench model', () => {
     expect(() =>
       canonicalizeWorkbenchFilters({ projectIds: ['project-a'] }, { kind: 'global' }),
     ).toThrow('READ_FAILED');
+
+    // 运行时 ingress 也必须封闭；不能把未知 enum 静默 canonicalize 成空筛选。
+    expect(() =>
+      canonicalizeWorkbenchFilters(
+        {
+          agents: ['not-an-agent'] as unknown as NonNullable<
+            WorkbenchActualReadSnapshot['query']['filters']
+          >['agents'],
+        },
+        { kind: 'all' },
+      ),
+    ).toThrow('READ_FAILED');
+    expect(() =>
+      canonicalizeWorkbenchFilters(
+        {
+          statuses: ['not-a-status'] as unknown as NonNullable<
+            WorkbenchActualReadSnapshot['query']['filters']
+          >['statuses'],
+        },
+        { kind: 'all' },
+      ),
+    ).toThrow('READ_FAILED');
   });
 
   it('keeps resolved global rows out of project segments unless resolution is resolved', () => {

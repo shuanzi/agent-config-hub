@@ -391,12 +391,31 @@ pub enum SkillActivation {
     Stale,
 }
 
+/// FE-01 只读 Skill cell 的操作可用性事实。它独立于通用 AssetCapabilities，
+/// 以免把未来 ticket 的 write command 映射进本 read-only slice。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SkillCellAvailability {
+    Allowed,
+    Disabled { reason_code: ReasonCode },
+    Blocked { reason_code: ReasonCode },
+}
+
+/// 可选的权威事务观察值。FE-01 只展示它，绝不创建或推进该事务。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SkillTargetPending {
+    pub operation_id: String,
+    pub phase: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SkillTargetState {
     pub agent: AgentId,
     pub presence: SkillPresence,
     pub activation: SkillActivation,
     pub applicability: ApplicabilityResolution,
+    pub enable_availability: SkillCellAvailability,
+    pub disable_availability: SkillCellAvailability,
+    pub pending: Option<SkillTargetPending>,
     pub stable_reason: Option<String>,
 }
 

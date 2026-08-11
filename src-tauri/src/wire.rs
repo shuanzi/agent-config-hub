@@ -14,7 +14,7 @@ use ts_rs::TS;
 use crate::domain;
 
 /// 当前唯一支持的 wire 版本；不匹配在 ingress 封闭失败，不做协商或 fallback。
-pub const GATEWAY_WIRE_VERSION: u32 = 2;
+pub const GATEWAY_WIRE_VERSION: u32 = 3;
 
 // ---------------------------------------------------------------------------
 // 字符串枚举 DTO
@@ -556,9 +556,40 @@ pub struct SkillTargetStateWire {
     pub presence: SkillPresenceWire,
     pub activation: SkillActivationWire,
     pub applicability: ApplicabilityResolutionWire,
+    pub enable_availability: SkillCellAvailabilityWire,
+    pub disable_availability: SkillCellAvailabilityWire,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub pending: Option<SkillTargetPendingWire>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub stable_reason: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+#[serde(deny_unknown_fields)]
+pub enum SkillCellAvailabilityWire {
+    Allowed,
+    Disabled(SkillCellUnavailableWire),
+    Blocked(SkillCellUnavailableWire),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SkillCellUnavailableWire {
+    pub reason_code: ReasonCodeWire,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SkillTargetPendingWire {
+    pub operation_id: String,
+    pub phase: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -1579,7 +1610,37 @@ impl From<domain::SkillTargetState> for SkillTargetStateWire {
             presence: value.presence.into(),
             activation: value.activation.into(),
             applicability: value.applicability.into(),
+            enable_availability: value.enable_availability.into(),
+            disable_availability: value.disable_availability.into(),
+            pending: value.pending.map(Into::into),
             stable_reason: value.stable_reason,
+        }
+    }
+}
+
+impl From<domain::SkillCellAvailability> for SkillCellAvailabilityWire {
+    fn from(value: domain::SkillCellAvailability) -> Self {
+        match value {
+            domain::SkillCellAvailability::Allowed => Self::Allowed,
+            domain::SkillCellAvailability::Disabled { reason_code } => {
+                Self::Disabled(SkillCellUnavailableWire {
+                    reason_code: reason_code.into(),
+                })
+            }
+            domain::SkillCellAvailability::Blocked { reason_code } => {
+                Self::Blocked(SkillCellUnavailableWire {
+                    reason_code: reason_code.into(),
+                })
+            }
+        }
+    }
+}
+
+impl From<domain::SkillTargetPending> for SkillTargetPendingWire {
+    fn from(value: domain::SkillTargetPending) -> Self {
+        Self {
+            operation_id: value.operation_id,
+            phase: value.phase,
         }
     }
 }

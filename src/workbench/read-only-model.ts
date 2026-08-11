@@ -142,7 +142,11 @@ export type LocatorDestination =
   | { kind: 'skillDetail'; assetRef: ReadOnlyAssetRef }
   | { kind: 'unsupportedReadOnly'; assetRef: ReadOnlyAssetRef; reasonCode: string };
 
-export interface LocatorResult extends ReadOnlyRow {
+export interface LocatorResult extends Omit<ReadOnlyRow, 'redactedSummary' | 'ownershipHint'> {
+  /** locator 只能展示已遮蔽的摘要；缺失时整个 wire snapshot fail-closed。 */
+  redactedSummary: string;
+  /** 已遮蔽的全局/项目展示提示；opaque AssetRef 仍是唯一 identity。 */
+  ownershipHint: string;
   destinationViewContext: ViewContext;
   destination: LocatorDestination;
   matchedField:
@@ -169,8 +173,18 @@ export interface SkillTargetState {
   presence: 'absent' | 'present' | 'unknown' | 'blocked' | 'stale';
   activation: 'notApplicable' | 'enabled' | 'disabled' | 'unknown' | 'blocked' | 'stale';
   applicability: 'resolved' | 'unknown' | 'blocked' | 'stale';
+  /** 权威操作可用性只读事实；FE-01 不渲染任何操作控件。 */
+  enableAvailability: SkillCellAvailability;
+  disableAvailability: SkillCellAvailability;
+  /** 可选的权威事务标识；仅显示，不产生或推进事务。 */
+  pending?: { operationId: string; phase: string };
   stableReason?: string;
 }
+
+export type SkillCellAvailability =
+  | { kind: 'allowed' }
+  | { kind: 'disabled'; reasonCode: string }
+  | { kind: 'blocked'; reasonCode: string };
 
 export interface ListPresentationState {
   nameSort: 'asc' | 'desc';
@@ -228,6 +242,12 @@ export function canonicalizeWorkbenchFilters(
   viewContext: ViewContext,
 ): WorkbenchFilters | undefined {
   if (filters === undefined) return undefined;
+  if (
+    filters.agents?.some((agent) => !AGENT_ORDER.includes(agent)) ||
+    filters.statuses?.some((status) => !STATUS_ORDER.includes(status))
+  ) {
+    throw new Error('READ_FAILED: unknown workbench filter enum');
+  }
   assertNonEmptyIds(filters.sourceIds);
   assertNonEmptyIds(filters.projectIds);
   if (viewContext.kind !== 'all' && (filters.projectIds?.length ?? 0) > 0) {

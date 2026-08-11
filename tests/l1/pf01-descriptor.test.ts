@@ -1,9 +1,16 @@
 /** PF-01 的 FE-01-only acceptance correction：选择 Skill 行只展示结构化只读 cells。 */
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const descriptorPath = resolve('performance/descriptors/pf-01.catalog-browse.json');
+
+function descriptorDigest(raw: string, value: string): string {
+  return createHash('sha256')
+    .update(raw.replace(`"value": "${value}"`, '"value": ""'), 'utf8')
+    .digest('hex');
+}
 
 describe('PF-01 descriptor', () => {
   it('将选择指标限制为四个只读 Skill Agent cells，不读取源码', () => {
@@ -29,7 +36,27 @@ describe('PF-01 descriptor', () => {
     };
     expect(descriptor.budgetStatus).toEqual('formula-authorized / clean-manifest-gated');
     expect(descriptor.budgetNote).toMatch(/首次.*inconclusive/);
-    expect(descriptor.budgetNote).toMatch(/独立 clean rerun/);
+    expect(descriptor.budgetNote).toMatch(/独立人工审核/);
+    expect(descriptor.budgetNote).toMatch(/绝不生成版本化预算/);
     expect(descriptor.budgetStatus).not.toMatch(/authoritative-baseline-required/);
+  });
+
+  it('将 startup 计为首屏代表性列表行真实可见，并固定 L2 layer、selector 与自描述 digest', () => {
+    const descriptor = JSON.parse(readFileSync(descriptorPath, 'utf8')) as {
+      metrics: Array<{ id: string; definition: string; layer?: string; selector?: string }>;
+      digest: { value: string };
+    };
+    const startup = descriptor.metrics.find(
+      (metric) => metric.id === 'pf01.startup.first_list_visible',
+    );
+    expect(startup).toMatchObject({
+      definition:
+        '测试入口模块求值（User Timing 起点）→ 首屏代表性 `.list-pane [role="option"]` DOM 行真正可见',
+      layer: 'L2 mock renderer（headless Chrome + Vite dev server；非 release-like artifact）',
+      selector: '.list-pane [role="option"]',
+    });
+    expect(descriptorDigest(readFileSync(descriptorPath, 'utf8'), descriptor.digest.value)).toBe(
+      descriptor.digest.value,
+    );
   });
 });

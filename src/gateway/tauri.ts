@@ -34,6 +34,7 @@ import type {
   MvpAssetType,
   ReadOnlyAssetRef,
   ReadOnlyRow,
+  SkillCellAvailability,
   SkillTargetState,
   ViewContext,
   WorkbenchActualReadSnapshot,
@@ -177,6 +178,19 @@ function assetRefFromWire(
       };
 }
 
+function skillCellAvailabilityFromWire(value: unknown): SkillCellAvailability | null {
+  if (!isRecord(value)) return null;
+  if (value.kind === 'allowed' && Object.keys(value).length === 1) return { kind: 'allowed' };
+  if (
+    (value.kind === 'disabled' || value.kind === 'blocked') &&
+    isOneOf(value.reasonCode, REASON_CODES) &&
+    Object.keys(value).length === 2
+  ) {
+    return { kind: value.kind, reasonCode: value.reasonCode };
+  }
+  return null;
+}
+
 function rowFromWire(value: unknown, expectedAssetType: MvpAssetType): ReadOnlyRow | null {
   if (!isRecord(value) || !isRecord(value.summary) || !isRecord(value.summary.asset)) return null;
   const summary = value.summary as Record<string, unknown>;
@@ -214,6 +228,13 @@ function rowFromWire(value: unknown, expectedAssetType: MvpAssetType): ReadOnlyR
       !isOneOf(cell.presence, PRESENCE) ||
       !isOneOf(cell.activation, ACTIVATION) ||
       !isOneOf(cell.applicability, APPLICABILITY) ||
+      skillCellAvailabilityFromWire(cell.enableAvailability) === null ||
+      skillCellAvailabilityFromWire(cell.disableAvailability) === null ||
+      (cell.pending !== undefined &&
+        (!isRecord(cell.pending) ||
+          !isNonEmptyString(cell.pending.operationId) ||
+          !isNonEmptyString(cell.pending.phase) ||
+          Object.keys(cell.pending).length !== 2)) ||
       (cell.stableReason !== undefined && !isNonEmptyString(cell.stableReason))
     ) {
       return null;
@@ -223,6 +244,16 @@ function rowFromWire(value: unknown, expectedAssetType: MvpAssetType): ReadOnlyR
       presence: cell.presence,
       activation: cell.activation,
       applicability: cell.applicability,
+      enableAvailability: skillCellAvailabilityFromWire(cell.enableAvailability)!,
+      disableAvailability: skillCellAvailabilityFromWire(cell.disableAvailability)!,
+      ...(cell.pending === undefined
+        ? {}
+        : {
+            pending: {
+              operationId: cell.pending.operationId as string,
+              phase: cell.pending.phase as string,
+            },
+          }),
       ...(cell.stableReason === undefined ? {} : { stableReason: cell.stableReason }),
     } satisfies SkillTargetState;
   });
@@ -535,6 +566,8 @@ function locatorSnapshotFromWire(value: unknown): GlobalLocatorSnapshot | null {
           row.assetRef.nativeOwnership.kind !== 'project' ||
           destinationAsset.nativeOwnership.projectId === row.assetRef.nativeOwnership.projectId);
       return row === null ||
+        !isNonEmptyString(row.redactedSummary) ||
+        !isNonEmptyString(row.ownershipHint) ||
         destinationViewContext === null ||
         destination === null ||
         matchedField === null ||
@@ -542,6 +575,8 @@ function locatorSnapshotFromWire(value: unknown): GlobalLocatorSnapshot | null {
         ? null
         : {
             ...row,
+            redactedSummary: row.redactedSummary,
+            ownershipHint: row.ownershipHint,
             destinationViewContext,
             destination:
               'assetId' in destination

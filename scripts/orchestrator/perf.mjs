@@ -12,28 +12,28 @@
  * proposed-budgets.json 到输出目录。
  *
  * 预算门（ARC-06c §3.16，预算未冻结不得宣称通过）：
- * - 首次完整、clean representative baseline 在用户授权下可自动生成版本化
- *   performance/budgets/pf-01.budgets.json，但该首次运行仍以退出码 2 结束
- *   （budget-not-frozen → inconclusive）；后续独立 clean rerun 才能比较；
+ * - 首次完整、clean representative baseline 只收集样本并保持 budget-not-frozen；
+ *   它绝不写入 performance/budgets/pf-01.budgets.json，须独立人工审核后才可冻结；
  * - 存在 → 按预算逐 metric 比较，超预算 exit 1，达标 exit 0（未来路径）。
  * 采样本身失败（wdio 非零退出、样本数不足）一律 exit 1。
  *
  * 样本/资源/provenance 不完整或 worktree dirty 一律 inconclusive，绝不写预算。
  *
- * 输出目录：环境变量 PERF_OUTPUT_DIR（verify:ticket 注入 evidence 目录），
+ * 输出目录：`--output-dir=<repo/.artifacts/...>`（verify:ticket 注入 evidence 目录），
  * 缺省 .artifacts/performance/PF-01/<run-id>/。
  */
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {
+  assertCurrentPfDescriptorDigest,
   capture,
   gitInfo,
   makeRunId,
-  pfDescriptorDigest,
   runStep,
   sanitizeText,
   scanEvidenceText,
+  sameGitIdentity,
   writeJson,
   ARTIFACTS_ROOT,
   REPO_ROOT,
@@ -41,16 +41,14 @@ import {
 import { ensureHarnessBuilt } from './build-harness.mjs';
 import {
   assertPf01L3BuildEnvironment,
+  assertPf01OutputDirectory,
   assertPf01L3ViteModuleClosure,
+  assertPf01VerificationEnvironment,
   collectPf01L3HarnessBuildInputs,
-  collectPf01L3HarnessBuildInputsFromGit,
 } from './pf01-build-inputs.mjs';
 import {
   assertCleanPf01Baseline,
   collectCurrentPf01Attestation,
-  formatPf01BudgetJson,
-  freezePf01Budget,
-  PF01_BUDGET_CONSTANTS,
   pf01ComparisonProvenance,
   validateCurrentPf01Attestation,
   validateFrozenPf01Budget,
@@ -113,55 +111,30 @@ function proposeBudget(metricId, stats) {
     proposedAbsoluteCeilingMs: absoluteCeilingMs,
     proposedRegressionAllowance: { relativeTo: 'baseline-p50', maxRatio: 1.25 },
     status: 'proposed-not-frozen',
-    note: '本次完整 clean baseline 会在同一 runner 内生成版本化预算；首次运行仍为 inconclusive，须后续独立 clean rerun 比较。',
+    note: '本次完整 clean baseline 只收集样本；预算冻结须独立人工审核，首次运行仍为 inconclusive。',
   };
 }
 
-function relativeArtifactPath(filePath) {
-  const relative = path.relative(REPO_ROOT, filePath);
-  if (relative.startsWith('..') || path.isAbsolute(relative)) {
-    throw new Error(`PF-01 artifact 必须位于 repo 内: ${filePath}`);
-  }
-  return relative;
-}
-
-async function completeBaselineProvenance({ outputDir, resourceEvidence, currentAttestation }) {
-  const attestation = validateCurrentPf01Attestation(currentAttestation);
-  if (!attestation.valid) throw new Error(attestation.violations.join('; '));
-  const [git, cargo, rustc, npm, macosProductVersion] = await Promise.all([
-    gitInfo(),
+/**
+ * 未来显式 budget freeze 必须能从 immutable run 重建完整 provenance；这里仅记录
+ * 当前采样 runner/toolchain，绝不在 perf 首次 baseline 内创建预算。
+ */
+async function captureBudgetFreezeRuntimeProvenance() {
+  const [npm, cargo, rustc, macosProductVersion] = await Promise.all([
+    capture('corepack', ['npm', '--version']),
     capture('cargo', ['--version']),
     capture('rustc', ['--version']),
-    capture('corepack', ['npm', '--version']),
     capture('sw_vers', ['-productVersion']),
   ]);
-  if (typeof git.commit !== 'string' || !/^[a-f0-9]{40,64}$/i.test(git.commit)) {
-    throw new Error('git commit unavailable');
-  }
-  assertCleanPf01Baseline(git);
-  if (cargo.exitCode !== 0 || rustc.exitCode !== 0 || npm.exitCode !== 0 || macosProductVersion.exitCode !== 0) {
-    throw new Error('toolchain or macOS product version unavailable');
-  }
-  const baselineBuildInputs = collectPf01L3HarnessBuildInputsFromGit({ commit: git.commit });
-  if (baselineBuildInputs.digest !== currentAttestation.buildInputs?.digest) {
-    throw new Error('baseline Git-object build-input digest 与当前 clean checkout 不匹配');
+  if (
+    npm.exitCode !== 0 ||
+    cargo.exitCode !== 0 ||
+    rustc.exitCode !== 0 ||
+    macosProductVersion.exitCode !== 0
+  ) {
+    throw new Error('runner/toolchain provenance unavailable');
   }
   return {
-    run: relativeArtifactPath(outputDir),
-    collectedAt: new Date().toISOString(),
-    statusBeforeBudgetFreeze: 'baseline-collected / budget-not-frozen',
-    commit: git.commit,
-    worktreeDirty: false,
-    artifact: {
-      identityPath: currentAttestation.artifact.identityPath,
-      kind: currentAttestation.artifact.kind,
-      identifier: currentAttestation.artifact.identifier,
-      profile: currentAttestation.artifact.profile,
-      binary: currentAttestation.artifact.binary,
-      declaredBinarySha256: currentAttestation.artifact.declaredBinarySha256,
-      actualBinarySha256: currentAttestation.artifact.actualBinarySha256,
-      provenance: currentAttestation.artifact.provenance,
-    },
     runner: {
       node: process.version,
       npm: npm.stdout.trim(),
@@ -171,15 +144,6 @@ async function completeBaselineProvenance({ outputDir, resourceEvidence, current
       arch: os.arch(),
     },
     toolchain: { cargo: cargo.stdout.trim(), rustc: rustc.stdout.trim() },
-    fixture: currentAttestation.fixture,
-    buildInputs: baselineBuildInputs,
-    resources: {
-      metric: resourceEvidence.metric,
-      layer: resourceEvidence.layer,
-      sampling: PF01_BUDGET_CONSTANTS.RESOURCE_SAMPLING,
-      rawPeaksBytes: resourceEvidence.rawPeakBytes,
-      maxBytes: resourceEvidence.maxBytes,
-    },
   };
 }
 
@@ -231,11 +195,24 @@ async function main() {
     process.exit(1);
   }
 
+  try {
+    assertPf01VerificationEnvironment();
+  } catch (error) {
+    console.error(
+      `INCONCLUSIVE  PF ambient environment 无法证明：${error instanceof Error ? error.message : 'unknown'}`,
+    );
+    process.exit(2);
+  }
+
   // descriptor 自描述 digest 一致性（防手工篡改形状而未更新 digest）
-  const digest = pfDescriptorDigest(DESCRIPTOR_PATH);
-  const declared = JSON.parse(fs.readFileSync(DESCRIPTOR_PATH, 'utf8')).digest.value;
-  if (digest !== declared) {
-    console.error(`FAIL  descriptor digest 不一致: 实算 ${digest} != 声明 ${declared}`);
+  let descriptor;
+  let digest;
+  try {
+    ({ descriptor, digest } = assertCurrentPfDescriptorDigest(DESCRIPTOR_PATH));
+  } catch (error) {
+    console.error(
+      `FAIL  descriptor digest 无效：${error instanceof Error ? error.message : 'unknown'}`,
+    );
     process.exit(1);
   }
   console.log(`PF-01 descriptor digest: ${digest}（profile: ${profile}）`);
@@ -250,17 +227,34 @@ async function main() {
     process.exit(2);
   }
   let buildEnvironment;
+  let runtimeProvenance;
   try {
     buildEnvironment = assertPf01L3BuildEnvironment();
+    runtimeProvenance = await captureBudgetFreezeRuntimeProvenance();
   } catch (error) {
     console.error(
-      `INCONCLUSIVE  L3 harness build environment 无法证明：${error instanceof Error ? error.message : 'unknown'}`,
+      `INCONCLUSIVE  L3 harness build/runner environment 无法证明：${error instanceof Error ? error.message : 'unknown'}`,
     );
     process.exit(2);
   }
 
-  const outputDir =
-    process.env.PERF_OUTPUT_DIR ?? path.join(ARTIFACTS_ROOT, 'performance/PF-01', makeRunId());
+  const outputDirFlag = args.filter((arg) => arg.startsWith('--output-dir='));
+  if (outputDirFlag.length > 1 || (outputDirFlag[0] !== undefined && outputDirFlag[0].length === 13)) {
+    console.error('INCONCLUSIVE  PF output directory 参数无效');
+    process.exit(2);
+  }
+  let outputDir;
+  try {
+    outputDir = assertPf01OutputDirectory(
+      outputDirFlag[0]?.slice('--output-dir='.length) ??
+        path.join(ARTIFACTS_ROOT, 'performance/PF-01', makeRunId()),
+    );
+  } catch (error) {
+    console.error(
+      `INCONCLUSIVE  PF output directory 无法证明：${error instanceof Error ? error.message : 'unknown'}`,
+    );
+    process.exit(2);
+  }
   fs.mkdirSync(outputDir, { recursive: true });
 
   // --- L2 采样（mock renderer surface） --------------------------------------
@@ -353,6 +347,7 @@ async function main() {
 
   const metrics = {};
   let complete = true;
+  let provenanceError = null;
   for (const [metricId, minSamples] of Object.entries(MIN_SAMPLES)) {
     const raw = mergedSamples[metricId]?.samples ?? [];
     const stats = summarize(raw);
@@ -367,9 +362,15 @@ async function main() {
     };
   }
   if (resourceEvidence === null) complete = false;
+  const endingGit = await gitInfo();
+  const gitIdentityConsistent = sameGitIdentity(startingGit, endingGit);
+  if (!gitIdentityConsistent) {
+    complete = false;
+    provenanceError = 'PF-01 start/end Git identity mismatch';
+  }
 
-  // 首次完整采样前不存在版本化预算；即使本次获授权自动生成预算，也必须
-  // 保持这一次为 budget-not-frozen/inconclusive，不能把首次结果冒充 PASS。
+  // current budget 缺失时首次完整采样只收集样本；保持
+  // budget-not-frozen/inconclusive，不能自动写入或把首次结果冒充 PASS。
   const budgetExistedBeforeRun = fs.existsSync(BUDGETS_PATH);
   let existingBudget = null;
   let budgetValidation = null;
@@ -378,7 +379,7 @@ async function main() {
       existingBudget = JSON.parse(fs.readFileSync(BUDGETS_PATH, 'utf8'));
       budgetValidation = validateFrozenPf01Budget(
         existingBudget,
-        JSON.parse(fs.readFileSync(DESCRIPTOR_PATH, 'utf8')),
+        descriptor,
         profile,
         currentAttestation,
       );
@@ -387,34 +388,6 @@ async function main() {
         valid: false,
         violations: [error instanceof Error ? error.message : '预算文件无法解析'],
       };
-    }
-  }
-  let generatedBudget = null;
-  let provenanceError = null;
-  if (complete && !budgetExistedBeforeRun && resourceEvidence !== null) {
-    try {
-      generatedBudget = freezePf01Budget({
-        descriptor: JSON.parse(fs.readFileSync(DESCRIPTOR_PATH, 'utf8')),
-        profile,
-        metrics,
-        baselineProvenance: await completeBaselineProvenance({
-          outputDir,
-          resourceEvidence,
-          currentAttestation,
-        }),
-      });
-      const validation = validateFrozenPf01Budget(
-        generatedBudget,
-        JSON.parse(fs.readFileSync(DESCRIPTOR_PATH, 'utf8')),
-        profile,
-        currentAttestation,
-      );
-      if (!validation.valid) throw new Error(validation.violations.join('; '));
-      fs.writeFileSync(BUDGETS_PATH, await formatPf01BudgetJson(generatedBudget), 'utf8');
-    } catch (error) {
-      generatedBudget = null;
-      provenanceError = error instanceof Error ? error.message : 'baseline provenance unavailable';
-      complete = false;
     }
   }
   const status = !complete
@@ -432,9 +405,7 @@ async function main() {
     profile,
     status,
     budgetState: !budgetExistedBeforeRun
-      ? generatedBudget === null
-        ? 'budget-not-frozen（本次 baseline 不完整，未生成版本化预算）'
-        : 'budget-created / first-run-inconclusive（须后续独立 rerun 比较）'
+      ? 'budget-not-frozen（本次 baseline 只收集样本，未生成版本化预算）'
       : budgetValidation?.valid
         ? 'budget-frozen（performance/budgets/pf-01.budgets.json）'
         : 'budget-invalid（禁止比较或 PASS）',
@@ -449,11 +420,19 @@ async function main() {
       current: {
         ...comparisonProvenance.current,
         buildEnvironment,
+        ...runtimeProvenance,
       },
+    },
+    runIdentity: {
+      startCommit: startingGit.commit,
+      startWorktreeDirty: startingGit.worktreeDirty,
+      endCommit: endingGit.commit,
+      endWorktreeDirty: endingGit.worktreeDirty,
+      consistent: gitIdentityConsistent,
     },
     budgetValidation:
       budgetValidation === null
-        ? { status: generatedBudget === null ? 'not-created' : 'created-for-next-rerun' }
+        ? { status: 'not-created' }
         : budgetValidation,
     collectedAt: samplesPayload.collectedAt,
   };
@@ -462,7 +441,7 @@ async function main() {
     descriptorId: 'PF-01',
     profile,
     status: 'proposed-not-frozen',
-    note: '以下为基于本次样本分布的建议预算（absolute ceiling = p95×1.5 上取整 10ms；regression allowance = baseline p50×1.25）。首次 clean baseline 已获授权生成版本化预算，但本次仍不得据此关闭性能验收。',
+    note: '以下为基于本次样本分布的建议预算（absolute ceiling = p95×1.5 上取整 10ms；regression allowance = baseline p50×1.25）。首次 clean baseline 只收集样本；须独立人工审核后才可冻结，绝不据此关闭性能验收。',
     budgets: Object.entries(metrics).map(([metricId, stats]) => proposeBudget(metricId, stats)),
     resources:
       resourceEvidence === null

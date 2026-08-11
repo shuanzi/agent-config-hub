@@ -28,9 +28,10 @@ use crate::domain::{
     GlobalLocatorSnapshot, IndexStatus, InspectorData, LocatorGroup, LocatorMatchedField,
     LocatorResult, MaskedSourceContent, MvpAssetType, NativeFileContent, NativeFileRef,
     NativeFileSnapshot, NativeOwnership, NativeUnitKind, ReadFailure, ReasonCode, RecoveryAction,
-    SegmentSource, SensitiveDisplayState, SensitiveSegmentRef, SkillActivation, SkillPresence,
-    SkillTargetState, SourceAnchor, SourceTier, ViewContext, WorkbenchActualReadSnapshot,
-    WorkbenchQuery, WorkbenchRow, WorkbenchSegment, WorkbenchStatusFacts,
+    SegmentSource, SensitiveDisplayState, SensitiveSegmentRef, SkillActivation,
+    SkillCellAvailability, SkillPresence, SkillTargetState, SourceAnchor, SourceTier, ViewContext,
+    WorkbenchActualReadSnapshot, WorkbenchQuery, WorkbenchRow, WorkbenchSegment,
+    WorkbenchStatusFacts,
 };
 
 /// 与 fixtures/sensitive-masking.ts 相同的固定遮蔽标记。
@@ -61,6 +62,9 @@ fn skill_target_states() -> Vec<SkillTargetState> {
             presence: SkillPresence::Present,
             activation: SkillActivation::Enabled,
             applicability: crate::domain::ApplicabilityResolution::Resolved,
+            enable_availability: SkillCellAvailability::Allowed,
+            disable_availability: SkillCellAvailability::Allowed,
+            pending: None,
             stable_reason: None,
         },
         SkillTargetState {
@@ -68,6 +72,11 @@ fn skill_target_states() -> Vec<SkillTargetState> {
             presence: SkillPresence::Absent,
             activation: SkillActivation::NotApplicable,
             applicability: crate::domain::ApplicabilityResolution::Resolved,
+            enable_availability: SkillCellAvailability::Allowed,
+            disable_availability: SkillCellAvailability::Disabled {
+                reason_code: ReasonCode::UnsupportedCapability,
+            },
+            pending: None,
             stable_reason: None,
         },
         SkillTargetState {
@@ -75,6 +84,11 @@ fn skill_target_states() -> Vec<SkillTargetState> {
             presence: SkillPresence::Absent,
             activation: SkillActivation::NotApplicable,
             applicability: crate::domain::ApplicabilityResolution::Resolved,
+            enable_availability: SkillCellAvailability::Allowed,
+            disable_availability: SkillCellAvailability::Disabled {
+                reason_code: ReasonCode::UnsupportedCapability,
+            },
+            pending: None,
             stable_reason: None,
         },
         SkillTargetState {
@@ -82,6 +96,11 @@ fn skill_target_states() -> Vec<SkillTargetState> {
             presence: SkillPresence::Absent,
             activation: SkillActivation::NotApplicable,
             applicability: crate::domain::ApplicabilityResolution::Resolved,
+            enable_availability: SkillCellAvailability::Allowed,
+            disable_availability: SkillCellAvailability::Disabled {
+                reason_code: ReasonCode::UnsupportedCapability,
+            },
+            pending: None,
             stable_reason: None,
         },
     ]

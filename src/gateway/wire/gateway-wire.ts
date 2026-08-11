@@ -6,7 +6,7 @@
  * verify:static 在临时目录重新生成并逐字节比对，任何手工编辑都会造成漂移失败。
  */
 
-export const GATEWAY_WIRE_VERSION = 2 as const;
+export const GATEWAY_WIRE_VERSION = 3 as const;
 
 export type AssetTypeWire = "skill" | "longTermInstruction" | "subagent" | "hook";
 export type AgentIdWire = "claude-code" | "codex" | "gemini-cli" | "opencode";
@@ -70,7 +70,10 @@ queriedAt: string,
  * ISO 8601
  */
 indexUpdatedAt: string, };
-export type SkillTargetStateWire = { agent: AgentIdWire, presence: SkillPresenceWire, activation: SkillActivationWire, applicability: ApplicabilityResolutionWire, stableReason?: string, };
+export type SkillCellUnavailableWire = { reasonCode: ReasonCodeWire, };
+export type SkillCellAvailabilityWire = { "kind": "allowed" } | { "kind": "disabled" } & SkillCellUnavailableWire | { "kind": "blocked" } & SkillCellUnavailableWire;
+export type SkillTargetPendingWire = { operationId: string, phase: string, };
+export type SkillTargetStateWire = { agent: AgentIdWire, presence: SkillPresenceWire, activation: SkillActivationWire, applicability: ApplicabilityResolutionWire, enableAvailability: SkillCellAvailabilityWire, disableAvailability: SkillCellAvailabilityWire, pending?: SkillTargetPendingWire, stableReason?: string, };
 export type WorkbenchRowWire = { summary: AssetSummaryWire, sortBaseName: string, authoritativeInputOrder: number, statusMemberships: Array<AssetStatusFilterWire>, skillTargetStates: Array<SkillTargetStateWire>, redactedSummary?: string, };
 export type WorkbenchSegmentWire = { id: string, source: SegmentSourceWire, displayLabel: string, projectId?: string, rows: Array<WorkbenchRowWire>, };
 export type EffectiveContextFactWire = { asset: AssetRefWire, assetId: string, projectId: string, projectDisplayName: string, adapter: AdapterProvenanceWire, rule: RuleProvenanceWire, authoritativeReadRevision: string, sourceTierId: string, loadOrder: number, priority: number, overrideRelation?: OverrideRelationWire, resolution: ApplicabilityResolutionWire, reasonCode?: ReasonCodeWire, };
