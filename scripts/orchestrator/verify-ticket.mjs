@@ -38,10 +38,13 @@ import { TICKET_REGISTRY, ticketConfig } from './ticket-registry.mjs';
 import { maybeWriteLatestCleanPass } from './latest-clean-pass.mjs';
 import {
   assertPf01L3ViteModuleClosure,
+  assertPf01L3BuildEnvironment,
   assertPf01VerificationEnvironment,
   collectPf01L3HarnessBuildInputs,
 } from './pf01-build-inputs.mjs';
+import { collectPf01MeasurementInputs } from './pf01-measurement-inputs.mjs';
 import {
+  capturePf01RuntimeProvenance,
   collectCurrentPf01Attestation,
   pf01ComparisonProvenance,
   validateFrozenPf01Budget,
@@ -89,8 +92,11 @@ async function budgetState(performance) {
   try {
     const budget = JSON.parse(fs.readFileSync(budgetPath, 'utf8'));
     await assertPf01L3ViteModuleClosure();
+    const runtimeProvenance = await capturePf01RuntimeProvenance();
     const currentAttestation = collectCurrentPf01Attestation({
       buildInputs: collectPf01L3HarnessBuildInputs(),
+      measurementInputs: await collectPf01MeasurementInputs(),
+      runtimeProvenance,
     });
     const validation = validateFrozenPf01Budget(
       budget,
@@ -141,7 +147,10 @@ async function main() {
 
   let verificationEnvironment;
   try {
-    verificationEnvironment = assertPf01VerificationEnvironment();
+    verificationEnvironment = {
+      verification: assertPf01VerificationEnvironment(),
+      build: assertPf01L3BuildEnvironment(),
+    };
   } catch (error) {
     console.error(
       `INCONCLUSIVE  verify ambient environment 无法证明：${error instanceof Error ? error.message : 'unknown'}`,

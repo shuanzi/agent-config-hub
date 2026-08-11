@@ -10,6 +10,9 @@ import { formatPf01BudgetJson, freezePf01Budget, migratePf01BudgetV2 } from '../
 // prettier-ignore
 // @ts-expect-error runtime verifier module is a plain Node ESM module.
 import { computePf01L3HarnessBuildInputsDigest } from '../../scripts/orchestrator/pf01-build-inputs.mjs';
+// prettier-ignore
+// @ts-expect-error runtime provenance module is a plain Node ESM module.
+import { computePf01MeasurementInputsDigest, PF01_MEASUREMENT_INPUT_PATHS, PF01_MEASUREMENT_INPUTS } from '../../scripts/orchestrator/pf01-measurement-inputs.mjs';
 
 const HISTORICAL_BUDGET_PATH = 'performance/budgets/history/pf-01.budgets.20260810T124356Z.json';
 
@@ -26,6 +29,28 @@ function baselineBuildInputs(): Record<string, unknown> {
     source: {
       kind: 'git-object-tree',
       method: 'raw bytes SHA-256 / byte-sorted repo-relative paths',
+      commit: '4fdff98be42065936bcfff462302f033de5d6b4a',
+    },
+    entries,
+  };
+}
+
+function baselineMeasurementInputs(): Record<string, unknown> {
+  const entries = PF01_MEASUREMENT_INPUT_PATHS.map((path: string, index: number) => ({
+    path,
+    sha256: (index + 1).toString(16).padStart(64, '0'),
+  }));
+  return {
+    schemaVersion: PF01_MEASUREMENT_INPUTS.schemaVersion,
+    algorithm: PF01_MEASUREMENT_INPUTS.algorithm,
+    digest: computePf01MeasurementInputsDigest({
+      schemaVersion: PF01_MEASUREMENT_INPUTS.schemaVersion,
+      algorithm: PF01_MEASUREMENT_INPUTS.algorithm,
+      entries,
+    }),
+    source: {
+      kind: 'git-object-tree',
+      method: PF01_MEASUREMENT_INPUTS.method,
       commit: '4fdff98be42065936bcfff462302f033de5d6b4a',
     },
     entries,
@@ -136,6 +161,7 @@ describe('PF-01 frozen representative budget', () => {
       migratePf01BudgetV2({
         budget: legacy,
         baselineBuildInputs: baselineBuildInputs(),
+        baselineMeasurementInputs: baselineMeasurementInputs(),
       }),
     ).toThrow(/PF-01/);
   });
@@ -148,8 +174,9 @@ describe('PF-01 frozen representative budget', () => {
     const refreshed = migratePf01BudgetV2({
       budget: current,
       baselineBuildInputs: baselineBuildInputs(),
+      baselineMeasurementInputs: baselineMeasurementInputs(),
     });
-    expect(refreshed.schemaVersion).toBe(3);
+    expect(refreshed.schemaVersion).toBe(4);
     expect(refreshed.baselineProvenance.buildInputs.digest).toBe(
       baselineBuildInputs().digest as string,
     );

@@ -10,6 +10,9 @@ import { freezePf01BudgetFromBaselineRun } from '../../scripts/orchestrator/refr
 // prettier-ignore
 // @ts-expect-error runtime orchestrator module is plain Node ESM.
 import { computePf01L3HarnessBuildInputsDigest } from '../../scripts/orchestrator/pf01-build-inputs.mjs';
+// prettier-ignore
+// @ts-expect-error runtime provenance module is a plain Node ESM module.
+import { computePf01MeasurementInputsDigest, PF01_MEASUREMENT_INPUT_PATHS, PF01_MEASUREMENT_INPUTS } from '../../scripts/orchestrator/pf01-measurement-inputs.mjs';
 
 const descriptor = JSON.parse(
   readFileSync(resolve('performance/descriptors/pf-01.catalog-browse.json'), 'utf8'),
@@ -30,6 +33,28 @@ function buildInputs(kind: 'clean-tracked-checkout' | 'git-object-tree') {
     source: {
       kind,
       method: 'raw bytes SHA-256 / byte-sorted repo-relative paths',
+      commit,
+    },
+    entries,
+  };
+}
+
+function measurementInputs(kind: 'clean-tracked-checkout' | 'git-object-tree') {
+  const entries = PF01_MEASUREMENT_INPUT_PATHS.map((path: string, index: number) => ({
+    path,
+    sha256: (index + 1).toString(16).padStart(64, '0'),
+  }));
+  return {
+    schemaVersion: PF01_MEASUREMENT_INPUTS.schemaVersion,
+    algorithm: PF01_MEASUREMENT_INPUTS.algorithm,
+    digest: computePf01MeasurementInputsDigest({
+      schemaVersion: PF01_MEASUREMENT_INPUTS.schemaVersion,
+      algorithm: PF01_MEASUREMENT_INPUTS.algorithm,
+      entries,
+    }),
+    source: {
+      kind,
+      method: PF01_MEASUREMENT_INPUTS.method,
       commit,
     },
     entries,
@@ -82,6 +107,7 @@ function writeRun(root: string, mutate?: (summary: Record<string, unknown>) => v
     artifact: { ...artifact },
     fixture: { ...fixture },
     buildInputs: buildInputs('clean-tracked-checkout'),
+    measurementInputs: measurementInputs('clean-tracked-checkout'),
     runner: {
       node: 'v24.18.0',
       npm: '11.16.0',
@@ -193,8 +219,19 @@ function argumentsFor(root: string) {
       artifact: { ...artifact },
       fixture: { ...fixture },
       buildInputs: buildInputs('clean-tracked-checkout'),
+      measurementInputs: measurementInputs('clean-tracked-checkout'),
+      runner: {
+        node: 'v24.18.0',
+        npm: '11.16.0',
+        platform: 'darwin',
+        release: '25.0.0',
+        macosProductVersion: '26.0',
+        arch: 'arm64',
+      },
+      toolchain: { cargo: 'cargo 1.90.0', rustc: 'rustc 1.90.0' },
     },
     baselineBuildInputs: buildInputs('git-object-tree'),
+    baselineMeasurementInputs: measurementInputs('git-object-tree'),
     environment: {},
   };
 }
@@ -263,6 +300,30 @@ describe('refresh PF-01 budget public seam', () => {
             summary.comparisonProvenance as { current: { buildInputs: { digest: string } } }
           ).current.buildInputs.digest = 'd'.repeat(64)),
         /build-input/i,
+      ],
+      [
+        'missing-measurement-input',
+        (summary) =>
+          delete (summary.comparisonProvenance as { current: { measurementInputs?: unknown } })
+            .current.measurementInputs,
+        /attestation/i,
+      ],
+      [
+        'measurement-input-drift',
+        (summary) =>
+          (((
+            summary.comparisonProvenance as {
+              current: { measurementInputs: { digest: string } };
+            }
+          ).current.measurementInputs.digest as string) = 'd'.repeat(64)),
+        /attestation/i,
+      ],
+      [
+        'runtime-drift',
+        (summary) =>
+          (((summary.comparisonProvenance as { current: { runner: { node: string } } }).current
+            .runner.node as string) = 'v99.0.0'),
+        /runtime|attestation/i,
       ],
       [
         'missing-build-environment',

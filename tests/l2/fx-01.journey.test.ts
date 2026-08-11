@@ -284,6 +284,23 @@ describe('FX-01 只读 workbench L2 journey', () => {
     ).toEqual('detail-error-heading');
   });
 
+  it('合法 Skill locator destination 的 authoritative reread 失败时聚焦详情错误，而非仅显示列表读取错误', async () => {
+    await openWorkbench('fail-locator-detail');
+    await $('button=全局搜索').click();
+    await $('#global-locator-input').setValue('Demo');
+    const result = await $('[aria-label="Skills"] [data-testid="locator-result"]');
+    await result.waitForDisplayed();
+    await result.click();
+    await browser.waitUntil(async () => (await $$('.global-locator').length) === 0);
+    const heading = await $('[data-testid="detail-error-heading"]');
+    await heading.waitForDisplayed();
+    expect(await heading.getText()).toEqual('无法打开只读详情');
+    expect(await $('[role="alert"]').getText()).toContain('读取失败');
+    expect(
+      await browser.execute(() => document.activeElement?.getAttribute('data-testid')),
+    ).toEqual('detail-error-heading');
+  });
+
   it('stale 与 ReadFailed 仍为可解释的只读 state', async () => {
     await openWorkbench('stale-index');
     expect(await $('[role="status"]').getText()).toContain('索引已过期');

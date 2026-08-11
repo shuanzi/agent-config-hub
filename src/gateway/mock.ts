@@ -222,6 +222,7 @@ export class ScriptedMockGateway implements FrontendGateway {
   private projectProjection: 'none' | 'single' | 'multiple' = 'none';
   private skillCellFailure: 'unknown' | 'blocked' | null = null;
   private unsupportedLocator = false;
+  private failWorkbenchAfterLocator = false;
   /** PF-01 perf-catalog scenario 的合成目录；null 时保持 FX-01 单资产语义 */
   private perfCatalog: PerfCatalog | null = null;
 
@@ -245,6 +246,10 @@ export class ScriptedMockGateway implements FrontendGateway {
       case 'workbench':
         return this.readWorkbench(query) as ReadResult<SnapshotFor<Q>>;
       case 'globalLocator':
+        if (this.failWorkbenchAfterLocator) {
+          this.failWorkbenchAfterLocator = false;
+          this.failNext('workbench', 'READ_FAILED');
+        }
         return this.readSucceeded(this.buildGlobalLocatorSnapshot(query.searchText)) as ReadResult<
           SnapshotFor<Q>
         >;
@@ -384,6 +389,9 @@ export class ScriptedMockGateway implements FrontendGateway {
         break;
       case 'unsupported-locator':
         this.unsupportedLocator = true;
+        break;
+      case 'fail-locator-detail':
+        this.failWorkbenchAfterLocator = true;
         break;
       case 'masked-text':
         this.setFixtureTextOverrides({

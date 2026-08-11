@@ -41,6 +41,18 @@ describe('PF-01 descriptor', () => {
     expect(descriptor.budgetStatus).not.toMatch(/authoritative-baseline-required/);
   });
 
+  it('将独立的版本化 measurementInputs 方法学写入 descriptor，不把它混同为 harness buildInputs', () => {
+    const descriptor = JSON.parse(readFileSync(descriptorPath, 'utf8')) as {
+      measurementInputs?: { schemaVersion: number; algorithm: string; responsibility: string };
+    };
+    expect(descriptor.measurementInputs).toEqual({
+      schemaVersion: 1,
+      algorithm: 'pf01-measurement-inputs-v1',
+      responsibility:
+        '独立固定 L2 实际 Vite module closure、PF/L3 WDIO、cold-start/RSS、统计与预算比较、collector 与显式 freeze 输入；不替代 L3 harness buildInputs 或 binary SHA。',
+    });
+  });
+
   it('将 startup 计为首屏代表性列表行真实可见，并固定 L2 layer、selector 与自描述 digest', () => {
     const descriptor = JSON.parse(readFileSync(descriptorPath, 'utf8')) as {
       metrics: Array<{ id: string; definition: string; layer?: string; selector?: string }>;

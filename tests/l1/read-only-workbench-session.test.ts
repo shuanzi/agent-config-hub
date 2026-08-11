@@ -233,6 +233,43 @@ describe('ReadOnlyWorkbenchSession', () => {
     session.dispose();
   });
 
+  it('unsupported locator detail error survives its authoritative context reread', async () => {
+    const gateway = new DeferredReadGateway();
+    const session = new ReadOnlyWorkbenchSession(gateway);
+    await waitForPending(gateway);
+    gateway.resolveNext({ kind: 'readSucceeded', snapshot: snapshot('enabled') });
+    await waitFor((state) => state.loadState.kind === 'ready', session);
+
+    const unsupportedAssetRef = {
+      ...snapshot('enabled').segments[0].rows[0].assetRef,
+      assetId: 'instruction-1',
+      assetType: 'longTermInstruction' as const,
+      nativeUnitRef: 'nunit-instruction-1',
+    };
+    const unsupported = locatorSnapshot(
+      {
+        kind: 'unsupportedReadOnly',
+        assetRef: unsupportedAssetRef,
+        reasonCode: 'UNSUPPORTED_CAPABILITY',
+      },
+      {
+        ...snapshot('enabled').segments[0].rows[0],
+        assetRef: unsupportedAssetRef,
+        assetId: unsupportedAssetRef.assetId,
+      },
+    ).groups[0].results[0];
+
+    session.dispatch({ kind: 'selectLocatorResult', result: unsupported });
+    await waitForPending(gateway);
+    gateway.resolveNext({ kind: 'readSucceeded', snapshot: snapshot('enabled') });
+    const reread = await waitFor((state) => state.loadState.kind === 'ready', session);
+    expect(reread.detailError).toMatchObject({
+      assetRef: unsupportedAssetRef,
+      reasonCode: 'UNSUPPORTED_CAPABILITY',
+    });
+    session.dispose();
+  });
+
   it('locator clear, close, and reopen cancel old in-flight searches before their result can revive', async () => {
     const gateway = new DeferredReadGateway();
     const session = new ReadOnlyWorkbenchSession(gateway);
@@ -261,6 +298,47 @@ describe('ReadOnlyWorkbenchSession', () => {
       session,
     );
     expect(latest.locator).toMatchObject({ kind: 'open', searchText: 'new' });
+    session.dispose();
+  });
+
+  it('合法 Skill locator destination 的 authoritative workbench reread 失败时建立 detailError，而非降级为通用列表错误', async () => {
+    const gateway = new DeferredReadGateway();
+    const session = new ReadOnlyWorkbenchSession(gateway);
+    await waitForPending(gateway);
+    gateway.resolveNext({ kind: 'readSucceeded', snapshot: snapshot('enabled') });
+    await waitFor((state) => state.loadState.kind === 'ready', session);
+
+    session.dispatch({ kind: 'openLocator' });
+    session.dispatch({ kind: 'setLocatorSearch', searchText: 'Skill' });
+    await waitForPending(gateway);
+    gateway.resolveNext({ kind: 'readSucceeded', snapshot: locatorSnapshot() });
+    const open = await waitFor(
+      (state) => state.locator.kind === 'open' && state.locator.snapshot !== null,
+      session,
+    );
+    if (open.locator.kind !== 'open' || open.locator.snapshot === null)
+      throw new Error('unreachable');
+
+    const result = open.locator.snapshot.groups[0].results[0];
+    session.dispatch({ kind: 'selectLocatorResult', result });
+    await waitForPending(gateway);
+    gateway.resolveNext({
+      kind: 'readFailed',
+      reasonCode: 'READ_FAILED',
+      message: 'authoritative detail reread failed',
+    });
+
+    const failed = await waitFor((state) => state.detailError !== null, session);
+    expect(failed).toMatchObject({
+      loadState: { kind: 'failed', reasonCode: 'READ_FAILED' },
+      selected: null,
+      locator: { kind: 'closed' },
+      detailError: {
+        assetRef: result.destination.assetRef,
+        reasonCode: 'READ_FAILED',
+        message: 'authoritative detail reread failed',
+      },
+    });
     session.dispose();
   });
 

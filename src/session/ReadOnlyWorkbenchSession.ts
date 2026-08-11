@@ -92,6 +92,10 @@ export class ReadOnlyWorkbenchSession {
   private locatorGeneration = 0;
   /** event 后 UI 不保留旧 facts；仅保留 native identity 供新 snapshot 成功时重绑。 */
   private pendingRereadSelection: ReadOnlyRow | null = null;
+  /** 合法 locator 跳转在随后的 authoritative reread 失败时仍需定位到详情错误。 */
+  private pendingLocatorDetail: ReadOnlyAssetRef | null = null;
+  /** 非 Skill destination 的 fail-closed detail error 必须跨过其单次 context reread。 */
+  private preserveUnsupportedLocatorDetail = false;
   private disposed = false;
   private state: ReadOnlyWorkbenchState = {
     loadState: { kind: 'loading' },
@@ -133,6 +137,8 @@ export class ReadOnlyWorkbenchSession {
     switch (action.kind) {
       case 'selectAssetType':
         this.pendingRereadSelection = null;
+        this.pendingLocatorDetail = null;
+        this.preserveUnsupportedLocatorDetail = false;
         this.update({
           assetType: action.assetType,
           selected: null,
@@ -143,6 +149,8 @@ export class ReadOnlyWorkbenchSession {
         return;
       case 'selectViewContext':
         this.pendingRereadSelection = null;
+        this.pendingLocatorDetail = null;
+        this.preserveUnsupportedLocatorDetail = false;
         this.update({
           viewContext: action.viewContext,
           selected: null,
@@ -153,6 +161,8 @@ export class ReadOnlyWorkbenchSession {
         return;
       case 'setFilters':
         this.pendingRereadSelection = null;
+        this.pendingLocatorDetail = null;
+        this.preserveUnsupportedLocatorDetail = false;
         this.update({
           filters: action.filters,
           selected: null,
@@ -176,6 +186,8 @@ export class ReadOnlyWorkbenchSession {
         return;
       case 'selectRow':
         this.pendingRereadSelection = null;
+        this.pendingLocatorDetail = null;
+        this.preserveUnsupportedLocatorDetail = false;
         this.update({ selected: action.row, detailError: null });
         return;
       case 'openLocator':
@@ -195,8 +207,10 @@ export class ReadOnlyWorkbenchSession {
       }
       case 'selectLocatorResult':
         this.locatorGeneration += 1;
+        this.preserveUnsupportedLocatorDetail = action.result.destination.kind !== 'skillDetail';
         if (action.result.destination.kind !== 'skillDetail') {
           this.pendingRereadSelection = null;
+          this.pendingLocatorDetail = null;
           const assetRef = action.result.destination.assetRef;
           this.update({
             assetType: assetRef.assetType,
@@ -214,6 +228,7 @@ export class ReadOnlyWorkbenchSession {
           return;
         }
         this.pendingRereadSelection = null;
+        this.pendingLocatorDetail = action.result.destination.assetRef;
         this.update({
           assetType: action.result.destination.assetRef.assetType,
           viewContext: action.result.destinationViewContext,
@@ -259,9 +274,19 @@ export class ReadOnlyWorkbenchSession {
       if (this.disposed || generation !== this.workbenchGeneration) return;
       if (result.kind === 'readFailed') {
         this.pendingRereadSelection = null;
+        const detailAsset = this.pendingLocatorDetail;
+        this.pendingLocatorDetail = null;
+        const preserveUnsupported = this.preserveUnsupportedLocatorDetail;
+        this.preserveUnsupportedLocatorDetail = false;
         this.update({
           loadState: { kind: 'failed', reasonCode: result.reasonCode, message: result.message },
           selected: null,
+          detailError:
+            detailAsset === null
+              ? preserveUnsupported
+                ? this.state.detailError
+                : null
+              : { assetRef: detailAsset, reasonCode: result.reasonCode, message: result.message },
         });
         return;
       }
@@ -289,9 +314,13 @@ export class ReadOnlyWorkbenchSession {
             ) ?? null)
           : null;
       this.pendingRereadSelection = null;
+      this.pendingLocatorDetail = null;
+      const preserveUnsupported = this.preserveUnsupportedLocatorDetail;
+      this.preserveUnsupportedLocatorDetail = false;
       this.update({
         loadState,
         selected,
+        detailError: preserveUnsupported ? this.state.detailError : null,
         availableProjectIds,
         presentation:
           projected.page === this.state.presentation.page
@@ -312,6 +341,8 @@ export class ReadOnlyWorkbenchSession {
         : null;
     const locatorGeneration = ++this.locatorGeneration;
     this.pendingRereadSelection = this.state.selected;
+    this.pendingLocatorDetail = null;
+    this.preserveUnsupportedLocatorDetail = false;
     this.update({
       loadState: { kind: 'loading' },
       selected: null,

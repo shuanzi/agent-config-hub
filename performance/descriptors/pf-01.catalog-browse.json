@@ -80,9 +80,14 @@
   ],
   "budgetStatus": "formula-authorized / clean-manifest-gated",
   "budgetNote": "完整 clean representative baseline 首次运行只收集样本，保持 budget-not-frozen/inconclusive，绝不生成版本化预算；须独立人工审核后才可冻结与比较。仅 descriptor digest、完整 provenance 与 schema 均匹配的 manifest 才是 frozen。旧 20260810T124356Z 仅 preliminary/inconclusive，禁止追补 provenance 或作为冻结来源。",
+  "measurementInputs": {
+    "schemaVersion": 1,
+    "algorithm": "pf01-measurement-inputs-v1",
+    "responsibility": "独立固定 L2 实际 Vite module closure、PF/L3 WDIO、cold-start/RSS、统计与预算比较、collector 与显式 freeze 输入；不替代 L3 harness buildInputs 或 binary SHA。"
+  },
   "digest": {
     "algorithm": "sha256",
     "canonicalization": "将本文件 digest.value 置为空字符串后对文件原始字节求 sha256；由 scripts/orchestrator/lib.mjs 的 pfDescriptorDigest 复算",
-    "value": "176da9697dcf604559edd68a85fe813a89c0e67967a52fbf14809d8a7193aa6b"
+    "value": "66af35654ee554d92c57628112c55a620f39400db2911f19973efddaefdcc668"
   }
 }

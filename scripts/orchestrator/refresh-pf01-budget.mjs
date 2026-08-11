@@ -22,8 +22,13 @@ import {
   collectPf01L3HarnessBuildInputsFromGit,
 } from './pf01-build-inputs.mjs';
 import {
+  collectPf01MeasurementInputs,
+  collectPf01MeasurementInputsFromGit,
+} from './pf01-measurement-inputs.mjs';
+import {
   PF01_BUDGET_CONSTANTS,
   PF01_TIMING_METRICS,
+  capturePf01RuntimeProvenance,
   collectCurrentPf01Attestation,
   formatPf01BudgetJson,
   freezePf01Budget,
@@ -269,9 +274,13 @@ function assertSameCurrentAttestation(recorded, current) {
     !sameJson(recorded.artifact, current.artifact) ||
     !sameJson(recorded.fixture, current.fixture) ||
     recorded.buildInputs.digest !== current.buildInputs.digest ||
-    !sameJson(recorded.buildInputs.entries, current.buildInputs.entries)
+    !sameJson(recorded.buildInputs.entries, current.buildInputs.entries) ||
+    recorded.measurementInputs.digest !== current.measurementInputs.digest ||
+    !sameJson(recorded.measurementInputs.entries, current.measurementInputs.entries) ||
+    !sameJson(recorded.runner, current.runner) ||
+    !sameJson(recorded.toolchain, current.toolchain)
   ) {
-    throw new Error('PF-01 baseline/current artifact, fixture, or build-input mismatch');
+    throw new Error('PF-01 baseline/current artifact, fixture, runtime, build-input, or measurement-input mismatch');
   }
 }
 
@@ -288,6 +297,7 @@ export function freezePf01BudgetFromBaselineRun({
   currentGit,
   currentAttestation,
   baselineBuildInputs,
+  baselineMeasurementInputs,
   environment = process.env,
 } = {}) {
   if (profile !== PROFILE) throw new Error('PF-01 budget freeze only accepts representative profile');
@@ -363,6 +373,15 @@ export function freezePf01BudgetFromBaselineRun({
   ) {
     throw new Error('PF-01 baseline Git-object build-input mismatch');
   }
+  if (
+    !isObject(baselineMeasurementInputs) ||
+    baselineMeasurementInputs.source?.kind !== 'git-object-tree' ||
+    baselineMeasurementInputs.source?.commit !== runIdentity.startCommit ||
+    baselineMeasurementInputs.digest !== recorded.measurementInputs.digest ||
+    !sameJson(baselineMeasurementInputs.entries, recorded.measurementInputs.entries)
+  ) {
+    throw new Error('PF-01 baseline Git-object measurement-input mismatch');
+  }
 
   const budget = freezePf01Budget({
     descriptor,
@@ -379,6 +398,7 @@ export function freezePf01BudgetFromBaselineRun({
       toolchain: recorded.toolchain,
       fixture: recorded.fixture,
       buildInputs: baselineBuildInputs,
+      measurementInputs: baselineMeasurementInputs,
       resources: {
         metric: resources.metric,
         layer: resources.layer,
@@ -427,16 +447,23 @@ async function main() {
     assertRefreshPf01Environment();
     const { descriptor } = assertCurrentPfDescriptorDigest(DESCRIPTOR_PATH);
     const currentGit = await gitInfo();
+    const runtimeProvenance = await capturePf01RuntimeProvenance();
     const currentAttestation = collectCurrentPf01Attestation({
       buildInputs: collectPf01L3HarnessBuildInputs(),
+      measurementInputs: await collectPf01MeasurementInputs(),
+      runtimeProvenance,
     });
     const baselineBuildInputs = collectPf01L3HarnessBuildInputsFromGit({ commit: currentGit.commit });
+    const baselineMeasurementInputs = collectPf01MeasurementInputsFromGit({
+      commit: currentGit.commit,
+    });
     const budget = freezePf01BudgetFromBaselineRun({
       baselineRun,
       descriptor,
       currentGit,
       currentAttestation,
       baselineBuildInputs,
+      baselineMeasurementInputs,
     });
     assertBudgetTargetIsNew();
     const formatted = await formatPf01BudgetJson(budget);

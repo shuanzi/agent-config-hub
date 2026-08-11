@@ -21,10 +21,8 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import type { FrontendGateway, ObserveHandle } from '../contract/gateway';
 import type {
   AssetType,
-  IndexStatus,
   Query,
   ReadResult,
-  ReasonCode,
   SnapshotFor,
   Subscription,
   WorkspaceEvent,
@@ -48,6 +46,7 @@ import {
 
 const INVALIDATION_EVENT = 'acm://workspace-invalidation';
 const MVP_ASSET_TYPES: readonly MvpAssetType[] = ['skill', 'longTermInstruction', 'subagent'];
+const WIRE_ASSET_TYPES: readonly AssetType[] = ['skill', 'longTermInstruction', 'subagent', 'hook'];
 const AGENT_IDS = ['claude-code', 'codex', 'gemini-cli', 'opencode'] as const;
 const STATUS_MEMBERSHIPS = [
   'editable',
@@ -405,6 +404,39 @@ function filtersFromWire(value: unknown, viewContext: ViewContext) {
   };
 }
 
+function sameStringArray(
+  left: readonly string[] | undefined,
+  right: readonly string[] | undefined,
+): boolean {
+  return (
+    left === right ||
+    (left !== undefined &&
+      right !== undefined &&
+      left.length === right.length &&
+      left.every((value, index) => value === right[index]))
+  );
+}
+
+/** snapshot echo 必须正好对应本次 canonical workbench request，不能被 session 投影。 */
+function sameCanonicalWorkbenchRequest(
+  requested: Extract<Query, { kind: 'workbench' }>,
+  echoed: WorkbenchActualReadSnapshot['query'],
+): boolean {
+  const requestedView = requested.viewContext;
+  const echoedView = echoed.viewContext;
+  return (
+    requested.assetType === echoed.assetType &&
+    requestedView.kind === echoedView.kind &&
+    (requestedView.kind !== 'project' ||
+      echoedView.kind !== 'project' ||
+      requestedView.projectId === echoedView.projectId) &&
+    sameStringArray(requested.filters?.agents, echoed.filters?.agents) &&
+    sameStringArray(requested.filters?.sourceIds, echoed.filters?.sourceIds) &&
+    sameStringArray(requested.filters?.statuses, echoed.filters?.statuses) &&
+    sameStringArray(requested.filters?.projectIds, echoed.filters?.projectIds)
+  );
+}
+
 /** Rust-first DTO → contract read snapshot. Unknown/malformed nested fields fail closed. */
 function workbenchSnapshotFromWire(value: unknown): WorkbenchActualReadSnapshot | null {
   if (!isRecord(value) || value.kind !== 'workbench' || !isRecord(value.query)) return null;
@@ -622,7 +654,7 @@ function locatorSnapshotFromWire(value: unknown): GlobalLocatorSnapshot | null {
 function normalizeResponse<Q extends Query>(
   raw: unknown,
   requestId: string,
-  queryKind: Q['kind'],
+  request: Q,
 ): ReadResult<SnapshotFor<Q>> | null {
   if (!isRecord(raw)) {
     return null;
@@ -636,16 +668,16 @@ function normalizeResponse<Q extends Query>(
   }
   if (payload.kind === 'readSucceeded') {
     const snapshot = payload.snapshot;
-    if (!isRecord(snapshot) || snapshot.kind !== queryKind) {
+    if (!isRecord(snapshot) || snapshot.kind !== request.kind) {
       return null;
     }
-    if (queryKind === 'workbench') {
+    if (request.kind === 'workbench') {
       const normalized = workbenchSnapshotFromWire(snapshot);
-      return normalized === null
+      return normalized === null || !sameCanonicalWorkbenchRequest(request, normalized.query)
         ? null
         : ({ kind: 'readSucceeded', snapshot: normalized } as ReadResult<SnapshotFor<Q>>);
     }
-    if (queryKind === 'globalLocator') {
+    if (request.kind === 'globalLocator') {
       const normalized = locatorSnapshotFromWire(snapshot);
       return normalized === null
         ? null
@@ -654,7 +686,7 @@ function normalizeResponse<Q extends Query>(
     return { kind: 'readSucceeded', snapshot: snapshot as unknown as SnapshotFor<Q> };
   }
   if (payload.kind === 'readFailed') {
-    if (typeof payload.reasonCode !== 'string' || typeof payload.message !== 'string') {
+    if (!isOneOf(payload.reasonCode, REASON_CODES) || typeof payload.message !== 'string') {
       return null;
     }
     const recovery = payload.recoveryAction;
@@ -663,7 +695,7 @@ function normalizeResponse<Q extends Query>(
     }
     return {
       kind: 'readFailed',
-      reasonCode: payload.reasonCode as ReasonCode,
+      reasonCode: payload.reasonCode,
       message: payload.message,
       // 如实透传 core 声明的恢复动作；未声明时不发明
       ...(recovery !== undefined ? { recoveryAction: { kind: 'retryRead' as const } } : {}),
@@ -684,22 +716,22 @@ function normalizeEvent(raw: unknown): WorkspaceEvent | null {
   switch (event.kind) {
     case 'assetsInvalidated': {
       const assetType = event.assetType;
-      if (assetType !== undefined && typeof assetType !== 'string') {
+      if (assetType !== undefined && !isOneOf(assetType, WIRE_ASSET_TYPES)) {
         return null;
       }
       return assetType === undefined
         ? { kind: 'assetsInvalidated' }
-        : { kind: 'assetsInvalidated', assetType: assetType as AssetType };
+        : { kind: 'assetsInvalidated', assetType };
     }
     case 'assetDriftDetected':
       return typeof event.assetId === 'string'
         ? { kind: 'assetDriftDetected', assetId: event.assetId }
         : null;
     case 'indexStatusChanged':
-      return typeof event.indexStatus === 'string'
+      return isOneOf(event.indexStatus, INDEX_STATUSES)
         ? {
             kind: 'indexStatusChanged',
-            indexStatus: event.indexStatus as IndexStatus,
+            indexStatus: event.indexStatus,
           }
         : null;
     case 'compatibilityChanged':
@@ -726,7 +758,7 @@ export function createTauriGateway(options: TauriGatewayOptions = {}): FrontendG
           payload: query as ReadRequestPayload,
         };
         const raw: unknown = await invoke('frontend_gateway_read', { request: envelope });
-        return normalizeResponse(raw, requestId, query.kind) ?? gatewayUnavailable();
+        return normalizeResponse(raw, requestId, query) ?? gatewayUnavailable();
       } catch {
         // transport/协议异常一律归一化，不把异常字符串传给 UI。
         return gatewayUnavailable();

@@ -17,9 +17,8 @@ import {
 import {
   PF01_BUDGET_CONSTANTS,
   PF01_TIMING_METRICS,
-  pf01ComparisonProvenance,
-  validateFrozenPf01Budget,
 } from './pf01-budget.mjs';
+import { computePf01L3HarnessBuildInputsDigest, PF01_L3_BUILD_INPUTS } from './pf01-build-inputs.mjs';
 import { finalizeHarnessPeakRss, validatePf01ResourceEvidence } from './pf01-resource.mjs';
 
 export const FE01_PF01_WAIVER_PATH = 'performance/waivers/fe-01-pf-01-l3-cold-start.json';
@@ -83,6 +82,10 @@ function isSha256(value) {
 
 function number(value) {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0;
+}
+
+function positiveNumber(value) {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0;
 }
 
 function percentile(sorted, p) {
@@ -206,6 +209,114 @@ function compareAgainstBudget(budget, metrics) {
     }
   }
   return violations;
+}
+
+/**
+ * The only historical waiver is immutable schema v3 evidence. It remains auditable, but
+ * is deliberately not upgraded into (or accepted as) the current v4 measurement method.
+ */
+function validateHistoricalWaiverBudget(budget, descriptor, current) {
+  const provenance = budget?.baselineProvenance;
+  const validBuildInputs = (value, sourceKind) =>
+    value?.schemaVersion === PF01_L3_BUILD_INPUTS.schemaVersion &&
+    value?.algorithm === PF01_L3_BUILD_INPUTS.algorithm &&
+    value?.source?.kind === sourceKind &&
+    value?.source?.method === 'raw bytes SHA-256 / byte-sorted repo-relative paths' &&
+    typeof value?.source?.commit === 'string' &&
+    isSha256(value?.digest) &&
+    Array.isArray(value?.entries) &&
+    value.digest ===
+      computePf01L3HarnessBuildInputsDigest({
+        schemaVersion: value.schemaVersion,
+        algorithm: value.algorithm,
+        entries: value.entries,
+      });
+  const sameArtifact =
+    provenance?.artifact !== null &&
+    typeof provenance?.artifact === 'object' &&
+    current?.artifact !== null &&
+    typeof current?.artifact === 'object' &&
+    ['identityPath', 'kind', 'identifier', 'profile', 'binary', 'provenance'].every(
+      (field) => provenance.artifact[field] === current.artifact[field],
+    ) &&
+    isSha256(provenance.artifact.declaredBinarySha256) &&
+    provenance.artifact.declaredBinarySha256 === provenance.artifact.actualBinarySha256 &&
+    isSha256(current.artifact.declaredBinarySha256) &&
+    current.artifact.declaredBinarySha256 === current.artifact.actualBinarySha256;
+  const expectedMetricSet = PF01_TIMING_METRICS;
+  const validMetrics =
+    Array.isArray(budget?.budgets) &&
+    budget.budgets.length === expectedMetricSet.length &&
+    sameJson(
+      budget.budgets.map((entry) => entry?.metric).sort(),
+      [...expectedMetricSet].sort(),
+    ) &&
+    budget.budgets.every((entry) => {
+      const metric = entry?.metric;
+      const baseline = entry?.baseline;
+      const expectedCount = PF01_BUDGET_CONSTANTS.EXACT_SAMPLE_COUNTS[metric];
+      return (
+        entry?.layer === (metric === 'pf01.l3.cold_start.first_snapshot' ? L3_LAYER : L2_LAYER) &&
+        positiveNumber(baseline?.p50) &&
+        positiveNumber(baseline?.p95) &&
+        baseline?.n === expectedCount &&
+        entry?.absoluteCeilingMs === Math.ceil((baseline.p95 * 1.5) / 10) * 10 &&
+        entry?.regressionAllowance?.relativeTo === 'baseline-p50' &&
+        entry?.regressionAllowance?.maxRatio === 1.25
+      );
+    });
+  const validResources =
+    provenance?.resources?.metric === 'pf01.l3.peak_rss_bytes' &&
+    provenance.resources.layer === L3_LAYER &&
+    provenance.resources.sampling === PF01_BUDGET_CONSTANTS.RESOURCE_SAMPLING &&
+    Array.isArray(provenance.resources.rawPeaksBytes) &&
+    provenance.resources.rawPeaksBytes.length === 3 &&
+    provenance.resources.rawPeaksBytes.every(positiveNumber) &&
+    provenance.resources.maxBytes === Math.max(...provenance.resources.rawPeaksBytes);
+  return (
+    budget?.schemaVersion === 3 &&
+    budget?.descriptorId === PERFORMANCE &&
+    budget?.descriptorDigest === descriptor?.digest?.value &&
+    budget?.profile === 'representative' &&
+    budget?.formula?.absoluteCeilingMs === PF01_BUDGET_CONSTANTS.ABSOLUTE_FORMULA &&
+    budget?.formula?.regressionAllowance === PF01_BUDGET_CONSTANTS.REGRESSION_FORMULA &&
+    provenance?.run === '.artifacts/performance/PF-01/20260810T174423659Z-p67445-000' &&
+    provenance?.statusBeforeBudgetFreeze === 'baseline-collected / budget-not-frozen' &&
+    provenance?.worktreeDirty === false &&
+    typeof provenance?.commit === 'string' &&
+    validBuildInputs(provenance?.buildInputs, 'git-object-tree') &&
+    provenance.buildInputs.source.commit === provenance.commit &&
+    validBuildInputs(current?.buildInputs, 'clean-tracked-checkout') &&
+    current.buildInputs.source.commit === PERFORMANCE_COMMIT &&
+    sameJson(provenance.buildInputs.entries, current.buildInputs.entries) &&
+    provenance.buildInputs.digest === current.buildInputs.digest &&
+    provenance?.fixture?.path === 'fixtures/fx-01/native-root' &&
+    provenance.fixture.sha256 === current?.fixture?.sha256 &&
+    isSha256(provenance.fixture.sha256) &&
+    sameArtifact &&
+    validResources &&
+    validMetrics
+  );
+}
+
+function historicalComparisonProvenance(budget, currentAttestation) {
+  const baseline = budget?.baselineProvenance;
+  return {
+    baseline: {
+      run: baseline?.run,
+      collectedAt: baseline?.collectedAt,
+      commit: baseline?.commit,
+      worktreeDirty: baseline?.worktreeDirty,
+      artifact: baseline?.artifact,
+      fixture: baseline?.fixture,
+      buildInputs: baseline?.buildInputs,
+    },
+    current: {
+      artifact: currentAttestation?.artifact,
+      fixture: currentAttestation?.fixture,
+      buildInputs: currentAttestation?.buildInputs,
+    },
+  };
 }
 
 function invalid(violations, message) {
@@ -376,11 +487,10 @@ export function validateFe01Pf01Waiver({
   }
 
   const currentAttestation = summary?.comparisonProvenance?.current;
-  const budgetValidation = validateFrozenPf01Budget(budget, descriptor, 'representative', currentAttestation);
-  if (!budgetValidation.valid) {
-    invalid(violations, `performance-run budget/provenance 无效: ${budgetValidation.violations.join('; ')}`);
+  if (!validateHistoricalWaiverBudget(budget, descriptor, currentAttestation)) {
+    invalid(violations, 'performance-run legacy budget/provenance 无效');
   }
-  const expectedBaseline = pf01ComparisonProvenance(budget, currentAttestation).baseline;
+  const expectedBaseline = historicalComparisonProvenance(budget, currentAttestation).baseline;
   if (!sameJson(summary?.comparisonProvenance?.baseline, expectedBaseline)) {
     invalid(violations, 'summary baseline provenance 与 immutable performance-run budget 不一致');
   }

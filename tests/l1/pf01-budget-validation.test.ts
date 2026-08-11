@@ -9,16 +9,41 @@ import { assertCleanPf01Baseline, collectCurrentPf01Attestation, pf01ComparisonP
 // prettier-ignore
 // @ts-expect-error runtime verifier module is a plain Node ESM module.
 import { computePf01L3HarnessBuildInputsDigest } from '../../scripts/orchestrator/pf01-build-inputs.mjs';
+// prettier-ignore
+// @ts-expect-error runtime provenance module is a plain Node ESM module.
+import { computePf01MeasurementInputsDigest, PF01_MEASUREMENT_INPUT_PATHS, PF01_MEASUREMENT_INPUTS } from '../../scripts/orchestrator/pf01-measurement-inputs.mjs';
 
 const descriptor = JSON.parse(
   readFileSync(resolve('performance/descriptors/pf-01.catalog-browse.json'), 'utf8'),
 ) as Record<string, unknown>;
 
+function measurementInputs(kind: 'clean-tracked-checkout' | 'git-object-tree') {
+  const entries = PF01_MEASUREMENT_INPUT_PATHS.map((path: string, index: number) => ({
+    path,
+    sha256: (index + 1).toString(16).padStart(64, '0'),
+  }));
+  return {
+    schemaVersion: PF01_MEASUREMENT_INPUTS.schemaVersion,
+    algorithm: PF01_MEASUREMENT_INPUTS.algorithm,
+    digest: computePf01MeasurementInputsDigest({
+      schemaVersion: PF01_MEASUREMENT_INPUTS.schemaVersion,
+      algorithm: PF01_MEASUREMENT_INPUTS.algorithm,
+      entries,
+    }),
+    entries,
+    source: {
+      kind,
+      method: PF01_MEASUREMENT_INPUTS.method,
+      commit: 'f783568e73d70411f3a7ce1e5b982b99135b5e57',
+    },
+  };
+}
+
 function validBudget(): Record<string, unknown> {
   const digest = (descriptor.digest as { value: string }).value;
   const entries = [{ path: 'src/main.tsx', sha256: 'c'.repeat(64) }];
   return {
-    schemaVersion: 3,
+    schemaVersion: 4,
     descriptorId: 'PF-01',
     descriptorDigest: digest,
     profile: 'representative',
@@ -63,6 +88,7 @@ function validBudget(): Record<string, unknown> {
         },
         entries,
       },
+      measurementInputs: measurementInputs('git-object-tree'),
       resources: {
         metric: 'pf01.l3.peak_rss_bytes',
         layer: 'L3 test-harness debug（隔离临时 fixture 根；非 release-like artifact）',
@@ -104,6 +130,16 @@ function currentAttestation(budget = validBudget()): Record<string, unknown> {
   return {
     artifact: { ...artifact },
     fixture: { ...provenance.fixture },
+    runner: { ...provenance.runner },
+    toolchain: { ...provenance.toolchain },
+    measurementInputs: {
+      ...JSON.parse(JSON.stringify(provenance.measurementInputs)),
+      source: {
+        kind: 'clean-tracked-checkout',
+        method: PF01_MEASUREMENT_INPUTS.method,
+        commit: 'f783568e73d70411f3a7ce1e5b982b99135b5e57',
+      },
+    },
     buildInputs: {
       ...JSON.parse(JSON.stringify(provenance.buildInputs)),
       source: {
@@ -262,6 +298,43 @@ describe('PF-01 frozen budget validator', () => {
     }
   });
 
+  it('baseline/current 的 Node、OS、arch 与 Rust toolchain 任一精确漂移都拒绝比较', () => {
+    const budget = validBudget();
+    const bogusNode = currentAttestation(budget);
+    (bogusNode.runner as Record<string, unknown>).node = 'v99.0.0';
+    const alienOs = currentAttestation(budget);
+    (alienOs.runner as Record<string, unknown>).platform = 'linux';
+    const bogusRust = currentAttestation(budget);
+    (bogusRust.toolchain as Record<string, unknown>).rustc = 'rustc 99.0.0';
+
+    for (const invalid of [bogusNode, alienOs, bogusRust]) {
+      expect(validateFrozenPf01Budget(budget, descriptor, 'representative', invalid).valid).toBe(
+        false,
+      );
+    }
+  });
+
+  it('measurementInputs 必须独立完整且 baseline/current digest 精确一致，不能借 buildInputs 冒充', () => {
+    const budget = validBudget();
+    const missing = currentAttestation(budget);
+    delete missing.measurementInputs;
+    const drift = currentAttestation(budget);
+    ((drift.measurementInputs as Record<string, unknown>).digest as string) = 'f'.repeat(64);
+    const extra = currentAttestation(budget);
+    (
+      (extra.measurementInputs as Record<string, unknown>).entries as Array<Record<string, unknown>>
+    ).push({
+      path: 'source-digest-is-not-method-input.ts',
+      sha256: 'f'.repeat(64),
+    });
+
+    for (const invalid of [missing, drift, extra]) {
+      expect(validateFrozenPf01Budget(budget, descriptor, 'representative', invalid).valid).toBe(
+        false,
+      );
+    }
+  });
+
   it('build-input provenance 缺少版本化 entries 或篡改 method 时拒绝比较', () => {
     const missingEntries = currentAttestation();
     delete (missingEntries.buildInputs as Record<string, unknown>).entries;
@@ -322,12 +395,18 @@ describe('PF-01 frozen budget validator', () => {
         worktreeDirty: (budget.baselineProvenance as Record<string, unknown>).worktreeDirty,
         artifact: (budget.baselineProvenance as Record<string, unknown>).artifact,
         buildInputs: (budget.baselineProvenance as Record<string, unknown>).buildInputs,
+        measurementInputs: (budget.baselineProvenance as Record<string, unknown>).measurementInputs,
         fixture: (budget.baselineProvenance as Record<string, unknown>).fixture,
+        runner: (budget.baselineProvenance as Record<string, unknown>).runner,
+        toolchain: (budget.baselineProvenance as Record<string, unknown>).toolchain,
       },
       current: {
         artifact: current.artifact,
         buildInputs: current.buildInputs,
+        measurementInputs: current.measurementInputs,
         fixture: current.fixture,
+        runner: current.runner,
+        toolchain: current.toolchain,
       },
     });
     expect(pf01ComparisonProvenance(null, current).baseline).toBeNull();

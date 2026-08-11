@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { createTauriGateway } from '../../src/gateway/tauri';
 import { GATEWAY_WIRE_VERSION } from '../../src/gateway/wire/gateway-wire';
+import type { WorkbenchQuery } from '../../src/workbench/read-only-model';
 
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn() }));
 vi.mock('@tauri-apps/api/event', () => ({ listen: vi.fn() }));
@@ -10,9 +11,19 @@ vi.mock('@tauri-apps/api/event', () => ({ listen: vi.fn() }));
 const invokeMock = invoke as unknown as ReturnType<typeof vi.fn>;
 
 function snapshot() {
+  const query: {
+    assetType: string;
+    viewContext: { kind: string; projectId?: string };
+    filters?: {
+      agents?: string[];
+      sourceIds?: string[];
+      statuses?: string[];
+      projectIds?: string[];
+    };
+  } = { assetType: 'skill', viewContext: { kind: 'all' } };
   return {
     kind: 'workbench',
-    query: { assetType: 'skill', viewContext: { kind: 'all' } },
+    query,
     authoritativeReadRevision: 'rev-1',
     segments: [
       {
@@ -227,6 +238,96 @@ describe('Tauri workbench wire decode', () => {
         wireVersion: 2,
         requestId: args.request.requestId,
         payload: { kind: 'readSucceeded', snapshot: snapshot() },
+      }),
+    );
+    const result = await createTauriGateway().read({
+      kind: 'workbench',
+      assetType: 'skill',
+      viewContext: { kind: 'all' },
+    });
+    expect(result).toMatchObject({ kind: 'readFailed', reasonCode: 'GATEWAY_UNAVAILABLE' });
+  });
+
+  it('只接受完整 canonical request echo，拒绝 asset type、view、project identity 或 filters 漂移', async () => {
+    const request: WorkbenchQuery = {
+      kind: 'workbench',
+      assetType: 'skill',
+      viewContext: { kind: 'all' },
+      filters: {
+        agents: ['claude-code'],
+        sourceIds: ['source-1'],
+        statuses: ['normal'],
+        projectIds: ['opaque-project'],
+      },
+    };
+    const mismatches: Array<(raw: ReturnType<typeof snapshot>) => void> = [
+      (raw) => {
+        raw.query.viewContext = { kind: 'global' };
+      },
+      (raw) => {
+        raw.query.filters = { ...request.filters, sourceIds: ['other-source'] };
+      },
+      (raw) => {
+        raw.query.assetType = 'longTermInstruction';
+        raw.segments = [];
+        raw.aggregateTotal = 0;
+      },
+      (raw) => {
+        raw.query.viewContext = { kind: 'project', projectId: 'other-project' };
+        delete raw.query.filters;
+        raw.segments = [];
+        raw.aggregateTotal = 0;
+      },
+    ];
+
+    invokeMock.mockImplementation(
+      async (_command: string, args: { request: { requestId: string } }) => {
+        const raw = snapshot();
+        raw.query = {
+          assetType: request.assetType,
+          viewContext: request.viewContext,
+          filters: request.filters,
+        };
+        return {
+          wireVersion: GATEWAY_WIRE_VERSION,
+          requestId: args.request.requestId,
+          payload: { kind: 'readSucceeded', snapshot: raw },
+        };
+      },
+    );
+    await expect(createTauriGateway().read(request)).resolves.toMatchObject({
+      kind: 'readSucceeded',
+      snapshot: { query: request },
+    });
+
+    for (const mutate of mismatches) {
+      invokeMock.mockImplementation(
+        async (_command: string, args: { request: { requestId: string } }) => {
+          const raw = snapshot();
+          raw.query = {
+            assetType: request.assetType,
+            viewContext: request.viewContext,
+            filters: request.filters,
+          };
+          mutate(raw);
+          return {
+            wireVersion: GATEWAY_WIRE_VERSION,
+            requestId: args.request.requestId,
+            payload: { kind: 'readSucceeded', snapshot: raw },
+          };
+        },
+      );
+      const result = await createTauriGateway().read(request);
+      expect(result).toMatchObject({ kind: 'readFailed', reasonCode: 'GATEWAY_UNAVAILABLE' });
+    }
+  });
+
+  it('unknown read failure reasonCode 封闭为 GATEWAY_UNAVAILABLE', async () => {
+    invokeMock.mockImplementation(
+      async (_command: string, args: { request: { requestId: string } }) => ({
+        wireVersion: GATEWAY_WIRE_VERSION,
+        requestId: args.request.requestId,
+        payload: { kind: 'readFailed', reasonCode: 'INVENTED_REASON', message: 'forged' },
       }),
     );
     const result = await createTauriGateway().read({

@@ -1,17 +1,21 @@
 /** PF-01 版本化预算的 fail-closed schema 与阈值校验。 */
 import fs from 'node:fs';
 import { Buffer } from 'node:buffer';
+import os from 'node:os';
 import path from 'node:path';
+import process from 'node:process';
 import prettier from 'prettier';
 import {
   ARTIFACTS_ROOT,
   REPO_ROOT,
+  capture,
   digestDirectory,
   sha256File,
   sha256Text,
 } from './lib.mjs';
 import { HARNESS_BINARY } from './build-harness.mjs';
 import { computePf01L3HarnessBuildInputsDigest, PF01_L3_BUILD_INPUTS } from './pf01-build-inputs.mjs';
+import { validatePf01MeasurementInputs } from './pf01-measurement-inputs.mjs';
 
 export const PF01_TIMING_METRICS = [
   'pf01.startup.first_list_visible',
@@ -37,7 +41,7 @@ const RESOURCE_SAMPLING =
   'agent-config-manager harness PID + 后代；50ms process-tree RSS bytes；排除 WDIO/Vite；成功启动至正常退出';
 const HARNESS_IDENTITY_RELATIVE_PATH = '.artifacts/test-harness/identity.json';
 const FX01_FIXTURE_RELATIVE_PATH = 'fixtures/fx-01/native-root';
-const BUDGET_SCHEMA_VERSION = 3;
+const BUDGET_SCHEMA_VERSION = 4;
 const BUILD_INPUT_SCHEMA_VERSION = PF01_L3_BUILD_INPUTS.schemaVersion;
 const BUILD_INPUT_ALGORITHM = PF01_L3_BUILD_INPUTS.algorithm;
 const BUILD_INPUT_METHOD = 'raw bytes SHA-256 / byte-sorted repo-relative paths';
@@ -99,6 +103,31 @@ function sameArtifactIdentity(baseline, current) {
   ].every((field) => baseline?.[field] === current?.[field]);
 }
 
+const RUNNER_FIELDS = ['node', 'npm', 'platform', 'release', 'macosProductVersion', 'arch'];
+const TOOLCHAIN_FIELDS = ['cargo', 'rustc'];
+
+function matchesRuntimeProvenance(value) {
+  return (
+    value !== null &&
+    typeof value === 'object' &&
+    value.runner !== null &&
+    typeof value.runner === 'object' &&
+    RUNNER_FIELDS.every((field) => typeof value.runner[field] === 'string' && value.runner[field].length > 0) &&
+    value.toolchain !== null &&
+    typeof value.toolchain === 'object' &&
+    TOOLCHAIN_FIELDS.every(
+      (field) => typeof value.toolchain[field] === 'string' && value.toolchain[field].length > 0,
+    )
+  );
+}
+
+function sameRuntimeProvenance(baseline, current) {
+  return (
+    RUNNER_FIELDS.every((field) => baseline?.runner?.[field] === current?.runner?.[field]) &&
+    TOOLCHAIN_FIELDS.every((field) => baseline?.toolchain?.[field] === current?.toolchain?.[field])
+  );
+}
+
 function matchesBuildInputEntries(entries) {
   if (!Array.isArray(entries) || entries.length === 0) return false;
   const collisions = new Set();
@@ -155,6 +184,44 @@ function sameBuildInputs(baseline, current) {
   );
 }
 
+function sameMeasurementInputs(baseline, current) {
+  return (
+    baseline?.schemaVersion === current?.schemaVersion &&
+    baseline?.algorithm === current?.algorithm &&
+    baseline?.digest === current?.digest &&
+    JSON.stringify(baseline?.entries) === JSON.stringify(current?.entries)
+  );
+}
+
+/** Sampling, freezing and verification use the same runtime reference shape. */
+export async function capturePf01RuntimeProvenance() {
+  const [npm, cargo, rustc, macosProductVersion] = await Promise.all([
+    capture('corepack', ['npm', '--version']),
+    capture('cargo', ['--version']),
+    capture('rustc', ['--version']),
+    capture('sw_vers', ['-productVersion']),
+  ]);
+  if (
+    npm.exitCode !== 0 ||
+    cargo.exitCode !== 0 ||
+    rustc.exitCode !== 0 ||
+    macosProductVersion.exitCode !== 0
+  ) {
+    throw new Error('runner/toolchain provenance unavailable');
+  }
+  return {
+    runner: {
+      node: process.version,
+      npm: npm.stdout.trim(),
+      platform: os.platform(),
+      release: os.release(),
+      macosProductVersion: macosProductVersion.stdout.trim(),
+      arch: os.arch(),
+    },
+    toolchain: { cargo: cargo.stdout.trim(), rustc: rustc.stdout.trim() },
+  };
+}
+
 /**
  * 读取当前真实 L3 harness 与 FX-01 fixture，并以此生成 comparison/freeze attestation。
  * identity.json 只提供声明元数据；binarySha256 必须由当前 HARNESS_BINARY 重算。
@@ -163,6 +230,8 @@ export function collectCurrentPf01Attestation({
   repoRoot = REPO_ROOT,
   artifactsRoot = ARTIFACTS_ROOT,
   buildInputs,
+  measurementInputs,
+  runtimeProvenance,
 } = {}) {
   const identityPath = path.join(artifactsRoot, 'test-harness/identity.json');
   if (!fs.existsSync(identityPath)) throw new Error('current harness artifact identity missing');
@@ -188,6 +257,8 @@ export function collectCurrentPf01Attestation({
       sha256: sha256Text(JSON.stringify(digestDirectory(fixtureRoot))),
     },
     ...(buildInputs === undefined ? {} : { buildInputs }),
+    ...(measurementInputs === undefined ? {} : { measurementInputs }),
+    ...(runtimeProvenance === undefined ? {} : runtimeProvenance),
   };
 }
 
@@ -208,6 +279,12 @@ export function validateCurrentPf01Attestation(attestation) {
   }
   if (!matchesBuildInputsSchema(attestation?.buildInputs, 'clean-tracked-checkout')) {
     violations.push('current L3 harness build-input attestation 不完整');
+  }
+  if (!validatePf01MeasurementInputs(attestation?.measurementInputs, 'clean-tracked-checkout')) {
+    violations.push('current measurement-input attestation 不完整');
+  }
+  if (!matchesRuntimeProvenance(attestation)) {
+    violations.push('current runner/toolchain provenance 不完整');
   }
   return { valid: violations.length === 0, violations };
 }
@@ -260,16 +337,7 @@ export function validateFrozenPf01Budget(budget, descriptor, expectedProfile, cu
     violations.push('baselineProvenance.artifact declaredBinarySha256 与实际 binary 不匹配');
   }
   if (
-    provenance?.runner === undefined ||
-    typeof provenance.runner.node !== 'string' ||
-    typeof provenance.runner.npm !== 'string' ||
-    typeof provenance.runner.platform !== 'string' ||
-    typeof provenance.runner.release !== 'string' ||
-    typeof provenance.runner.macosProductVersion !== 'string' ||
-    typeof provenance.runner.arch !== 'string' ||
-    provenance?.toolchain === undefined ||
-    typeof provenance.toolchain.cargo !== 'string' ||
-    typeof provenance.toolchain.rustc !== 'string' ||
+    !matchesRuntimeProvenance(provenance) ||
     provenance?.fixture === undefined ||
     provenance.fixture.path !== 'fixtures/fx-01/native-root' ||
     !isSha256(provenance.fixture.sha256)
@@ -280,6 +348,11 @@ export function validateFrozenPf01Budget(budget, descriptor, expectedProfile, cu
     violations.push('baselineProvenance.buildInputs 不完整');
   } else if (provenance.buildInputs.source.commit !== provenance.commit) {
     violations.push('baselineProvenance.buildInputs commit 与 baseline commit 不匹配');
+  }
+  if (!validatePf01MeasurementInputs(provenance?.measurementInputs, 'git-object-tree')) {
+    violations.push('baselineProvenance.measurementInputs 不完整');
+  } else if (provenance.measurementInputs.source.commit !== provenance.commit) {
+    violations.push('baselineProvenance.measurementInputs commit 与 baseline commit 不匹配');
   }
   const resources = provenance?.resources;
   if (
@@ -304,6 +377,12 @@ export function validateFrozenPf01Budget(budget, descriptor, expectedProfile, cu
     }
     if (!sameBuildInputs(provenance?.buildInputs, currentAttestation.buildInputs)) {
       violations.push('baselineProvenance.buildInputs 与当前 L3 harness build-input 不匹配');
+    }
+    if (!sameMeasurementInputs(provenance?.measurementInputs, currentAttestation.measurementInputs)) {
+      violations.push('baselineProvenance.measurementInputs 与当前测量方法不匹配');
+    }
+    if (!sameRuntimeProvenance(provenance, currentAttestation)) {
+      violations.push('baselineProvenance runner/toolchain 与当前执行环境不匹配');
     }
     if (
       provenance?.fixture?.path !== currentAttestation.fixture.path ||
@@ -360,11 +439,17 @@ export function pf01ComparisonProvenance(budget, currentAttestation) {
             artifact: baseline.artifact,
             fixture: baseline.fixture,
             buildInputs: baseline.buildInputs,
+            measurementInputs: baseline.measurementInputs,
+            runner: baseline.runner,
+            toolchain: baseline.toolchain,
           },
     current: {
       artifact: currentAttestation?.artifact,
       fixture: currentAttestation?.fixture,
       buildInputs: currentAttestation?.buildInputs,
+      measurementInputs: currentAttestation?.measurementInputs,
+      runner: currentAttestation?.runner,
+      toolchain: currentAttestation?.toolchain,
     },
   };
 }
@@ -411,12 +496,12 @@ export async function formatPf01BudgetJson(budget) {
 }
 
 /**
- * 将方案 A 前冻结的 v2 baseline 升级、或幂等刷新 v3 budget 的 Git-object
- * build-input provenance。仅重算 manifest provenance，不触碰历史 sampling artifact。
+ * 将历史 v2/v3 budget 仅在调用方同时给出可复算 Git-object build/measurement
+ * provenance 时转换为当前 schema；仅读取历史，不修改 immutable sampling artifact。
  */
-export function migratePf01BudgetV2({ budget, baselineBuildInputs }) {
-  if (budget?.schemaVersion !== 2 && budget?.schemaVersion !== BUDGET_SCHEMA_VERSION) {
-    throw new Error('PF-01 budget migration requires schemaVersion 2 or 3');
+export function migratePf01BudgetV2({ budget, baselineBuildInputs, baselineMeasurementInputs }) {
+  if (![2, 3, BUDGET_SCHEMA_VERSION].includes(budget?.schemaVersion)) {
+    throw new Error('PF-01 budget migration requires schemaVersion 2, 3, or 4');
   }
   if (budget?.descriptorId !== 'PF-01' || !isSha256(budget?.descriptorDigest)) {
     throw new Error('PF-01 budget migration requires PF-01 descriptor identity');
@@ -442,6 +527,12 @@ export function migratePf01BudgetV2({ budget, baselineBuildInputs }) {
   ) {
     throw new Error('PF-01 baseline build-input digest invalid');
   }
+  if (
+    !validatePf01MeasurementInputs(baselineMeasurementInputs, 'git-object-tree') ||
+    baselineMeasurementInputs.source.commit !== budget.baselineProvenance.commit
+  ) {
+    throw new Error('PF-01 baseline measurement-input digest invalid');
+  }
   const metrics = Object.fromEntries(
     (budget.budgets ?? []).map((entry) => [entry?.metric, entry?.baseline]),
   );
@@ -462,6 +553,7 @@ export function migratePf01BudgetV2({ budget, baselineBuildInputs }) {
         provenance: legacyArtifact.provenance,
       },
       buildInputs: baselineBuildInputs,
+      measurementInputs: baselineMeasurementInputs,
     },
   });
 }

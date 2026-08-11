@@ -23,11 +23,9 @@
  * 缺省 .artifacts/performance/PF-01/<run-id>/。
  */
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import {
   assertCurrentPfDescriptorDigest,
-  capture,
   gitInfo,
   makeRunId,
   runStep,
@@ -46,8 +44,10 @@ import {
   assertPf01VerificationEnvironment,
   collectPf01L3HarnessBuildInputs,
 } from './pf01-build-inputs.mjs';
+import { collectPf01MeasurementInputs } from './pf01-measurement-inputs.mjs';
 import {
   assertCleanPf01Baseline,
+  capturePf01RuntimeProvenance,
   collectCurrentPf01Attestation,
   pf01ComparisonProvenance,
   validateCurrentPf01Attestation,
@@ -119,34 +119,6 @@ function proposeBudget(metricId, stats) {
  * 未来显式 budget freeze 必须能从 immutable run 重建完整 provenance；这里仅记录
  * 当前采样 runner/toolchain，绝不在 perf 首次 baseline 内创建预算。
  */
-async function captureBudgetFreezeRuntimeProvenance() {
-  const [npm, cargo, rustc, macosProductVersion] = await Promise.all([
-    capture('corepack', ['npm', '--version']),
-    capture('cargo', ['--version']),
-    capture('rustc', ['--version']),
-    capture('sw_vers', ['-productVersion']),
-  ]);
-  if (
-    npm.exitCode !== 0 ||
-    cargo.exitCode !== 0 ||
-    rustc.exitCode !== 0 ||
-    macosProductVersion.exitCode !== 0
-  ) {
-    throw new Error('runner/toolchain provenance unavailable');
-  }
-  return {
-    runner: {
-      node: process.version,
-      npm: npm.stdout.trim(),
-      platform: os.platform(),
-      release: os.release(),
-      macosProductVersion: macosProductVersion.stdout.trim(),
-      arch: os.arch(),
-    },
-    toolchain: { cargo: cargo.stdout.trim(), rustc: rustc.stdout.trim() },
-  };
-}
-
 /**
  * 冻结预算比较（未来路径，代码就绪）：逐 metric 查 budget 条目，
  * p95 ≤ absoluteCeilingMs 且 p50 ≤ baseline.p50 × regressionAllowance.maxRatio。
@@ -230,7 +202,7 @@ async function main() {
   let runtimeProvenance;
   try {
     buildEnvironment = assertPf01L3BuildEnvironment();
-    runtimeProvenance = await captureBudgetFreezeRuntimeProvenance();
+    runtimeProvenance = await capturePf01RuntimeProvenance();
   } catch (error) {
     console.error(
       `INCONCLUSIVE  L3 harness build/runner environment 无法证明：${error instanceof Error ? error.message : 'unknown'}`,
@@ -288,8 +260,11 @@ async function main() {
   let currentAttestation;
   try {
     await assertPf01L3ViteModuleClosure();
+    const measurementInputs = await collectPf01MeasurementInputs();
     currentAttestation = collectCurrentPf01Attestation({
       buildInputs: collectPf01L3HarnessBuildInputs(),
+      measurementInputs,
+      runtimeProvenance,
     });
     const attestation = validateCurrentPf01Attestation(currentAttestation);
     if (!attestation.valid) throw new Error(attestation.violations.join('; '));
