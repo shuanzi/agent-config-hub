@@ -189,7 +189,8 @@ function sameMeasurementInputs(baseline, current) {
     baseline?.schemaVersion === current?.schemaVersion &&
     baseline?.algorithm === current?.algorithm &&
     baseline?.digest === current?.digest &&
-    JSON.stringify(baseline?.entries) === JSON.stringify(current?.entries)
+    JSON.stringify(baseline?.entries) === JSON.stringify(current?.entries) &&
+    JSON.stringify(baseline?.l2DevModuleGraph) === JSON.stringify(current?.l2DevModuleGraph)
   );
 }
 

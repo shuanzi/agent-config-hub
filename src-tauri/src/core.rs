@@ -100,14 +100,22 @@ impl GatewayCore {
                 }
             };
             return match resolver.read(&ProjectApplicabilityQuery { view }) {
-                Ok(snapshot) => ReadResult::Succeeded(Snapshot::Workbench(
-                    workbench_from_applicability(&query, snapshot),
-                )),
+                Ok(snapshot) => {
+                    let workbench = workbench_from_applicability(&query, snapshot);
+                    if workbench_skill_cells_valid(&workbench) {
+                        ReadResult::Succeeded(Snapshot::Workbench(workbench))
+                    } else {
+                        ReadResult::Failed(workbench_read_failed())
+                    }
+                }
                 Err(failure) => ReadResult::Failed(failure),
             };
         }
         match self.catalog.workbench(&query) {
-            Ok(snapshot) => ReadResult::Succeeded(Snapshot::Workbench(snapshot)),
+            Ok(snapshot) if workbench_skill_cells_valid(&snapshot) => {
+                ReadResult::Succeeded(Snapshot::Workbench(snapshot))
+            }
+            Ok(_) => ReadResult::Failed(workbench_read_failed()),
             Err(failure) => ReadResult::Failed(failure),
         }
     }
@@ -134,6 +142,15 @@ impl GatewayCore {
             Err(failure) => ReadResult::Failed(failure),
         }
     }
+}
+
+fn workbench_skill_cells_valid(snapshot: &WorkbenchActualReadSnapshot) -> bool {
+    snapshot
+        .segments
+        .iter()
+        .flat_map(|segment| segment.rows.iter())
+        .flat_map(|row| row.skill_target_states.iter())
+        .all(SkillTargetState::is_semantically_valid)
 }
 
 fn valid_locator_asset_types(query: &GlobalLocatorQuery) -> bool {

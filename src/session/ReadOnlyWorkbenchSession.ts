@@ -205,9 +205,10 @@ export class ReadOnlyWorkbenchSession {
         if (action.searchText.trim() !== '') this.readLocator(action.searchText, locatorGeneration);
         return;
       }
-      case 'selectLocatorResult':
+      case 'selectLocatorResult': {
         this.locatorGeneration += 1;
         this.preserveUnsupportedLocatorDetail = action.result.destination.kind !== 'skillDetail';
+        const filters = this.filtersForLocatorDestination(action.result.destinationViewContext);
         if (action.result.destination.kind !== 'skillDetail') {
           this.pendingRereadSelection = null;
           this.pendingLocatorDetail = null;
@@ -215,6 +216,7 @@ export class ReadOnlyWorkbenchSession {
           this.update({
             assetType: assetRef.assetType,
             viewContext: action.result.destinationViewContext,
+            filters,
             selected: null,
             detailError: {
               assetRef,
@@ -232,6 +234,7 @@ export class ReadOnlyWorkbenchSession {
         this.update({
           assetType: action.result.destination.assetRef.assetType,
           viewContext: action.result.destinationViewContext,
+          filters,
           selected: action.result,
           detailError: null,
           locator: { kind: 'closed' },
@@ -239,6 +242,7 @@ export class ReadOnlyWorkbenchSession {
         });
         this.refresh(true);
         return;
+      }
       case 'retry':
         this.refresh(true);
         return;
@@ -397,5 +401,14 @@ export class ReadOnlyWorkbenchSession {
 
   private resetPage(): ListPresentationState {
     return { ...this.state.presentation, page: 1 };
+  }
+
+  /** locator destination 改变作用域时，All-only projectIds 不能进入 global/project query。 */
+  private filtersForLocatorDestination(viewContext: ViewContext): WorkbenchFilters | undefined {
+    if (viewContext.kind === 'all') {
+      return canonicalizeWorkbenchFilters(this.state.filters, viewContext);
+    }
+    const { projectIds: _projectIds, ...retained } = this.state.filters ?? {};
+    return canonicalizeWorkbenchFilters(retained, viewContext);
   }
 }

@@ -46,10 +46,10 @@ describe('PF-01 descriptor', () => {
       measurementInputs?: { schemaVersion: number; algorithm: string; responsibility: string };
     };
     expect(descriptor.measurementInputs).toEqual({
-      schemaVersion: 1,
-      algorithm: 'pf01-measurement-inputs-v1',
+      schemaVersion: 2,
+      algorithm: 'pf01-measurement-inputs-v2',
       responsibility:
-        '独立固定 L2 实际 Vite module closure、PF/L3 WDIO、cold-start/RSS、统计与预算比较、collector 与显式 freeze 输入；不替代 L3 harness buildInputs 或 binary SHA。',
+        '独立固定 performance/wdio.conf.ts 实际 createServer+browser ModuleGraph closure、PF/L3 WDIO、cold-start/RSS、统计与预算比较、collector 与显式 freeze 输入；不替代 L3 harness buildInputs 或 binary SHA。',
     });
   });
 

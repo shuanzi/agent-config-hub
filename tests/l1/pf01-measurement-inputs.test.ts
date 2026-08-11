@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest';
 
 // prettier-ignore
 // @ts-expect-error runtime provenance module is a plain Node ESM module.
-import { PF01_MEASUREMENT_INPUTS, PF01_MEASUREMENT_INPUT_PATHS, assertPf01L2ViteModuleClosure, collectPf01MeasurementInputs, collectPf01MeasurementInputsFromGit, computePf01MeasurementInputsDigest, validatePf01MeasurementInputs } from '../../scripts/orchestrator/pf01-measurement-inputs.mjs';
+import { PF01_MEASUREMENT_INPUTS, PF01_MEASUREMENT_INPUT_PATHS, attestPf01L2ViteDevModuleGraph, expectedPf01L2ViteDevModuleGraph, assertPf01L2ViteModuleClosure, collectPf01MeasurementInputs, collectPf01MeasurementInputsFromGit, computePf01MeasurementInputsDigest, validatePf01MeasurementInputs } from '../../scripts/orchestrator/pf01-measurement-inputs.mjs';
 
 const REQUIRED_MEASUREMENT_METHOD_FILES = [
   'scripts/orchestrator/pf01-measurement-inputs.mjs',
@@ -22,6 +22,7 @@ function entries() {
 
 function measurementInputs(kind: 'clean-tracked-checkout' | 'git-object-tree') {
   const inputEntries = entries();
+  const l2DevModuleGraph = expectedPf01L2ViteDevModuleGraph();
   return {
     schemaVersion: PF01_MEASUREMENT_INPUTS.schemaVersion,
     algorithm: PF01_MEASUREMENT_INPUTS.algorithm,
@@ -29,8 +30,10 @@ function measurementInputs(kind: 'clean-tracked-checkout' | 'git-object-tree') {
       schemaVersion: PF01_MEASUREMENT_INPUTS.schemaVersion,
       algorithm: PF01_MEASUREMENT_INPUTS.algorithm,
       entries: inputEntries,
+      l2DevModuleGraph,
     }),
     entries: inputEntries,
+    l2DevModuleGraph,
     source: {
       kind,
       method: PF01_MEASUREMENT_INPUTS.method,
@@ -88,27 +91,66 @@ describe('PF-01 independent measurement-input provenance', () => {
   });
 
   it('实际 L2 Vite module closure 是测量方法的一部分，未来未登记模块 fail-closed', async () => {
+    const expected = expectedPf01L2ViteDevModuleGraph();
     const actual = await assertPf01L2ViteModuleClosure({
-      moduleIds: [
-        'fixtures/fx-01/fixture.json',
-        'fixtures/fx-01/native-root/skills/demo-skill/SKILL.md',
-        'fixtures/sensitive-masking.ts',
-        'src/App.tsx',
-        'src/gateway/mock.ts',
-        'src/gateway/perf-catalog.ts',
-        'src/session/ReadOnlyWorkbenchSession.ts',
-        'src/ui/ReadOnlyWorkbench.tsx',
-        'src/ui/workbench.css',
-        'src/workbench/read-only-model.ts',
-        'tests/l2/l2-main.tsx',
-        'tests/l2/pf01-startup-eligibility.ts',
-        'tests/l2/workbench.html',
-      ],
+      moduleIds: expected.actualModulePaths,
     });
     expect(actual).toContain('tests/l2/l2-main.tsx');
     await expect(
       assertPf01L2ViteModuleClosure({ moduleIds: [...actual, 'src/untracked-measurement.ts'] }),
     ).rejects.toThrow(/closure/i);
+  });
+
+  it('只接受实际 dev-server/browser module graph：missing、extra、dev-only 与 declared/actual mismatch 均 fail-closed', () => {
+    const expected = expectedPf01L2ViteDevModuleGraph();
+    expect(
+      attestPf01L2ViteDevModuleGraph({
+        moduleIds: [
+          ...expected.actualModulePaths,
+          '\0vite/client',
+          '/outside/node_modules/react/index.js',
+        ],
+      }),
+    ).toEqual(expected);
+
+    const invalidGraphs = [
+      { ...expected, actualModulePaths: expected.actualModulePaths.slice(1) },
+      {
+        ...expected,
+        actualModulePaths: [...expected.actualModulePaths, 'src/dev-only-measurement.ts'],
+      },
+      {
+        ...expected,
+        declaredModulePaths: [...expected.declaredModulePaths].reverse(),
+      },
+    ];
+    for (const graph of invalidGraphs) {
+      expect(() =>
+        attestPf01L2ViteDevModuleGraph({
+          moduleIds: graph.actualModulePaths,
+          declaredModulePaths: graph.declaredModulePaths,
+        }),
+      ).toThrow(/module graph|closure|declared/i);
+    }
+  });
+
+  it('实际 dev module graph 的 repo-local module 必须是 physical regular file', () => {
+    const root = mkdtempSync(join(tmpdir(), 'pf01-dev-module-graph-symlink-'));
+    try {
+      writeFixtureTree(root);
+      const expected = expectedPf01L2ViteDevModuleGraph();
+      const target = join(root, 'src/gateway/mock.ts');
+      rmSync(target);
+      symlinkSync(join(root, 'src/App.tsx'), target);
+      expect(() =>
+        attestPf01L2ViteDevModuleGraph({
+          repoRoot: root,
+          moduleIds: expected.actualModulePaths,
+        }),
+      ).toThrow(/symlink/i);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it('current/Git collector 拒绝 untracked 与 symlink，且只接受 regular Git blobs', () => {
@@ -118,22 +160,26 @@ describe('PF-01 independent measurement-input provenance', () => {
       const current = collectPf01MeasurementInputs({
         repoRoot: root,
         trackedPaths: PF01_MEASUREMENT_INPUT_PATHS,
+        l2DevModuleGraph: expectedPf01L2ViteDevModuleGraph(),
       });
       expect(current).toMatchObject({ source: { kind: 'clean-tracked-checkout' } });
       expect(current.entries.map((entry: { path: string }) => entry.path)).toEqual(
         expect.arrayContaining(REQUIRED_MEASUREMENT_METHOD_FILES),
       );
-      expect(collectPf01MeasurementInputsFromGit({ repoRoot: root, commit: 'HEAD' })).toMatchObject(
-        {
-          source: { kind: 'git-object-tree' },
-        },
-      );
+      expect(
+        collectPf01MeasurementInputsFromGit({
+          repoRoot: root,
+          commit: 'HEAD',
+          l2DevModuleGraph: expectedPf01L2ViteDevModuleGraph(),
+        }),
+      ).toMatchObject({ source: { kind: 'git-object-tree' } });
 
       expect(() =>
         collectPf01MeasurementInputs({
           repoRoot: root,
           trackedPaths: PF01_MEASUREMENT_INPUT_PATHS,
           gitStatus: '?? untracked-method.ts\n',
+          l2DevModuleGraph: expectedPf01L2ViteDevModuleGraph(),
         }),
       ).toThrow(/untracked|clean/i);
 
@@ -145,6 +191,7 @@ describe('PF-01 independent measurement-input provenance', () => {
           repoRoot: root,
           trackedPaths: PF01_MEASUREMENT_INPUT_PATHS,
           gitStatus: '',
+          l2DevModuleGraph: expectedPf01L2ViteDevModuleGraph(),
         }),
       ).toThrow(/symlink/i);
 
@@ -154,6 +201,7 @@ describe('PF-01 independent measurement-input provenance', () => {
         collectPf01MeasurementInputs({
           repoRoot: root,
           trackedPaths: PF01_MEASUREMENT_INPUT_PATHS,
+          l2DevModuleGraph: expectedPf01L2ViteDevModuleGraph(),
         }),
       ).toThrow(/untracked|clean/i);
     } finally {

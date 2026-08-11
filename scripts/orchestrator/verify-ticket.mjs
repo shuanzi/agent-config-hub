@@ -42,7 +42,10 @@ import {
   assertPf01VerificationEnvironment,
   collectPf01L3HarnessBuildInputs,
 } from './pf01-build-inputs.mjs';
-import { collectPf01MeasurementInputs } from './pf01-measurement-inputs.mjs';
+import {
+  collectPf01MeasurementInputs,
+  readPf01L2ViteDevModuleGraph,
+} from './pf01-measurement-inputs.mjs';
 import {
   capturePf01RuntimeProvenance,
   collectCurrentPf01Attestation,
@@ -63,7 +66,7 @@ const STATUS_LABEL = {
   fail: 'FAIL',
 };
 
-async function budgetState(performance) {
+async function budgetState(performance, l2DevModuleGraphPath) {
   let descriptor;
   let descriptorDigest;
   try {
@@ -92,10 +95,11 @@ async function budgetState(performance) {
   try {
     const budget = JSON.parse(fs.readFileSync(budgetPath, 'utf8'));
     await assertPf01L3ViteModuleClosure();
+    const l2DevModuleGraph = readPf01L2ViteDevModuleGraph(l2DevModuleGraphPath);
     const runtimeProvenance = await capturePf01RuntimeProvenance();
     const currentAttestation = collectCurrentPf01Attestation({
       buildInputs: collectPf01L3HarnessBuildInputs(),
-      measurementInputs: await collectPf01MeasurementInputs(),
+      measurementInputs: collectPf01MeasurementInputs({ l2DevModuleGraph }),
       runtimeProvenance,
     });
     const validation = validateFrozenPf01Budget(
@@ -237,7 +241,10 @@ async function main() {
     }
   }
 
-  const budget = ticket.performance === undefined ? null : await budgetState(ticket.performance);
+  const budget =
+    ticket.performance === undefined
+      ? null
+      : await budgetState(ticket.performance, path.join(performanceDir, 'l2-dev-module-graph.json'));
   const git = await gitInfo();
   const gitIdentityConsistent = sameGitIdentity(startingGit, git);
   const computedOverallStatus =

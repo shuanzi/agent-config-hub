@@ -54,7 +54,7 @@ function snapshot() {
                 presence: 'present',
                 activation: 'enabled',
                 applicability: 'resolved',
-                enableAvailability: { kind: 'allowed' },
+                enableAvailability: { kind: 'disabled', reasonCode: 'READ_ONLY_POLICY' },
                 disableAvailability: { kind: 'allowed' },
                 pending: { operationId: 'pending-read-only', phase: 'reread' },
               },
@@ -140,7 +140,7 @@ describe('Tauri workbench wire decode', () => {
       expect(result.snapshot.segments[0].rows[0].skillTargetStates).toHaveLength(4);
       expect(result.snapshot.segments[0].rows[0].skillTargetStates?.[0]?.presence).toBe('present');
       expect(result.snapshot.segments[0].rows[0].skillTargetStates?.[0]).toMatchObject({
-        enableAvailability: { kind: 'allowed' },
+        enableAvailability: { kind: 'disabled', reasonCode: 'READ_ONLY_POLICY' },
         disableAvailability: { kind: 'allowed' },
         pending: { operationId: 'pending-read-only', phase: 'reread' },
       });
@@ -322,6 +322,73 @@ describe('Tauri workbench wire decode', () => {
     }
   });
 
+  it('request 与 echo 都拒绝非 canonical 的空/未知 filters、额外 view/query 字段及非规范排序', async () => {
+    const request: WorkbenchQuery = {
+      kind: 'workbench',
+      assetType: 'skill',
+      viewContext: { kind: 'all' },
+      filters: {
+        agents: ['claude-code', 'codex'],
+        sourceIds: ['source-a', 'source-b'],
+        statuses: ['editable', 'normal'],
+        projectIds: ['project-a', 'project-b'],
+      },
+    };
+    const malformedEchoes: Array<(query: Record<string, unknown>) => void> = [
+      (query) => {
+        query.filters = {};
+      },
+      (query) => {
+        query.filters = { agents: ['claude-code'], invented: ['value'] };
+      },
+      (query) => {
+        query.filters = { sourceIds: ['source-b', 'source-a'] };
+      },
+      (query) => {
+        query.viewContext = { kind: 'all', projectId: 'forged' };
+      },
+      (query) => {
+        query.viewContext = { kind: 'project', projectId: 'opaque-project' };
+        query.filters = { projectIds: ['opaque-project'] };
+      },
+      (query) => {
+        query.extra = 'forged';
+      },
+    ];
+
+    for (const mutate of malformedEchoes) {
+      invokeMock.mockImplementation(
+        async (_command: string, args: { request: { requestId: string } }) => {
+          const raw = snapshot();
+          raw.query = {
+            assetType: request.assetType,
+            viewContext: request.viewContext,
+            filters: request.filters,
+          };
+          mutate(raw.query as unknown as Record<string, unknown>);
+          return {
+            wireVersion: GATEWAY_WIRE_VERSION,
+            requestId: args.request.requestId,
+            payload: { kind: 'readSucceeded', snapshot: raw },
+          };
+        },
+      );
+      await expect(createTauriGateway().read(request)).resolves.toMatchObject({
+        kind: 'readFailed',
+        reasonCode: 'GATEWAY_UNAVAILABLE',
+      });
+    }
+
+    invokeMock.mockClear();
+    await expect(
+      createTauriGateway().read({
+        ...request,
+        filters: {} as WorkbenchQuery['filters'],
+      }),
+    ).resolves.toMatchObject({ kind: 'readFailed', reasonCode: 'GATEWAY_UNAVAILABLE' });
+    expect(invokeMock).not.toHaveBeenCalled();
+  });
+
   it('unknown read failure reasonCode 封闭为 GATEWAY_UNAVAILABLE', async () => {
     invokeMock.mockImplementation(
       async (_command: string, args: { request: { requestId: string } }) => ({
@@ -360,6 +427,60 @@ describe('Tauri workbench wire decode', () => {
       viewContext: { kind: 'all' },
     });
     expect(result).toMatchObject({ kind: 'readFailed', reasonCode: 'GATEWAY_UNAVAILABLE' });
+  });
+
+  it('Skill cell presence、activation、applicability 与 availability 的矛盾组合必须封闭', async () => {
+    const contradictoryCells: Array<(cell: Record<string, unknown>) => void> = [
+      (cell) => {
+        cell.presence = 'absent';
+        cell.activation = 'enabled';
+      },
+      (cell) => {
+        cell.presence = 'present';
+        cell.activation = 'notApplicable';
+      },
+      (cell) => {
+        cell.presence = 'unknown';
+        cell.activation = 'unknown';
+        cell.applicability = 'unknown';
+        cell.enableAvailability = { kind: 'allowed' };
+      },
+      (cell) => {
+        cell.presence = 'absent';
+        cell.activation = 'notApplicable';
+        cell.disableAvailability = { kind: 'allowed' };
+      },
+      (cell) => {
+        cell.presence = 'present';
+        cell.activation = 'disabled';
+        cell.disableAvailability = { kind: 'allowed' };
+      },
+      (cell) => {
+        cell.presence = 'present';
+        cell.activation = 'enabled';
+        cell.enableAvailability = { kind: 'allowed' };
+      },
+    ];
+    for (const mutate of contradictoryCells) {
+      invokeMock.mockImplementation(
+        async (_command: string, args: { request: { requestId: string } }) => {
+          const malformed = snapshot();
+          mutate(malformed.segments[0].rows[0].skillTargetStates[0] as Record<string, unknown>);
+          return {
+            wireVersion: GATEWAY_WIRE_VERSION,
+            requestId: args.request.requestId,
+            payload: { kind: 'readSucceeded', snapshot: malformed },
+          };
+        },
+      );
+      await expect(
+        createTauriGateway().read({
+          kind: 'workbench',
+          assetType: 'skill',
+          viewContext: { kind: 'all' },
+        }),
+      ).resolves.toMatchObject({ kind: 'readFailed', reasonCode: 'GATEWAY_UNAVAILABLE' });
+    }
   });
 
   it('缺少完整 AssetRef 的任一 identity 字段时封闭为 GATEWAY_UNAVAILABLE', async () => {

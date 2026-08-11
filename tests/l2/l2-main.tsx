@@ -44,6 +44,7 @@ declare global {
       getObserveCallCount: () => number;
       emitWorkspaceInvalidation: () => void;
       getLocator: () => ReadOnlyWorkbenchState['locator'];
+      setAllProjectFilter: (projectId: string) => void;
     };
     __pf01?: Pf01Bridge;
   }
@@ -171,4 +172,10 @@ window.__fx01 = {
     mock.emitEvent({ kind: 'assetsInvalidated', assetType: 'skill' });
   },
   getLocator: () => session.getSnapshot().locator,
+  setAllProjectFilter: (projectId) => {
+    session.dispatch({
+      kind: 'setFilters',
+      filters: { agents: ['claude-code'], projectIds: [projectId] },
+    });
+  },
 };

@@ -27,6 +27,7 @@ import type {
   Subscription,
   WorkspaceEvent,
 } from '../contract/types';
+import { canonicalizeWorkbenchFilters } from '../workbench/read-only-model';
 import type {
   GlobalLocatorSnapshot,
   MvpAssetType,
@@ -36,6 +37,8 @@ import type {
   SkillTargetState,
   ViewContext,
   WorkbenchActualReadSnapshot,
+  WorkbenchFilters,
+  WorkbenchQuery,
 } from '../workbench/read-only-model';
 import {
   GATEWAY_WIRE_VERSION,
@@ -139,8 +142,12 @@ function isNonEmptyString(value: unknown): value is string {
 
 function viewContextFromWire(value: unknown): ViewContext | null {
   if (!isRecord(value) || typeof value.kind !== 'string') return null;
-  if (value.kind === 'all' || value.kind === 'global') return { kind: value.kind };
-  return value.kind === 'project' && isNonEmptyString(value.projectId)
+  if ((value.kind === 'all' || value.kind === 'global') && Object.keys(value).length === 1) {
+    return { kind: value.kind };
+  }
+  return value.kind === 'project' &&
+    isNonEmptyString(value.projectId) &&
+    Object.keys(value).length === 2
     ? { kind: 'project', projectId: value.projectId }
     : null;
 }
@@ -188,6 +195,27 @@ function skillCellAvailabilityFromWire(value: unknown): SkillCellAvailability | 
     return { kind: value.kind, reasonCode: value.reasonCode };
   }
   return null;
+}
+
+function skillTargetStateSemanticallyValid(cell: SkillTargetState): boolean {
+  const absent = cell.presence === 'absent';
+  const present = cell.presence === 'present';
+  const notApplicable = cell.activation === 'notApplicable';
+  const active = cell.activation === 'enabled' || cell.activation === 'disabled';
+  if (absent !== notApplicable || present !== active) return false;
+
+  const unresolved =
+    ['unknown', 'blocked', 'stale'].includes(cell.presence) ||
+    ['unknown', 'blocked', 'stale'].includes(cell.activation) ||
+    ['unknown', 'blocked', 'stale'].includes(cell.applicability);
+  if (unresolved) {
+    return (
+      cell.enableAvailability.kind !== 'allowed' && cell.disableAvailability.kind !== 'allowed'
+    );
+  }
+  if (absent) return cell.disableAvailability.kind !== 'allowed';
+  if (cell.activation === 'disabled') return cell.disableAvailability.kind !== 'allowed';
+  return cell.activation !== 'enabled' || cell.enableAvailability.kind !== 'allowed';
 }
 
 function rowFromWire(value: unknown, expectedAssetType: MvpAssetType): ReadOnlyRow | null {
@@ -238,7 +266,7 @@ function rowFromWire(value: unknown, expectedAssetType: MvpAssetType): ReadOnlyR
     ) {
       return null;
     }
-    return {
+    const state = {
       agent: cell.agent,
       presence: cell.presence,
       activation: cell.activation,
@@ -255,6 +283,7 @@ function rowFromWire(value: unknown, expectedAssetType: MvpAssetType): ReadOnlyR
           }),
       ...(cell.stableReason === undefined ? {} : { stableReason: cell.stableReason }),
     } satisfies SkillTargetState;
+    return skillTargetStateSemanticallyValid(state) ? state : null;
   });
   if (
     targetStates.some((cell) => cell === null) ||
@@ -376,32 +405,55 @@ function effectiveContextFromWire(value: unknown, expectedAssetType: MvpAssetTyp
   };
 }
 
-function filtersFromWire(value: unknown, viewContext: ViewContext) {
+function filtersFromWire(
+  value: unknown,
+  viewContext: ViewContext,
+): WorkbenchFilters | null | undefined {
   if (value === undefined) return undefined;
-  if (!isRecord(value)) return null;
+  if (
+    !isRecord(value) ||
+    Object.keys(value).length === 0 ||
+    !Object.keys(value).every((key) =>
+      ['agents', 'sourceIds', 'statuses', 'projectIds'].includes(key),
+    )
+  )
+    return null;
   const agents = value.agents;
   const sourceIds = value.sourceIds;
   const statuses = value.statuses;
   const projectIds = value.projectIds;
   if (
     (agents !== undefined &&
-      (!Array.isArray(agents) || !agents.every((agent) => isOneOf(agent, AGENT_IDS)))) ||
+      (!Array.isArray(agents) ||
+        agents.length === 0 ||
+        !agents.every((agent) => isOneOf(agent, AGENT_IDS)))) ||
     (sourceIds !== undefined &&
-      (!Array.isArray(sourceIds) || !sourceIds.every(isNonEmptyString))) ||
+      (!Array.isArray(sourceIds) ||
+        sourceIds.length === 0 ||
+        !sourceIds.every(isNonEmptyString))) ||
     (statuses !== undefined &&
       (!Array.isArray(statuses) ||
+        statuses.length === 0 ||
         !statuses.every((status) => isOneOf(status, STATUS_MEMBERSHIPS)))) ||
     (projectIds !== undefined &&
-      (!Array.isArray(projectIds) || !projectIds.every(isNonEmptyString))) ||
+      (!Array.isArray(projectIds) ||
+        projectIds.length === 0 ||
+        !projectIds.every(isNonEmptyString))) ||
     (viewContext.kind !== 'all' && projectIds !== undefined)
   )
     return null;
-  return {
+  const supplied: WorkbenchFilters = {
     ...(agents === undefined ? {} : { agents }),
     ...(sourceIds === undefined ? {} : { sourceIds }),
     ...(statuses === undefined ? {} : { statuses }),
     ...(projectIds === undefined ? {} : { projectIds }),
   };
+  try {
+    const canonical = canonicalizeWorkbenchFilters(supplied, viewContext);
+    return canonical === undefined || !sameCanonicalFilters(supplied, canonical) ? null : canonical;
+  } catch {
+    return null;
+  }
 }
 
 function sameStringArray(
@@ -415,6 +467,41 @@ function sameStringArray(
       left.length === right.length &&
       left.every((value, index) => value === right[index]))
   );
+}
+
+function sameCanonicalFilters(left: WorkbenchFilters, right: WorkbenchFilters): boolean {
+  return (
+    sameStringArray(left.agents, right.agents) &&
+    sameStringArray(left.sourceIds, right.sourceIds) &&
+    sameStringArray(left.statuses, right.statuses) &&
+    sameStringArray(left.projectIds, right.projectIds)
+  );
+}
+
+/** Workbench snapshot query has no tag; request query adds the closed `kind` tag. */
+function workbenchQueryFromWire(value: unknown, requestForm: boolean): WorkbenchQuery | null {
+  if (!isRecord(value)) return null;
+  const allowedKeys = requestForm
+    ? ['kind', 'assetType', 'viewContext', 'filters']
+    : ['assetType', 'viewContext', 'filters'];
+  if (
+    !Object.keys(value).every((key) => allowedKeys.includes(key)) ||
+    !isOneOf(value.assetType, MVP_ASSET_TYPES) ||
+    (requestForm && value.kind !== 'workbench') ||
+    (Object.prototype.hasOwnProperty.call(value, 'filters') && value.filters === undefined)
+  ) {
+    return null;
+  }
+  const viewContext = viewContextFromWire(value.viewContext);
+  if (viewContext === null) return null;
+  const filters = filtersFromWire(value.filters, viewContext);
+  if (filters === null) return null;
+  return {
+    kind: 'workbench',
+    assetType: value.assetType,
+    viewContext,
+    ...(filters === undefined ? {} : { filters }),
+  };
 }
 
 /** snapshot echo 必须正好对应本次 canonical workbench request，不能被 session 投影。 */
@@ -440,13 +527,10 @@ function sameCanonicalWorkbenchRequest(
 /** Rust-first DTO → contract read snapshot. Unknown/malformed nested fields fail closed. */
 function workbenchSnapshotFromWire(value: unknown): WorkbenchActualReadSnapshot | null {
   if (!isRecord(value) || value.kind !== 'workbench' || !isRecord(value.query)) return null;
-  const query = value.query;
-  const assetType = query.assetType;
+  const query = workbenchQueryFromWire(value.query, false);
   const aggregateTotalValue = value.aggregateTotal;
-  const viewContext = viewContextFromWire(query.viewContext);
   if (
-    viewContext === null ||
-    !isOneOf(assetType, MVP_ASSET_TYPES) ||
+    query === null ||
     !isNonEmptyString(value.authoritativeReadRevision) ||
     !Array.isArray(value.segments) ||
     typeof aggregateTotalValue !== 'number' ||
@@ -457,8 +541,7 @@ function workbenchSnapshotFromWire(value: unknown): WorkbenchActualReadSnapshot 
   ) {
     return null;
   }
-  const filters = filtersFromWire(query.filters, viewContext);
-  if (filters === null) return null;
+  const assetType = query.assetType;
   const segments = value.segments.map((segment) => {
     if (
       !isRecord(segment) ||
@@ -519,12 +602,7 @@ function workbenchSnapshotFromWire(value: unknown): WorkbenchActualReadSnapshot 
   if (aggregateTotal !== aggregateTotalValue) return null;
   return {
     kind: 'workbench',
-    query: {
-      kind: 'workbench',
-      assetType,
-      viewContext,
-      ...(filters === undefined ? {} : { filters }),
-    },
+    query,
     authoritativeReadRevision: value.authoritativeReadRevision,
     segments: segments as WorkbenchActualReadSnapshot['segments'],
     effectiveContexts: effectiveContexts as WorkbenchActualReadSnapshot['effectiveContexts'],
@@ -750,15 +828,17 @@ export function createTauriGateway(options: TauriGatewayOptions = {}): FrontendG
     async read<Q extends Query>(query: Q): Promise<ReadResult<SnapshotFor<Q>>> {
       const requestId = crypto.randomUUID();
       try {
+        const request = query.kind === 'workbench' ? workbenchQueryFromWire(query, true) : query;
+        if (request === null) return gatewayUnavailable();
         // contract Query 与 wire ReadRequestPayload 结构一一对应（同一封闭
         // tag 集合由 Rust wire DTO 事实源保证）。
         const envelope: ReadRequestEnvelope = {
           wireVersion: GATEWAY_WIRE_VERSION,
           requestId,
-          payload: query as ReadRequestPayload,
+          payload: request as ReadRequestPayload,
         };
         const raw: unknown = await invoke('frontend_gateway_read', { request: envelope });
-        return normalizeResponse(raw, requestId, query) ?? gatewayUnavailable();
+        return normalizeResponse(raw, requestId, request as Q) ?? gatewayUnavailable();
       } catch {
         // transport/协议异常一律归一化，不把异常字符串传给 UI。
         return gatewayUnavailable();

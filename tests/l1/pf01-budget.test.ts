@@ -12,7 +12,7 @@ import { formatPf01BudgetJson, freezePf01Budget, migratePf01BudgetV2 } from '../
 import { computePf01L3HarnessBuildInputsDigest } from '../../scripts/orchestrator/pf01-build-inputs.mjs';
 // prettier-ignore
 // @ts-expect-error runtime provenance module is a plain Node ESM module.
-import { computePf01MeasurementInputsDigest, PF01_MEASUREMENT_INPUT_PATHS, PF01_MEASUREMENT_INPUTS } from '../../scripts/orchestrator/pf01-measurement-inputs.mjs';
+import { computePf01MeasurementInputsDigest, expectedPf01L2ViteDevModuleGraph, PF01_MEASUREMENT_INPUT_PATHS, PF01_MEASUREMENT_INPUTS } from '../../scripts/orchestrator/pf01-measurement-inputs.mjs';
 
 const HISTORICAL_BUDGET_PATH = 'performance/budgets/history/pf-01.budgets.20260810T124356Z.json';
 
@@ -40,6 +40,7 @@ function baselineMeasurementInputs(): Record<string, unknown> {
     path,
     sha256: (index + 1).toString(16).padStart(64, '0'),
   }));
+  const l2DevModuleGraph = expectedPf01L2ViteDevModuleGraph();
   return {
     schemaVersion: PF01_MEASUREMENT_INPUTS.schemaVersion,
     algorithm: PF01_MEASUREMENT_INPUTS.algorithm,
@@ -47,6 +48,7 @@ function baselineMeasurementInputs(): Record<string, unknown> {
       schemaVersion: PF01_MEASUREMENT_INPUTS.schemaVersion,
       algorithm: PF01_MEASUREMENT_INPUTS.algorithm,
       entries,
+      l2DevModuleGraph,
     }),
     source: {
       kind: 'git-object-tree',
@@ -54,6 +56,7 @@ function baselineMeasurementInputs(): Record<string, unknown> {
       commit: '4fdff98be42065936bcfff462302f033de5d6b4a',
     },
     entries,
+    l2DevModuleGraph,
   };
 }
 

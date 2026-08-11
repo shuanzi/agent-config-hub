@@ -173,6 +173,59 @@ describe('FX-01 只读 workbench L2 journey', () => {
     ).toEqual('skill-detail-heading');
   });
 
+  it('All 的 projectIds 筛选不会阻断 global/project locator destination 的详情焦点', async () => {
+    const projectId = 'project-fx01-opaque';
+    await openWorkbench();
+    await browser.execute((id) => window.__fx01?.setAllProjectFilter(id), projectId);
+    await browser.waitUntil(async () => {
+      const calls = await browser.execute(() => window.__fx01?.getCalls() ?? []);
+      const last = [...calls].reverse().find((call) => call.queryKind === 'workbench');
+      return last?.query.kind === 'workbench' && last.query.filters?.projectIds?.[0] === projectId;
+    });
+    await $('button=全局搜索').click();
+    await $('#global-locator-input').setValue('Demo');
+    await $('[aria-label="Skills"] [data-testid="locator-result"]').click();
+    await $('.skill-target-cells').waitForDisplayed();
+    expect(
+      await browser.execute(() => document.activeElement?.getAttribute('data-testid')),
+    ).toEqual('skill-detail-heading');
+    const globalQuery = await browser.execute(() => {
+      const calls = window.__fx01?.getCalls() ?? [];
+      return [...calls].reverse().find((call) => call.queryKind === 'workbench')?.query;
+    });
+    expect(globalQuery).toMatchObject({
+      kind: 'workbench',
+      viewContext: { kind: 'global' },
+      filters: { agents: ['claude-code'] },
+    });
+    expect(globalQuery?.kind === 'workbench' && globalQuery.filters?.projectIds).toBeUndefined();
+
+    await openWorkbench('project-projection');
+    await browser.execute((id) => window.__fx01?.setAllProjectFilter(id), projectId);
+    await browser.waitUntil(async () => {
+      const calls = await browser.execute(() => window.__fx01?.getCalls() ?? []);
+      const last = [...calls].reverse().find((call) => call.queryKind === 'workbench');
+      return last?.query.kind === 'workbench' && last.query.filters?.projectIds?.[0] === projectId;
+    });
+    await $('button=全局搜索').click();
+    await $('#global-locator-input').setValue('Project Native Skill');
+    await $('[aria-label="Skills"] [data-testid="locator-result"]').click();
+    await $('.skill-target-cells').waitForDisplayed();
+    expect(
+      await browser.execute(() => document.activeElement?.getAttribute('data-testid')),
+    ).toEqual('skill-detail-heading');
+    const projectQuery = await browser.execute(() => {
+      const calls = window.__fx01?.getCalls() ?? [];
+      return [...calls].reverse().find((call) => call.queryKind === 'workbench')?.query;
+    });
+    expect(projectQuery).toMatchObject({
+      kind: 'workbench',
+      viewContext: { kind: 'project', projectId },
+      filters: { agents: ['claude-code'] },
+    });
+    expect(projectQuery?.kind === 'workbench' && projectQuery.filters?.projectIds).toBeUndefined();
+  });
+
   it('workspace event 使打开的 locator 立即失效并以相同 searchText 重读', async () => {
     await openWorkbench();
     await $('button=全局搜索').click();

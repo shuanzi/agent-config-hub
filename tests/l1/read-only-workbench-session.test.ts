@@ -13,7 +13,11 @@ import {
   type ReadOnlyWorkbenchState,
 } from '../../src/session/ReadOnlyWorkbenchSession';
 import type { WorkbenchActualReadSnapshot } from '../../src/workbench/read-only-model';
-import type { GlobalLocatorSnapshot, LocatorResult } from '../../src/workbench/read-only-model';
+import type {
+  GlobalLocatorSnapshot,
+  LocatorResult,
+  ViewContext,
+} from '../../src/workbench/read-only-model';
 
 function snapshot(activation: 'enabled' | 'disabled'): WorkbenchActualReadSnapshot {
   return {
@@ -49,8 +53,14 @@ function snapshot(activation: 'enabled' | 'disabled'): WorkbenchActualReadSnapsh
                 presence: 'present',
                 activation,
                 applicability: 'resolved',
-                enableAvailability: { kind: 'allowed' },
-                disableAvailability: { kind: 'allowed' },
+                enableAvailability:
+                  activation === 'enabled'
+                    ? { kind: 'disabled', reasonCode: 'READ_ONLY_POLICY' }
+                    : { kind: 'allowed' },
+                disableAvailability:
+                  activation === 'disabled'
+                    ? { kind: 'disabled', reasonCode: 'READ_ONLY_POLICY' }
+                    : { kind: 'allowed' },
               },
             ],
           },
@@ -103,11 +113,13 @@ class EventingReadGateway implements FrontendGateway {
 }
 
 class DeferredReadGateway extends EventingReadGateway {
+  readonly queries: Query[] = [];
   private pending: Array<{
     resolve: (result: ReadResult<WorkbenchActualReadSnapshot>) => void;
   }> = [];
 
-  override read<Q extends Query>(_query: Q): Promise<ReadResult<SnapshotFor<Q>>> {
+  override read<Q extends Query>(query: Q): Promise<ReadResult<SnapshotFor<Q>>> {
+    this.queries.push(query);
     return new Promise((resolve) => {
       this.pending.push({
         resolve: (result) => resolve(result as ReadResult<SnapshotFor<Q>>),
@@ -132,6 +144,7 @@ function locatorSnapshot(
     assetRef: snapshot('enabled').segments[0].rows[0].assetRef,
   },
   resultRow = snapshot('enabled').segments[0].rows[0],
+  destinationViewContext: ViewContext = { kind: 'global' },
 ): GlobalLocatorSnapshot {
   const redactedSummary = resultRow.redactedSummary ?? '只读遮蔽摘要';
   const ownershipHint = resultRow.ownershipHint ?? 'global';
@@ -146,7 +159,7 @@ function locatorSnapshot(
             ...resultRow,
             redactedSummary,
             ownershipHint,
-            destinationViewContext: { kind: 'global' },
+            destinationViewContext,
             destination,
             matchedField: 'displayName',
           },
@@ -268,6 +281,68 @@ describe('ReadOnlyWorkbenchSession', () => {
       reasonCode: 'UNSUPPORTED_CAPABILITY',
     });
     session.dispose();
+  });
+
+  it('locator 从 All+projectIds 跳到 global/project 时原子移除 All-only projectIds 并保留其他 canonical filters', async () => {
+    const destinations: readonly ViewContext[] = [
+      { kind: 'global' },
+      { kind: 'project', projectId: 'opaque-project' },
+    ];
+    for (const destinationViewContext of destinations) {
+      const gateway = new DeferredReadGateway();
+      const session = new ReadOnlyWorkbenchSession(gateway);
+      await waitForPending(gateway);
+      gateway.resolveNext({ kind: 'readSucceeded', snapshot: snapshot('enabled') });
+      await waitFor((state) => state.loadState.kind === 'ready', session);
+
+      session.dispatch({
+        kind: 'setFilters',
+        filters: { agents: ['codex'], projectIds: ['opaque-project'] },
+      });
+      await waitForPending(gateway);
+      gateway.resolveNext({ kind: 'readSucceeded', snapshot: snapshot('enabled') });
+      await waitFor((state) => state.loadState.kind === 'ready', session);
+
+      const baseRow = snapshot('enabled').segments[0].rows[0];
+      const assetRef =
+        destinationViewContext.kind === 'project'
+          ? {
+              ...baseRow.assetRef,
+              nativeOwnership: {
+                kind: 'project' as const,
+                projectId: destinationViewContext.projectId,
+              },
+            }
+          : baseRow.assetRef;
+      const result = locatorSnapshot(
+        { kind: 'skillDetail', assetRef },
+        { ...baseRow, assetRef, nativeOwnership: assetRef.nativeOwnership },
+        destinationViewContext,
+      ).groups[0].results[0];
+      session.dispatch({ kind: 'selectLocatorResult', result });
+
+      expect(session.getSnapshot()).toMatchObject({
+        assetType: 'skill',
+        viewContext: destinationViewContext,
+        filters: { agents: ['codex'] },
+        selected: { assetRef },
+        locator: { kind: 'closed' },
+        loadState: { kind: 'loading' },
+      });
+      await waitForPending(gateway);
+      expect(gateway.queries.at(-1)).toMatchObject({
+        kind: 'workbench',
+        assetType: 'skill',
+        viewContext: destinationViewContext,
+        filters: { agents: ['codex'] },
+      });
+      const last = gateway.queries.at(-1);
+      if (last?.kind !== 'workbench') throw new Error('unreachable');
+      expect(last.filters?.projectIds).toBeUndefined();
+      gateway.resolveNext({ kind: 'readSucceeded', snapshot: snapshot('enabled') });
+      await waitFor((state) => state.loadState.kind === 'ready', session);
+      session.dispose();
+    }
   });
 
   it('locator clear, close, and reopen cancel old in-flight searches before their result can revive', async () => {

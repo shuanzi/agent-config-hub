@@ -419,6 +419,52 @@ pub struct SkillTargetState {
     pub stable_reason: Option<String>,
 }
 
+impl SkillTargetState {
+    /// FE-01 cell facts are read-only, but their authority still has a closed semantic form.
+    pub fn is_semantically_valid(&self) -> bool {
+        let absent = matches!(self.presence, SkillPresence::Absent);
+        let present = matches!(self.presence, SkillPresence::Present);
+        let not_applicable = matches!(self.activation, SkillActivation::NotApplicable);
+        let active = matches!(
+            self.activation,
+            SkillActivation::Enabled | SkillActivation::Disabled
+        );
+        if absent != not_applicable || present != active {
+            return false;
+        }
+
+        let unresolved = matches!(
+            self.presence,
+            SkillPresence::Unknown | SkillPresence::Blocked | SkillPresence::Stale
+        ) || matches!(
+            self.activation,
+            SkillActivation::Unknown | SkillActivation::Blocked | SkillActivation::Stale
+        ) || matches!(
+            self.applicability,
+            ApplicabilityResolution::Unknown
+                | ApplicabilityResolution::Blocked
+                | ApplicabilityResolution::Stale
+        );
+        if unresolved {
+            return !matches!(self.enable_availability, SkillCellAvailability::Allowed)
+                && !matches!(self.disable_availability, SkillCellAvailability::Allowed);
+        }
+
+        match (self.presence, self.activation) {
+            (SkillPresence::Absent, SkillActivation::NotApplicable) => {
+                !matches!(self.disable_availability, SkillCellAvailability::Allowed)
+            }
+            (SkillPresence::Present, SkillActivation::Enabled) => {
+                !matches!(self.enable_availability, SkillCellAvailability::Allowed)
+            }
+            (SkillPresence::Present, SkillActivation::Disabled) => {
+                !matches!(self.disable_availability, SkillCellAvailability::Allowed)
+            }
+            _ => true,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WorkbenchRow {
     pub summary: AssetSummary,

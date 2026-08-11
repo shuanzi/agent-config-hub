@@ -1,24 +1,28 @@
 /**
- * PF-01 measurement-method inputs v1.
+ * PF-01 measurement-method inputs v2.
  *
  * This provenance is deliberately independent from L3 harness `buildInputs`: the latter
- * establishes the binary inputs, while this module pins the L2/L3 measurement protocol,
- * samplers, statistics and comparison logic that determine samples and verdicts.
+ * establishes the binary inputs, while this module pins the actual L2 Vite dev-server/browser
+ * module graph, L2/L3 measurement protocol, samplers, statistics and comparison logic that
+ * determine samples and verdicts.
  */
 import { execFileSync } from 'node:child_process';
 import { Buffer } from 'node:buffer';
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
-import process from 'node:process';
-import { build } from 'vite';
 import { REPO_ROOT } from './lib.mjs';
 
 export const PF01_MEASUREMENT_INPUTS = Object.freeze({
-  schemaVersion: 1,
-  algorithm: 'pf01-measurement-inputs-v1',
+  schemaVersion: 2,
+  algorithm: 'pf01-measurement-inputs-v2',
   method: 'raw bytes SHA-256 / byte-sorted repo-relative paths',
+});
+
+export const PF01_L2_VITE_DEV_MODULE_GRAPH = Object.freeze({
+  schemaVersion: 1,
+  algorithm: 'pf01-l2-vite-dev-module-graph-v1',
+  entry: 'tests/l2/workbench.html',
 });
 
 /** `tests/l2/workbench.html` under the actual perf Vite server, excluding external/virtual modules. */
@@ -35,7 +39,6 @@ export const PF01_L2_VITE_MODULES = Object.freeze([
   'src/workbench/read-only-model.ts',
   'tests/l2/l2-main.tsx',
   'tests/l2/pf01-startup-eligibility.ts',
-  'tests/l2/workbench.html',
 ]);
 
 const METHOD_FILES = [
@@ -50,6 +53,7 @@ const METHOD_FILES = [
   'performance/pf-01.coldstart.test.ts',
   'performance/wdio.conf.ts',
   'performance/wdio.l3.conf.ts',
+  'tests/l2/workbench.html',
   'scripts/orchestrator/build-harness.mjs',
   'scripts/orchestrator/lib.mjs',
   'scripts/orchestrator/perf.mjs',
@@ -127,7 +131,7 @@ function command(repoRoot, args, encoding = 'utf8') {
   }
 }
 
-function formatResult(entries, source) {
+function formatResult(entries, source, l2DevModuleGraph) {
   return {
     schemaVersion: PF01_MEASUREMENT_INPUTS.schemaVersion,
     algorithm: PF01_MEASUREMENT_INPUTS.algorithm,
@@ -135,23 +139,31 @@ function formatResult(entries, source) {
       schemaVersion: PF01_MEASUREMENT_INPUTS.schemaVersion,
       algorithm: PF01_MEASUREMENT_INPUTS.algorithm,
       entries,
+      l2DevModuleGraph,
     }),
     entries,
+    l2DevModuleGraph,
     source,
   };
 }
 
 /** The canonical, versioned digest is intentionally not the harness binary/source digest. */
-export function computePf01MeasurementInputsDigest({ schemaVersion, algorithm, entries }) {
+export function computePf01MeasurementInputsDigest({
+  schemaVersion,
+  algorithm,
+  entries,
+  l2DevModuleGraph,
+}) {
   if (
     schemaVersion !== PF01_MEASUREMENT_INPUTS.schemaVersion ||
     algorithm !== PF01_MEASUREMENT_INPUTS.algorithm ||
-    !Array.isArray(entries)
+    !Array.isArray(entries) ||
+    !validatePf01L2ViteDevModuleGraph(l2DevModuleGraph)
   ) {
     throw new Error('PF-01 measurement-input canonical payload schema invalid');
   }
   return sha256Bytes(
-    Buffer.from(`${JSON.stringify({ schemaVersion, algorithm, entries })}\n`, 'utf8'),
+    Buffer.from(`${JSON.stringify({ schemaVersion, algorithm, entries, l2DevModuleGraph })}\n`, 'utf8'),
   );
 }
 
@@ -166,52 +178,136 @@ function relativeViteModuleId(moduleId, repoRoot) {
   return canonicalPath(normalized);
 }
 
-/** Rebuild the actual L2 perf entry closure; a changed method module cannot silently evade the digest. */
-export async function assertPf01L2ViteModuleClosure({ repoRoot = REPO_ROOT, moduleIds } = {}) {
-  let discovered = moduleIds;
-  if (discovered === undefined) {
-    const outputDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pf01-l2-measurement-'));
-    const moduleSet = new Set();
-    const previousNodeEnv = process.env.NODE_ENV;
-    try {
-      process.env.NODE_ENV = 'production';
-      await build({
-        root: repoRoot,
-        logLevel: 'silent',
-        build: {
-          outDir: outputDir,
-          emptyOutDir: true,
-          rollupOptions: { input: path.join(repoRoot, 'tests/l2/workbench.html') },
-        },
-        plugins: [
-          {
-            name: 'pf01-l2-measurement-module-closure',
-            generateBundle(_, bundle) {
-              for (const output of Object.values(bundle)) {
-                if (output.type !== 'chunk') continue;
-                for (const id of Object.keys(output.modules)) moduleSet.add(id);
-              }
-            },
-          },
-        ],
-      });
-      discovered = [...moduleSet];
-    } finally {
-      if (previousNodeEnv === undefined) delete process.env.NODE_ENV;
-      else process.env.NODE_ENV = previousNodeEnv;
-      fs.rmSync(outputDir, { recursive: true, force: true });
-    }
+function canonicalModulePaths(paths, { requireCanonicalOrder = false } = {}) {
+  if (!Array.isArray(paths)) throw new Error('PF-01 L2 Vite dev module graph paths missing');
+  const raw = paths.map(canonicalPath);
+  const canonical = sortPaths(raw);
+  if (requireCanonicalOrder && !samePathList(raw, canonical)) {
+    throw new Error('PF-01 L2 Vite dev module graph paths are not canonical byte order');
   }
-  const actual = sortPaths(
-    [...new Set(discovered.map((id) => relativeViteModuleId(id, repoRoot)).filter(Boolean))],
+  assertNoPathCollisions(canonical);
+  if (new Set(canonical).size !== canonical.length) {
+    throw new Error('PF-01 L2 Vite dev module graph paths duplicate');
+  }
+  return canonical;
+}
+
+function assertPhysicalDevModulePaths(paths, repoRoot) {
+  const root = path.resolve(repoRoot);
+  for (const pathname of paths) {
+    const fullPath = path.resolve(root, pathname);
+    if (fullPath === root || !fullPath.startsWith(`${root}${path.sep}`)) {
+      throw new Error(`PF-01 L2 Vite dev module path outside repository: ${pathname}`);
+    }
+    let stats;
+    try {
+      stats = fs.lstatSync(fullPath);
+    } catch {
+      throw new Error(`PF-01 L2 Vite dev module missing: ${pathname}`);
+    }
+    if (stats.isSymbolicLink()) throw new Error(`PF-01 L2 Vite dev module symlink rejected: ${pathname}`);
+    if (!stats.isFile()) throw new Error(`PF-01 L2 Vite dev module must be a regular file: ${pathname}`);
+  }
+}
+
+/** 固定的 repo-local 实际 dev module closure；HTML entry 本身作为 method input 单列。 */
+export function expectedPf01L2ViteDevModuleGraph() {
+  const modulePaths = sortPaths(PF01_L2_VITE_MODULES);
+  return {
+    ...PF01_L2_VITE_DEV_MODULE_GRAPH,
+    declaredModulePaths: modulePaths,
+    actualModulePaths: modulePaths,
+  };
+}
+
+/**
+ * 只接受 performance/wdio.conf.ts 实际 createServer 生命周期中、浏览器加载后
+ * Vite ModuleGraph 记录的 repo-local physical modules。virtual 与 external/node_modules
+ * id 不属于 repo closure（其行为分别由 Vite config/package-lock 固定），其余遗漏、
+ * 额外或 declared/actual 不一致一律拒绝。
+ */
+export function attestPf01L2ViteDevModuleGraph({
+  repoRoot = REPO_ROOT,
+  moduleIds,
+  declaredModulePaths,
+} = {}) {
+  if (!Array.isArray(moduleIds)) throw new Error('PF-01 L2 Vite dev module graph actual ids missing');
+  const actualModulePaths = canonicalModulePaths(
+    [...new Set(moduleIds.map((id) => relativeViteModuleId(id, repoRoot)).filter(Boolean))],
   );
-  const expected = sortPaths(PF01_L2_VITE_MODULES);
-  if (!samePathList(actual, expected)) {
+  const expected = expectedPf01L2ViteDevModuleGraph().actualModulePaths;
+  if (!samePathList(actualModulePaths, expected)) {
     throw new Error(
-      `PF-01 L2 Vite module closure mismatch: actual=${actual.join(',')} expected=${expected.join(',')}`,
+      `PF-01 L2 Vite dev module closure mismatch: actual=${actualModulePaths.join(',')} expected=${expected.join(',')}`,
     );
   }
-  return actual;
+  assertPhysicalDevModulePaths(actualModulePaths, repoRoot);
+  const declared = canonicalModulePaths(declaredModulePaths ?? actualModulePaths, {
+    requireCanonicalOrder: true,
+  });
+  if (!samePathList(declared, actualModulePaths)) {
+    throw new Error('PF-01 L2 Vite dev module graph declared/actual mismatch');
+  }
+  return {
+    ...PF01_L2_VITE_DEV_MODULE_GRAPH,
+    declaredModulePaths: declared,
+    actualModulePaths,
+  };
+}
+
+export function validatePf01L2ViteDevModuleGraph(value) {
+  if (
+    value === null ||
+    typeof value !== 'object' ||
+    !samePathList(Object.keys(value).sort(), [
+      'actualModulePaths',
+      'algorithm',
+      'declaredModulePaths',
+      'entry',
+      'schemaVersion',
+    ]) ||
+    value.schemaVersion !== PF01_L2_VITE_DEV_MODULE_GRAPH.schemaVersion ||
+    value.algorithm !== PF01_L2_VITE_DEV_MODULE_GRAPH.algorithm ||
+    value.entry !== PF01_L2_VITE_DEV_MODULE_GRAPH.entry
+  ) {
+    return false;
+  }
+  try {
+    const declared = canonicalModulePaths(value.declaredModulePaths, { requireCanonicalOrder: true });
+    const actual = canonicalModulePaths(value.actualModulePaths, { requireCanonicalOrder: true });
+    const expected = expectedPf01L2ViteDevModuleGraph().actualModulePaths;
+    return samePathList(declared, actual) && samePathList(actual, expected);
+  } catch {
+    return false;
+  }
+}
+
+/** 只读取当前 run 中 config 写出的 regular JSON evidence；symlink 一律拒绝。 */
+export function readPf01L2ViteDevModuleGraph(evidencePath) {
+  let stats;
+  try {
+    stats = fs.lstatSync(evidencePath);
+  } catch {
+    throw new Error('PF-01 L2 Vite dev module graph evidence missing');
+  }
+  if (stats.isSymbolicLink() || !stats.isFile()) {
+    throw new Error('PF-01 L2 Vite dev module graph evidence must be a regular file');
+  }
+  let value;
+  try {
+    value = JSON.parse(fs.readFileSync(evidencePath, 'utf8'));
+  } catch {
+    throw new Error('PF-01 L2 Vite dev module graph evidence JSON invalid');
+  }
+  if (!validatePf01L2ViteDevModuleGraph(value)) {
+    throw new Error('PF-01 L2 Vite dev module graph evidence invalid');
+  }
+  return value;
+}
+
+/** Backward-compatible public seam; production collection no longer invokes vite.build(). */
+export async function assertPf01L2ViteModuleClosure({ repoRoot = REPO_ROOT, moduleIds } = {}) {
+  return attestPf01L2ViteDevModuleGraph({ repoRoot, moduleIds }).actualModulePaths;
 }
 
 function matchesEntries(entries) {
@@ -250,11 +346,13 @@ export function validatePf01MeasurementInputs(value, sourceKind) {
     value.source.method === PF01_MEASUREMENT_INPUTS.method &&
     isCommit(value.source.commit) &&
     matchesEntries(value.entries) &&
+    validatePf01L2ViteDevModuleGraph(value.l2DevModuleGraph) &&
     value.digest ===
       computePf01MeasurementInputsDigest({
         schemaVersion: value.schemaVersion,
         algorithm: value.algorithm,
         entries: value.entries,
+        l2DevModuleGraph: value.l2DevModuleGraph,
       })
   );
 }
@@ -272,6 +370,7 @@ export function collectPf01MeasurementInputs({
   repoRoot = REPO_ROOT,
   trackedPaths,
   gitStatus,
+  l2DevModuleGraph,
 } = {}) {
   const status =
     gitStatus === undefined
@@ -284,11 +383,8 @@ export function collectPf01MeasurementInputs({
   const paths = sortPaths(selected.map(canonicalPath));
   assertNoPathCollisions(paths);
   assertExactPaths(paths);
-  if (trackedPaths === undefined) {
-    // The current checkout alone can execute Vite; an old Git tree is attested by raw blobs below.
-    return assertPf01L2ViteModuleClosure({ repoRoot }).then(() =>
-      collectPf01MeasurementInputs({ repoRoot, trackedPaths: paths, gitStatus: '' }),
-    );
+  if (!validatePf01L2ViteDevModuleGraph(l2DevModuleGraph)) {
+    throw new Error('PF-01 measurement-input actual L2 Vite dev module graph missing or invalid');
   }
 
   const root = path.resolve(repoRoot);
@@ -312,7 +408,7 @@ export function collectPf01MeasurementInputs({
     kind: 'clean-tracked-checkout',
     method: PF01_MEASUREMENT_INPUTS.method,
     commit,
-  });
+  }, l2DevModuleGraph);
 }
 
 function decodeGitPath(bytes) {
@@ -324,9 +420,16 @@ function decodeGitPath(bytes) {
 }
 
 /** Immutable baseline collector: Git blobs must be the same fixed regular-file method input set. */
-export function collectPf01MeasurementInputsFromGit({ repoRoot = REPO_ROOT, commit } = {}) {
+export function collectPf01MeasurementInputsFromGit({
+  repoRoot = REPO_ROOT,
+  commit,
+  l2DevModuleGraph,
+} = {}) {
   if (!/^[a-f0-9]{40}$/i.test(commit ?? '') && commit !== 'HEAD') {
     throw new Error('PF-01 measurement-input baseline commit invalid');
+  }
+  if (!validatePf01L2ViteDevModuleGraph(l2DevModuleGraph)) {
+    throw new Error('PF-01 measurement-input baseline L2 Vite dev module graph missing or invalid');
   }
   const resolvedCommit = command(repoRoot, ['rev-parse', commit]).trim();
   const raw = command(repoRoot, ['ls-tree', '-r', '-z', '--full-tree', resolvedCommit], 'buffer');
@@ -360,5 +463,5 @@ export function collectPf01MeasurementInputsFromGit({ repoRoot = REPO_ROOT, comm
     kind: 'git-object-tree',
     method: PF01_MEASUREMENT_INPUTS.method,
     commit: resolvedCommit,
-  });
+  }, l2DevModuleGraph);
 }

@@ -10,6 +10,10 @@ use std::path::PathBuf;
 use agent_config_manager_lib::adapter_registry::AdapterRegistry;
 use agent_config_manager_lib::catalog::Catalog;
 use agent_config_manager_lib::core::GatewayCore;
+use agent_config_manager_lib::domain::{
+    AgentId, ApplicabilityResolution, ReasonCode, SkillActivation, SkillCellAvailability,
+    SkillPresence, SkillTargetState,
+};
 use agent_config_manager_lib::ipc::{handle_read, MAX_REQUEST_BYTES};
 use agent_config_manager_lib::wire::{
     ActionAvailabilityWire, ReadRequestEnvelope, ReadResponsePayload, ReasonCodeWire,
@@ -30,6 +34,122 @@ fn fx19_core() -> GatewayCore {
             PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../fixtures/fx-19"),
         ),
     )
+}
+
+fn skill_state(
+    presence: SkillPresence,
+    activation: SkillActivation,
+    applicability: ApplicabilityResolution,
+    enable_availability: SkillCellAvailability,
+    disable_availability: SkillCellAvailability,
+) -> SkillTargetState {
+    SkillTargetState {
+        agent: AgentId::ClaudeCode,
+        presence,
+        activation,
+        applicability,
+        enable_availability,
+        disable_availability,
+        pending: None,
+        stable_reason: None,
+    }
+}
+
+fn unavailable() -> SkillCellAvailability {
+    SkillCellAvailability::Disabled {
+        reason_code: ReasonCode::ReadOnlyPolicy,
+    }
+}
+
+#[test]
+fn skill_cell_wire_domain_semantics_reject_contradictory_presence_activation_and_availability() {
+    let valid = [
+        skill_state(
+            SkillPresence::Absent,
+            SkillActivation::NotApplicable,
+            ApplicabilityResolution::Resolved,
+            SkillCellAvailability::Allowed,
+            unavailable(),
+        ),
+        skill_state(
+            SkillPresence::Present,
+            SkillActivation::Enabled,
+            ApplicabilityResolution::Resolved,
+            unavailable(),
+            SkillCellAvailability::Allowed,
+        ),
+        skill_state(
+            SkillPresence::Present,
+            SkillActivation::Disabled,
+            ApplicabilityResolution::Resolved,
+            SkillCellAvailability::Allowed,
+            unavailable(),
+        ),
+        skill_state(
+            SkillPresence::Unknown,
+            SkillActivation::Unknown,
+            ApplicabilityResolution::Unknown,
+            unavailable(),
+            unavailable(),
+        ),
+    ];
+    assert!(valid.iter().all(SkillTargetState::is_semantically_valid));
+
+    let invalid = [
+        // absent iff notApplicable; present iff enabled/disabled.
+        skill_state(
+            SkillPresence::Absent,
+            SkillActivation::Enabled,
+            ApplicabilityResolution::Resolved,
+            unavailable(),
+            unavailable(),
+        ),
+        skill_state(
+            SkillPresence::Present,
+            SkillActivation::NotApplicable,
+            ApplicabilityResolution::Resolved,
+            unavailable(),
+            unavailable(),
+        ),
+        // absent/disabled/enabled action availability contradictions.
+        skill_state(
+            SkillPresence::Absent,
+            SkillActivation::NotApplicable,
+            ApplicabilityResolution::Resolved,
+            unavailable(),
+            SkillCellAvailability::Allowed,
+        ),
+        skill_state(
+            SkillPresence::Present,
+            SkillActivation::Disabled,
+            ApplicabilityResolution::Resolved,
+            unavailable(),
+            SkillCellAvailability::Allowed,
+        ),
+        skill_state(
+            SkillPresence::Present,
+            SkillActivation::Enabled,
+            ApplicabilityResolution::Resolved,
+            SkillCellAvailability::Allowed,
+            unavailable(),
+        ),
+        // Any uncertainty makes both availability facts unavailable.
+        skill_state(
+            SkillPresence::Unknown,
+            SkillActivation::Unknown,
+            ApplicabilityResolution::Unknown,
+            SkillCellAvailability::Allowed,
+            unavailable(),
+        ),
+        skill_state(
+            SkillPresence::Present,
+            SkillActivation::Disabled,
+            ApplicabilityResolution::Stale,
+            SkillCellAvailability::Allowed,
+            unavailable(),
+        ),
+    ];
+    assert!(invalid.iter().all(|state| !state.is_semantically_valid()));
 }
 
 // ---------------------------------------------------------------------------

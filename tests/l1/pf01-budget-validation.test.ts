@@ -11,7 +11,7 @@ import { assertCleanPf01Baseline, collectCurrentPf01Attestation, pf01ComparisonP
 import { computePf01L3HarnessBuildInputsDigest } from '../../scripts/orchestrator/pf01-build-inputs.mjs';
 // prettier-ignore
 // @ts-expect-error runtime provenance module is a plain Node ESM module.
-import { computePf01MeasurementInputsDigest, PF01_MEASUREMENT_INPUT_PATHS, PF01_MEASUREMENT_INPUTS } from '../../scripts/orchestrator/pf01-measurement-inputs.mjs';
+import { computePf01MeasurementInputsDigest, expectedPf01L2ViteDevModuleGraph, PF01_MEASUREMENT_INPUT_PATHS, PF01_MEASUREMENT_INPUTS } from '../../scripts/orchestrator/pf01-measurement-inputs.mjs';
 
 const descriptor = JSON.parse(
   readFileSync(resolve('performance/descriptors/pf-01.catalog-browse.json'), 'utf8'),
@@ -22,6 +22,7 @@ function measurementInputs(kind: 'clean-tracked-checkout' | 'git-object-tree') {
     path,
     sha256: (index + 1).toString(16).padStart(64, '0'),
   }));
+  const l2DevModuleGraph = expectedPf01L2ViteDevModuleGraph();
   return {
     schemaVersion: PF01_MEASUREMENT_INPUTS.schemaVersion,
     algorithm: PF01_MEASUREMENT_INPUTS.algorithm,
@@ -29,8 +30,10 @@ function measurementInputs(kind: 'clean-tracked-checkout' | 'git-object-tree') {
       schemaVersion: PF01_MEASUREMENT_INPUTS.schemaVersion,
       algorithm: PF01_MEASUREMENT_INPUTS.algorithm,
       entries,
+      l2DevModuleGraph,
     }),
     entries,
+    l2DevModuleGraph,
     source: {
       kind,
       method: PF01_MEASUREMENT_INPUTS.method,

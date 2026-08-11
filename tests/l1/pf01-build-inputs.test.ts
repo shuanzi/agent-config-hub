@@ -1,11 +1,11 @@
-import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 // prettier-ignore
 // @ts-expect-error runtime verifier module is a plain Node ESM module.
-import { assertPf01L3ViteModuleClosure, collectPf01L3HarnessBuildInputs, collectPf01L3HarnessBuildInputsFromGit, computePf01L3HarnessBuildInputsDigest } from '../../scripts/orchestrator/pf01-build-inputs.mjs';
+import { assertPf01L3BuildEnvironment, assertPf01L3ViteModuleClosure, collectPf01L3HarnessBuildInputs, collectPf01L3HarnessBuildInputsFromGit, computePf01L3HarnessBuildInputsDigest } from '../../scripts/orchestrator/pf01-build-inputs.mjs';
 
 const BASELINE_COMMIT = '4fdff98be42065936bcfff462302f033de5d6b4a';
 
@@ -31,6 +31,44 @@ const EXPECTED_VITE_MODULES = [
 ];
 
 describe('PF-01 L3 harness build-input digest v2', () => {
+  it('actual Cargo/native toolchain overrides（含 target、HOST/TARGET 与 cc-rs）一律不允许未 attested', () => {
+    const root = mkdtempSync(join(tmpdir(), 'pf01-native-toolchain-'));
+    try {
+      mkdirSync(root, { recursive: true });
+      expect(assertPf01L3BuildEnvironment({}, root)).toMatchObject({ overrides: [] });
+      const nativeOverrides = [
+        'RUSTC',
+        'RUSTDOC',
+        'RUSTDOCFLAGS',
+        'CC',
+        'CXX',
+        'AR',
+        'CPPFLAGS',
+        'CFLAGS',
+        'CXXFLAGS',
+        'LDFLAGS',
+        'CC_aarch64-apple-darwin',
+        'CXX_aarch64_apple_darwin',
+        'AR_aarch64_apple_darwin',
+        'HOST_CC',
+        'TARGET_CFLAGS',
+        'CXXSTDLIB_aarch64-apple-darwin',
+        'CRATE_CC_NO_DEFAULTS',
+        'CC_ENABLE_DEBUG_OUTPUT',
+        'CC_SHELL_ESCAPED_FLAGS',
+        'CC_KNOWN_WRAPPER_CUSTOM',
+        'CC_FORCE_DISABLE',
+      ];
+      for (const key of nativeOverrides) {
+        expect(() => assertPf01L3BuildEnvironment({ [key]: '/tmp/alternate' }, root)).toThrow(
+          /build-input environment/i,
+        );
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it('从 immutable baseline Git objects 与当前实现分别得到可追溯摘要，并暴露 output-affecting drift', () => {
     const baseline = collectPf01L3HarnessBuildInputsFromGit({ commit: BASELINE_COMMIT });
     // 注入 clean-status 仅覆盖 digest 算法；当前实现改动了 mock/UI/wire 等实际

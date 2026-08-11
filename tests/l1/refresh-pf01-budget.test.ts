@@ -12,7 +12,7 @@ import { freezePf01BudgetFromBaselineRun } from '../../scripts/orchestrator/refr
 import { computePf01L3HarnessBuildInputsDigest } from '../../scripts/orchestrator/pf01-build-inputs.mjs';
 // prettier-ignore
 // @ts-expect-error runtime provenance module is a plain Node ESM module.
-import { computePf01MeasurementInputsDigest, PF01_MEASUREMENT_INPUT_PATHS, PF01_MEASUREMENT_INPUTS } from '../../scripts/orchestrator/pf01-measurement-inputs.mjs';
+import { computePf01MeasurementInputsDigest, expectedPf01L2ViteDevModuleGraph, PF01_MEASUREMENT_INPUT_PATHS, PF01_MEASUREMENT_INPUTS } from '../../scripts/orchestrator/pf01-measurement-inputs.mjs';
 
 const descriptor = JSON.parse(
   readFileSync(resolve('performance/descriptors/pf-01.catalog-browse.json'), 'utf8'),
@@ -44,6 +44,7 @@ function measurementInputs(kind: 'clean-tracked-checkout' | 'git-object-tree') {
     path,
     sha256: (index + 1).toString(16).padStart(64, '0'),
   }));
+  const l2DevModuleGraph = expectedPf01L2ViteDevModuleGraph();
   return {
     schemaVersion: PF01_MEASUREMENT_INPUTS.schemaVersion,
     algorithm: PF01_MEASUREMENT_INPUTS.algorithm,
@@ -51,6 +52,7 @@ function measurementInputs(kind: 'clean-tracked-checkout' | 'git-object-tree') {
       schemaVersion: PF01_MEASUREMENT_INPUTS.schemaVersion,
       algorithm: PF01_MEASUREMENT_INPUTS.algorithm,
       entries,
+      l2DevModuleGraph,
     }),
     source: {
       kind,
@@ -58,6 +60,7 @@ function measurementInputs(kind: 'clean-tracked-checkout' | 'git-object-tree') {
       commit,
     },
     entries,
+    l2DevModuleGraph,
   };
 }
 
@@ -122,6 +125,7 @@ function writeRun(root: string, mutate?: (summary: Record<string, unknown>) => v
       overrides: [],
     },
   };
+  const l2DevModuleGraph = current.measurementInputs.l2DevModuleGraph;
   const summary: Record<string, unknown> = {
     schemaVersion: 1,
     descriptorId: 'PF-01',
@@ -168,6 +172,7 @@ function writeRun(root: string, mutate?: (summary: Record<string, unknown>) => v
   };
   mutate?.(summary);
   writeFileSync(join(runDir, 'summary.json'), JSON.stringify(summary));
+  writeFileSync(join(runDir, 'l2-dev-module-graph.json'), JSON.stringify(l2DevModuleGraph));
   writeFileSync(
     join(runDir, 'samples.json'),
     JSON.stringify({
@@ -306,7 +311,7 @@ describe('refresh PF-01 budget public seam', () => {
         (summary) =>
           delete (summary.comparisonProvenance as { current: { measurementInputs?: unknown } })
             .current.measurementInputs,
-        /attestation/i,
+        /attestation|module graph/i,
       ],
       [
         'measurement-input-drift',
@@ -369,6 +374,27 @@ describe('refresh PF-01 budget public seam', () => {
       rmSync(incompleteRoot, { recursive: true, force: true });
     }
 
+    const graphRoot = mkdtempSync(join(tmpdir(), 'pf01-freeze-dev-graph-'));
+    try {
+      writeRun(graphRoot);
+      const graphPath = join(graphRoot, run, 'l2-dev-module-graph.json');
+      const graph = JSON.parse(readFileSync(graphPath, 'utf8')) as {
+        actualModulePaths: string[];
+      };
+      graph.actualModulePaths = graph.actualModulePaths.slice(1);
+      writeFileSync(graphPath, JSON.stringify(graph));
+      expect(() => freezePf01BudgetFromBaselineRun(argumentsFor(graphRoot))).toThrow(
+        /module graph/i,
+      );
+
+      writeRun(graphRoot);
+      rmSync(graphPath);
+      symlinkSync(join(graphRoot, run, 'summary.json'), graphPath);
+      expect(() => freezePf01BudgetFromBaselineRun(argumentsFor(graphRoot))).toThrow(/symlink/i);
+    } finally {
+      rmSync(graphRoot, { recursive: true, force: true });
+    }
+
     const root = mkdtempSync(join(tmpdir(), 'pf01-freeze-symlink-'));
     try {
       const physical = join(root, 'physical');
@@ -418,6 +444,7 @@ describe('refresh PF-01 budget public seam', () => {
         ['PF01_OUTPUT_DIR', '/tmp/forged', /ambient/i],
         ['ACM_NATIVE_ROOT', '/tmp/forged', /ambient/i],
         ['RUSTFLAGS', '-C debuginfo=0', /build-input environment/i],
+        ['RUSTC', '/tmp/alternate-rustc', /build-input environment/i],
         ['NODE_OPTIONS', '--trace-warnings', /build-input environment/i],
       ];
       for (const [key, value, message] of cliOverrides) {

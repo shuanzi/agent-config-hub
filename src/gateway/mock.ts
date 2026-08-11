@@ -583,7 +583,9 @@ export class ScriptedMockGateway implements FrontendGateway {
                 presence: record.summary.agents.includes(agent) ? 'present' : 'absent',
                 activation: record.summary.agents.includes(agent) ? 'enabled' : 'notApplicable',
                 applicability: 'resolved',
-                enableAvailability: { kind: 'allowed' as const },
+                enableAvailability: record.summary.agents.includes(agent)
+                  ? { kind: 'disabled' as const, reasonCode: 'READ_ONLY_POLICY' }
+                  : { kind: 'allowed' as const },
                 disableAvailability: record.summary.agents.includes(agent)
                   ? { kind: 'allowed' as const }
                   : { kind: 'disabled' as const, reasonCode: 'UNSUPPORTED_CAPABILITY' },
@@ -830,7 +832,10 @@ export class ScriptedMockGateway implements FrontendGateway {
                 presence: agent === 'codex' ? 'present' : 'absent',
                 activation: agent === 'codex' ? 'enabled' : 'notApplicable',
                 applicability: 'resolved',
-                enableAvailability: { kind: 'allowed' as const },
+                enableAvailability:
+                  agent === 'codex'
+                    ? { kind: 'disabled' as const, reasonCode: 'READ_ONLY_POLICY' }
+                    : { kind: 'allowed' as const },
                 disableAvailability:
                   agent === 'codex'
                     ? { kind: 'allowed' as const }
@@ -1042,7 +1047,7 @@ export class ScriptedMockGateway implements FrontendGateway {
               presence: 'present',
               activation: 'enabled',
               applicability: 'resolved',
-              enableAvailability: { kind: 'allowed' },
+              enableAvailability: { kind: 'disabled', reasonCode: 'READ_ONLY_POLICY' },
               disableAvailability: { kind: 'allowed' },
             }
           : {

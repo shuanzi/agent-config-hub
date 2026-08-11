@@ -44,7 +44,10 @@ import {
   assertPf01VerificationEnvironment,
   collectPf01L3HarnessBuildInputs,
 } from './pf01-build-inputs.mjs';
-import { collectPf01MeasurementInputs } from './pf01-measurement-inputs.mjs';
+import {
+  collectPf01MeasurementInputs,
+  readPf01L2ViteDevModuleGraph,
+} from './pf01-measurement-inputs.mjs';
 import {
   assertCleanPf01Baseline,
   capturePf01RuntimeProvenance,
@@ -247,6 +250,17 @@ async function main() {
     process.exit(1);
   }
   const samplesPayload = JSON.parse(fs.readFileSync(samplesPath, 'utf8'));
+  let l2DevModuleGraph;
+  try {
+    l2DevModuleGraph = readPf01L2ViteDevModuleGraph(
+      path.join(outputDir, 'l2-dev-module-graph.json'),
+    );
+  } catch (error) {
+    console.error(
+      `INCONCLUSIVE  L2 actual Vite dev module graph 无法证明：${error instanceof Error ? error.message : 'unknown'}`,
+    );
+    process.exit(2);
+  }
 
   // --- L3 冷启动采样（test-harness surface） ---------------------------------
   // 确保 harness 已构建（standalone `perf -- PF-01` 同样可用），再串行 3 次
@@ -260,7 +274,7 @@ async function main() {
   let currentAttestation;
   try {
     await assertPf01L3ViteModuleClosure();
-    const measurementInputs = await collectPf01MeasurementInputs();
+    const measurementInputs = collectPf01MeasurementInputs({ l2DevModuleGraph });
     currentAttestation = collectCurrentPf01Attestation({
       buildInputs: collectPf01L3HarnessBuildInputs(),
       measurementInputs,

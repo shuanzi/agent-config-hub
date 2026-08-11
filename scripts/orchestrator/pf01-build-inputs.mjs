@@ -384,6 +384,51 @@ export function collectPf01L3HarnessBuildInputsFromGit({
   });
 }
 
+const NATIVE_TOOLCHAIN_EXACT_OVERRIDES = new Set([
+  'RUSTFLAGS',
+  'RUSTC',
+  'RUSTDOC',
+  'RUSTDOCFLAGS',
+  'RUSTC_WRAPPER',
+  'RUSTC_WORKSPACE_WRAPPER',
+  'RUSTUP_HOME',
+  'RUSTUP_TOOLCHAIN',
+  'CC',
+  'CXX',
+  'AR',
+  'CPPFLAGS',
+  'CFLAGS',
+  'CXXFLAGS',
+  'LDFLAGS',
+  'CXXSTDLIB',
+  'CRATE_CC_NO_DEFAULTS',
+  'CC_ENABLE_DEBUG_OUTPUT',
+  'CC_SHELL_ESCAPED_FLAGS',
+  'CC_KNOWN_WRAPPER_CUSTOM',
+  'CC_FORCE_DISABLE',
+]);
+
+const TARGETABLE_NATIVE_TOOLCHAIN_OVERRIDES = [
+  'CC',
+  'CXX',
+  'AR',
+  'CPPFLAGS',
+  'CFLAGS',
+  'CXXFLAGS',
+  'LDFLAGS',
+  'CXXSTDLIB',
+];
+
+function isNativeToolchainOverride(key) {
+  if (NATIVE_TOOLCHAIN_EXACT_OVERRIDES.has(key)) return true;
+  return TARGETABLE_NATIVE_TOOLCHAIN_OVERRIDES.some(
+    (name) =>
+      key === `HOST_${name}` ||
+      key === `TARGET_${name}` ||
+      (key.startsWith(`${name}_`) && /^[A-Za-z0-9_.-]+$/.test(key.slice(name.length + 1))),
+  );
+}
+
 /** 禁止未记录的 build override 参与当前 PF-01 attestation。 */
 export function assertPf01L3BuildEnvironment(env = process.env, repoRoot = REPO_ROOT) {
   const keys = Object.keys(env).filter(
@@ -391,16 +436,8 @@ export function assertPf01L3BuildEnvironment(env = process.env, repoRoot = REPO_
       key.startsWith('VITE_') ||
       key.startsWith('TAURI_') ||
       key.startsWith('CARGO_') ||
-      [
-        'RUSTFLAGS',
-        'RUSTC_WRAPPER',
-        'RUSTC_WORKSPACE_WRAPPER',
-        'RUSTUP_HOME',
-        'RUSTUP_TOOLCHAIN',
-        'MACOSX_DEPLOYMENT_TARGET',
-        'SDKROOT',
-        'NODE_OPTIONS',
-      ].includes(key) ||
+      isNativeToolchainOverride(key) ||
+      ['MACOSX_DEPLOYMENT_TARGET', 'SDKROOT', 'NODE_OPTIONS'].includes(key) ||
       (key === 'NODE_ENV' && env[key] !== 'production'),
   );
   const dotEnv = fs.readdirSync(repoRoot).filter((name) => name === '.env' || name.startsWith('.env.'));

@@ -62,7 +62,9 @@ fn skill_target_states() -> Vec<SkillTargetState> {
             presence: SkillPresence::Present,
             activation: SkillActivation::Enabled,
             applicability: crate::domain::ApplicabilityResolution::Resolved,
-            enable_availability: SkillCellAvailability::Allowed,
+            enable_availability: SkillCellAvailability::Disabled {
+                reason_code: ReasonCode::ReadOnlyPolicy,
+            },
             disable_availability: SkillCellAvailability::Allowed,
             pending: None,
             stable_reason: None,

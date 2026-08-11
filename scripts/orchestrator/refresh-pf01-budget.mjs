@@ -24,6 +24,8 @@ import {
 import {
   collectPf01MeasurementInputs,
   collectPf01MeasurementInputsFromGit,
+  readPf01L2ViteDevModuleGraph,
+  validatePf01L2ViteDevModuleGraph,
 } from './pf01-measurement-inputs.mjs';
 import {
   PF01_BUDGET_CONSTANTS,
@@ -277,6 +279,7 @@ function assertSameCurrentAttestation(recorded, current) {
     !sameJson(recorded.buildInputs.entries, current.buildInputs.entries) ||
     recorded.measurementInputs.digest !== current.measurementInputs.digest ||
     !sameJson(recorded.measurementInputs.entries, current.measurementInputs.entries) ||
+    !sameJson(recorded.measurementInputs.l2DevModuleGraph, current.measurementInputs.l2DevModuleGraph) ||
     !sameJson(recorded.runner, current.runner) ||
     !sameJson(recorded.toolchain, current.toolchain)
   ) {
@@ -307,6 +310,10 @@ export function freezePf01BudgetFromBaselineRun({
   const l2Samples = readPhysicalJson(artifactsRoot, path.join(runDirectory, 'samples.json'));
   const l3Samples = readPhysicalJson(artifactsRoot, path.join(runDirectory, 'l3-samples.json'));
   const resourceRuns = readPhysicalJson(artifactsRoot, path.join(runDirectory, 'l3-resource-runs.json'));
+  const l2DevModuleGraph = readPhysicalJson(
+    artifactsRoot,
+    path.join(runDirectory, 'l2-dev-module-graph.json'),
+  );
 
   if (
     !isObject(summary) ||
@@ -361,6 +368,12 @@ export function freezePf01BudgetFromBaselineRun({
 
   const recorded = summary.comparisonProvenance?.current;
   if (!isObject(recorded)) throw new Error('PF-01 baseline comparison provenance missing');
+  if (
+    !validatePf01L2ViteDevModuleGraph(l2DevModuleGraph) ||
+    !sameJson(recorded.measurementInputs?.l2DevModuleGraph, l2DevModuleGraph)
+  ) {
+    throw new Error('PF-01 baseline actual L2 Vite dev module graph missing or mismatched');
+  }
   assertRuntimeProvenance(recorded);
   assertBuildEnvironmentProvenance(recorded);
   assertSameCurrentAttestation(recorded, currentAttestation);
@@ -378,7 +391,8 @@ export function freezePf01BudgetFromBaselineRun({
     baselineMeasurementInputs.source?.kind !== 'git-object-tree' ||
     baselineMeasurementInputs.source?.commit !== runIdentity.startCommit ||
     baselineMeasurementInputs.digest !== recorded.measurementInputs.digest ||
-    !sameJson(baselineMeasurementInputs.entries, recorded.measurementInputs.entries)
+    !sameJson(baselineMeasurementInputs.entries, recorded.measurementInputs.entries) ||
+    !sameJson(baselineMeasurementInputs.l2DevModuleGraph, l2DevModuleGraph)
   ) {
     throw new Error('PF-01 baseline Git-object measurement-input mismatch');
   }
@@ -445,17 +459,26 @@ async function main() {
   try {
     const { baselineRun } = parseArguments(process.argv.slice(2));
     assertRefreshPf01Environment();
+    const { runDirectory } = baselineRunDirectory({
+      repoRoot: REPO_ROOT,
+      artifactsRoot: ARTIFACTS_ROOT,
+      baselineRun,
+    });
+    const l2DevModuleGraph = readPf01L2ViteDevModuleGraph(
+      path.join(runDirectory, 'l2-dev-module-graph.json'),
+    );
     const { descriptor } = assertCurrentPfDescriptorDigest(DESCRIPTOR_PATH);
     const currentGit = await gitInfo();
     const runtimeProvenance = await capturePf01RuntimeProvenance();
     const currentAttestation = collectCurrentPf01Attestation({
       buildInputs: collectPf01L3HarnessBuildInputs(),
-      measurementInputs: await collectPf01MeasurementInputs(),
+      measurementInputs: collectPf01MeasurementInputs({ l2DevModuleGraph }),
       runtimeProvenance,
     });
     const baselineBuildInputs = collectPf01L3HarnessBuildInputsFromGit({ commit: currentGit.commit });
     const baselineMeasurementInputs = collectPf01MeasurementInputsFromGit({
       commit: currentGit.commit,
+      l2DevModuleGraph,
     });
     const budget = freezePf01BudgetFromBaselineRun({
       baselineRun,
