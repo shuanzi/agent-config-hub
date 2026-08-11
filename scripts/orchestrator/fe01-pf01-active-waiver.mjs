@@ -1,24 +1,14 @@
 /**
- * FE-01 当前唯一可生效的 PF-01 manual disposition。
+ * FE-01 historical-only PF-01 manual disposition。
  *
  * 该模块与 `fe01-pf01-waiver.mjs` 的 historical-only L3 cold-start record 完全分离。
- * 它只接受用户指定的 immutable search p95 fail，不能成为通用 performance bypass。
+ * 它只审计用户指定的 immutable search p95 fail，不能成为当前 closure 或通用 performance bypass。
  */
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
-import { REPO_ROOT, scanEvidenceText, sha256File, sha256Text } from './lib.mjs';
-import {
-  PF01_TIMING_METRICS,
-  validateFrozenPf01Budget,
-} from './pf01-budget.mjs';
-import {
-  collectPf01L3HarnessBuildInputsFromGit,
-} from './pf01-build-inputs.mjs';
-import {
-  collectPf01MeasurementInputsFromGit,
-  readPf01L2ViteDevModuleGraph,
-} from './pf01-measurement-inputs.mjs';
+import { assertNoGitAmbient, REPO_ROOT, scanEvidenceText, sha256File, sha256Text } from './lib.mjs';
+import { PF01_TIMING_METRICS } from './pf01-budget.mjs';
 import { finalizeHarnessPeakRss, validatePf01ResourceEvidence } from './pf01-resource.mjs';
 import { hasPhysicalPath } from './clean-evidence-index.mjs';
 
@@ -148,6 +138,7 @@ function readJson(filePath) {
 }
 
 function gitText(commit, relativePath, repoRoot) {
+  assertNoGitAmbient();
   return execFileSync('git', ['show', `${commit}:${relativePath}`], {
     cwd: repoRoot,
     encoding: 'utf8',
@@ -156,6 +147,49 @@ function gitText(commit, relativePath, repoRoot) {
 
 function gitJson(commit, relativePath, repoRoot) {
   return JSON.parse(gitText(commit, relativePath, repoRoot));
+}
+
+/** V1 graph 与 v2 inputs 是 immutable historical-only evidence，绝不升级为 current method。 */
+function readHistoricalL2ViteDevModuleGraph(filePath) {
+  const value = readJson(filePath);
+  if (
+    !hasExactKeys(value, [
+      'schemaVersion',
+      'algorithm',
+      'entry',
+      'declaredModulePaths',
+      'actualModulePaths',
+    ]) ||
+    value.schemaVersion !== 1 ||
+    value.algorithm !== 'pf01-l2-vite-dev-module-graph-v1' ||
+    value.entry !== 'tests/l2/workbench.html' ||
+    !Array.isArray(value.declaredModulePaths) ||
+    !Array.isArray(value.actualModulePaths) ||
+    !sameJson(value.declaredModulePaths, value.actualModulePaths) ||
+    value.actualModulePaths.length !== EXPECTED_ATTESTATION.measurementInputs.l2DevModuleGraph.moduleCount
+  ) {
+    throw new Error('historical L2 Vite dev graph invalid');
+  }
+  return value;
+}
+
+function hasHistoricalActiveWaiverBudget(budget, descriptor) {
+  const provenance = budget?.baselineProvenance;
+  return (
+    budget?.schemaVersion === 4 &&
+    budget?.descriptorId === PERFORMANCE &&
+    budget?.descriptorDigest === descriptor?.digest?.value &&
+    budget?.profile === 'representative' &&
+    provenance?.commit === BASELINE_COMMIT &&
+    provenance?.worktreeDirty === false &&
+    sameInputAttestation(provenance?.buildInputs, EXPECTED_ATTESTATION.buildInputs, 'git-object-tree', BASELINE_COMMIT) &&
+    sameInputAttestation(
+      provenance?.measurementInputs,
+      EXPECTED_ATTESTATION.measurementInputs,
+      'git-object-tree',
+      BASELINE_COMMIT,
+    )
+  );
 }
 
 function percentile(sorted, p) {
@@ -495,7 +529,7 @@ export function validateFe01Pf01ActiveWaiver({ repoRoot = REPO_ROOT, waiver = un
     samples = readJson(path.join(runDirectory, 'samples.json'));
     l3Samples = readJson(path.join(runDirectory, 'l3-samples.json'));
     resourceRuns = readJson(path.join(runDirectory, 'l3-resource-runs.json'));
-    l2DevModuleGraph = readPf01L2ViteDevModuleGraph(
+    l2DevModuleGraph = readHistoricalL2ViteDevModuleGraph(
       path.join(runDirectory, 'l2-dev-module-graph.json'),
     );
     budget = gitJson(EVIDENCE_COMMIT, BUDGET_PATH, repoRoot);
@@ -571,44 +605,10 @@ export function validateFe01Pf01ActiveWaiver({ repoRoot = REPO_ROOT, waiver = un
     invalid(violations, 'L3 RSS resource evidence/normalExit 不完整或与 raw run 不一致');
   }
 
-  try {
-    const baselineBuildInputs = collectPf01L3HarnessBuildInputsFromGit({
-      repoRoot,
-      commit: BASELINE_COMMIT,
-    });
-    const baselineMeasurementInputs = collectPf01MeasurementInputsFromGit({
-      repoRoot,
-      commit: BASELINE_COMMIT,
-      l2DevModuleGraph,
-    });
-    const currentBuildInputs = collectPf01L3HarnessBuildInputsFromGit({
-      repoRoot,
-      commit: EVIDENCE_COMMIT,
-    });
-    const currentMeasurementInputs = collectPf01MeasurementInputsFromGit({
-      repoRoot,
-      commit: EVIDENCE_COMMIT,
-      l2DevModuleGraph,
-    });
-    const provenance = summary?.comparisonProvenance;
-    if (
-      !sameJson(baselineBuildInputs, provenance?.baseline?.buildInputs) ||
-      !sameJson(baselineMeasurementInputs, provenance?.baseline?.measurementInputs) ||
-      !sameJson(currentBuildInputs.entries, provenance?.current?.buildInputs?.entries) ||
-      currentBuildInputs.digest !== provenance?.current?.buildInputs?.digest ||
-      !sameJson(currentMeasurementInputs.entries, provenance?.current?.measurementInputs?.entries) ||
-      currentMeasurementInputs.digest !== provenance?.current?.measurementInputs?.digest
-    ) {
-      invalid(violations, 'build/measurement inputs 无法从 immutable Git object 复算');
-    }
-  } catch {
-    invalid(violations, 'build/measurement input Git object 无法复算');
-  }
-
   if (!verifySummaryProvenance({ record, summary, budget, l2DevModuleGraph })) {
     invalid(violations, 'summary provenance 与 active waiver binding 不精确');
   }
-  if (!validateFrozenPf01Budget(budget, descriptor, 'representative', summary?.comparisonProvenance?.current).valid) {
+  if (!hasHistoricalActiveWaiverBudget(budget, descriptor)) {
     invalid(violations, 'evidence-commit frozen budget/provenance 无效');
   }
 

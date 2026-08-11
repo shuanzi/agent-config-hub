@@ -20,6 +20,7 @@ import {
   assertPf01VerificationEnvironment,
   collectPf01L3HarnessBuildInputs,
   collectPf01L3HarnessBuildInputsFromGit,
+  PF01_BUILD_ENVIRONMENT,
 } from './pf01-build-inputs.mjs';
 import {
   collectPf01MeasurementInputs,
@@ -50,10 +51,6 @@ const EXACT_SAMPLE_COUNTS = Object.freeze({
   'pf01.filter.results_visible': 20,
   'pf01.select.skill_cells_visible': 20,
   'pf01.l3.cold_start.first_snapshot': 3,
-});
-const EXPECTED_BUILD_ENVIRONMENT = Object.freeze({
-  policy: 'no ambient VITE_/TAURI_/CARGO_/Rust/SDK/Node build overrides or root .env files',
-  overrides: [],
 });
 
 function isObject(value) {
@@ -246,10 +243,7 @@ function assertBuildEnvironmentProvenance(current) {
   const recorded = current?.buildEnvironment;
   if (
     !isObject(recorded) ||
-    !sameJson(Object.keys(recorded).sort(), ['overrides', 'policy']) ||
-    recorded.policy !== EXPECTED_BUILD_ENVIRONMENT.policy ||
-    !Array.isArray(recorded.overrides) ||
-    recorded.overrides.length !== 0
+    !sameJson(recorded, PF01_BUILD_ENVIRONMENT)
   ) {
     throw new Error('PF-01 baseline build environment provenance incomplete or drifted');
   }

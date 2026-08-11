@@ -10,12 +10,16 @@ describe('FE-01 ticket registry', () => {
     );
   });
 
-  it('保留 historical waiver 审计，并且只登记本次精确 active waiver 路径', () => {
+  it('旧 waiver 仅保留为历史审计；未来 automatic-pass record 使用独立路径', () => {
     expect(TICKET_REGISTRY['FE-01'].performance.historicalWaiverPath).toBe(
       'performance/waivers/fe-01-pf-01-l3-cold-start.json',
     );
-    expect(TICKET_REGISTRY['FE-01'].performance.activeWaiverPath).toBe(
+    expect(TICKET_REGISTRY['FE-01'].performance.historicalActiveWaiverPath).toBe(
       'performance/waivers/fe-01-pf-01-search-results-active.json',
+    );
+    expect(TICKET_REGISTRY['FE-01'].performance.activeWaiverPath).toBeUndefined();
+    expect(TICKET_REGISTRY['FE-01'].performance.automaticPassPath).toBe(
+      'performance/automatic-passes/fe-01-pf-01.json',
     );
     expect(
       TICKET_REGISTRY['FE-01'].steps.find((step: { id: string }) => step.id === 'perf'),

@@ -57,6 +57,7 @@ import {
   validateFrozenPf01Budget,
 } from './pf01-budget.mjs';
 import { finalizeHarnessPeakRss, validatePf01ResourceEvidence } from './pf01-resource.mjs';
+import { derivePf01AutomatedResult, PF01_CLEAN_CONTAMINATION } from './pf01-automated-result.mjs';
 
 const DESCRIPTOR_PATH = path.join(REPO_ROOT, 'performance/descriptors/pf-01.catalog-browse.json');
 const BUDGETS_PATH = path.join(REPO_ROOT, 'performance/budgets/pf-01.budgets.json');
@@ -282,6 +283,10 @@ async function main() {
     });
     const attestation = validateCurrentPf01Attestation(currentAttestation);
     if (!attestation.valid) throw new Error(attestation.violations.join('; '));
+    writeJson(path.join(outputDir, 'harness-identity.json'), {
+      schemaVersion: 1,
+      artifact: currentAttestation.artifact,
+    });
   } catch (error) {
     console.error(
       `INCONCLUSIVE  当前 harness/FX-01 attestation 无效：${error instanceof Error ? error.message : 'unknown'}`,
@@ -386,6 +391,16 @@ async function main() {
       : budgetValidation?.valid
         ? 'budget-comparison'
         : 'budget-invalid';
+  const comparisonViolations =
+    complete && budgetExistedBeforeRun && budgetValidation?.valid && existingBudget !== null
+      ? compareAgainstBudgets(existingBudget, metrics)
+      : [];
+  const automatedResult = derivePf01AutomatedResult({
+    complete,
+    budgetExistedBeforeRun,
+    budgetValid: budgetValidation?.valid === true,
+    comparisonViolations,
+  });
   const comparisonProvenance = pf01ComparisonProvenance(existingBudget, currentAttestation);
   const summary = {
     schemaVersion: 1,
@@ -423,6 +438,8 @@ async function main() {
       budgetValidation === null
         ? { status: 'not-created' }
         : budgetValidation,
+    automatedResult,
+    contamination: PF01_CLEAN_CONTAMINATION,
     collectedAt: samplesPayload.collectedAt,
   };
   const proposedBudgets = {
@@ -463,25 +480,24 @@ async function main() {
   }
   console.log(`evidence: ${sanitizeText(outputDir)}`);
 
-  if (!complete) {
+  if (automatedResult.exitCode === 2 && !complete) {
     console.error(`INCONCLUSIVE  样本、资源或 provenance 不完整（${provenanceError ?? '见 summary'}）`);
     process.exit(2);
   }
 
   // 预算门：首次生成预算仍为 inconclusive；后续独立运行才可比较。
-  if (!budgetExistedBeforeRun) {
+  if (automatedResult.exitCode === 2 && !budgetExistedBeforeRun) {
     console.log('budget-not-frozen → inconclusive（需单独授权冻结预算后才能 PASS）');
     process.exit(2);
   }
 
-  if (!budgetValidation?.valid || existingBudget === null) {
+  if (automatedResult.exitCode === 1 && (!budgetValidation?.valid || existingBudget === null)) {
     console.error(`FAIL  versioned budget invalid:\n  ${(budgetValidation?.violations ?? []).join('\n  ')}`);
     process.exit(1);
   }
 
-  const violations = compareAgainstBudgets(existingBudget, metrics);
-  if (violations.length > 0) {
-    console.error(`FAIL  超预算:\n  ${violations.join('\n  ')}`);
+  if (comparisonViolations.length > 0) {
+    console.error(`FAIL  超预算:\n  ${comparisonViolations.join('\n  ')}`);
     process.exit(1);
   }
   console.log('预算达标（budget-frozen）');

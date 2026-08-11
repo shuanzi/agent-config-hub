@@ -9,6 +9,7 @@ import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import {
+  assertNoGitAmbient,
   REPO_ROOT,
   scanEvidenceText,
   sha256File,
@@ -18,7 +19,6 @@ import {
   PF01_BUDGET_CONSTANTS,
   PF01_TIMING_METRICS,
 } from './pf01-budget.mjs';
-import { computePf01L3HarnessBuildInputsDigest, PF01_L3_BUILD_INPUTS } from './pf01-build-inputs.mjs';
 import { finalizeHarnessPeakRss, validatePf01ResourceEvidence } from './pf01-resource.mjs';
 
 export const FE01_PF01_WAIVER_PATH = 'performance/waivers/fe-01-pf-01-l3-cold-start.json';
@@ -108,6 +108,7 @@ function summarize(samples) {
 }
 
 function gitJson(commit, relativePath, repoRoot) {
+  assertNoGitAmbient();
   const text = execFileSync('git', ['show', `${commit}:${relativePath}`], {
     cwd: repoRoot,
     encoding: 'utf8',
@@ -117,6 +118,16 @@ function gitJson(commit, relativePath, repoRoot) {
 
 function readJson(filePath) {
   return JSON.parse(fs.readFileSync(filePath, 'utf8'));
+}
+
+function historicalBuildInputsDigest(value) {
+  return sha256Text(
+    `${JSON.stringify({
+      schemaVersion: value.schemaVersion,
+      algorithm: value.algorithm,
+      entries: value.entries,
+    })}\n`,
+  );
 }
 
 function expectedMetricStats(samples, metric) {
@@ -218,19 +229,15 @@ function compareAgainstBudget(budget, metrics) {
 function validateHistoricalWaiverBudget(budget, descriptor, current) {
   const provenance = budget?.baselineProvenance;
   const validBuildInputs = (value, sourceKind) =>
-    value?.schemaVersion === PF01_L3_BUILD_INPUTS.schemaVersion &&
-    value?.algorithm === PF01_L3_BUILD_INPUTS.algorithm &&
+    value?.schemaVersion === 2 &&
+    value?.algorithm === 'pf01-l3-harness-build-inputs-v2' &&
     value?.source?.kind === sourceKind &&
     value?.source?.method === 'raw bytes SHA-256 / byte-sorted repo-relative paths' &&
     typeof value?.source?.commit === 'string' &&
     isSha256(value?.digest) &&
     Array.isArray(value?.entries) &&
     value.digest ===
-      computePf01L3HarnessBuildInputsDigest({
-        schemaVersion: value.schemaVersion,
-        algorithm: value.algorithm,
-        entries: value.entries,
-      });
+      historicalBuildInputsDigest(value);
   const sameArtifact =
     provenance?.artifact !== null &&
     typeof provenance?.artifact === 'object' &&
@@ -443,6 +450,7 @@ export function validateFe01Pf01Waiver({
   // `pfDescriptorDigest` 的行为基于原始文本；这里对 immutable Git object 用同一
   // canonicalization 规则复算，不信任 descriptor 声明值。
   try {
+    assertNoGitAmbient();
     const descriptorText = execFileSync(
       'git',
       ['show', `${record.automaticResult.commit}:performance/descriptors/pf-01.catalog-browse.json`],

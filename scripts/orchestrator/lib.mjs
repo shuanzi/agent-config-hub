@@ -37,6 +37,66 @@ export function orchestratorEnv(extra = {}) {
   return env;
 }
 
+/** Git identity/object/status 读取不得继承任何可重定向 repository 解析的 ambient。 */
+export function assertNoGitAmbient(env = process.env) {
+  // `GIT_PAGER` 只影响人类输出呈现（CI/本地 runner 常设置为 cat），不参与 repo、
+  // index、object、config 或 ref 解析。其余未知 `GIT_*` 一律按可影响解析处理。
+  const keys = Object.keys(env).filter((key) => key.startsWith('GIT_') && key !== 'GIT_PAGER');
+  if (keys.length > 0) {
+    throw new Error(`Git ambient environment override rejected: ${keys.sort().join(', ')}`);
+  }
+  return { policy: 'no ambient Git repository/index/object/config/ref overrides', overrides: [] };
+}
+
+function declaredPackageRoots(repoRoot) {
+  const packagePath = path.join(repoRoot, 'package.json');
+  const stats = fs.lstatSync(packagePath);
+  if (!stats.isFile() || stats.isSymbolicLink()) {
+    throw new Error('PF-01 Vite package manifest must be a physical regular file');
+  }
+  const manifest = JSON.parse(fs.readFileSync(packagePath, 'utf8'));
+  const roots = new Set();
+  for (const field of ['dependencies', 'devDependencies', 'peerDependencies', 'optionalDependencies']) {
+    const dependencies = manifest?.[field];
+    if (dependencies === undefined) continue;
+    if (dependencies === null || typeof dependencies !== 'object' || Array.isArray(dependencies)) {
+      throw new Error(`PF-01 Vite package manifest ${field} must be an object`);
+    }
+    for (const name of Object.keys(dependencies)) roots.add(name);
+  }
+  return roots;
+}
+
+function packageRoot(moduleId) {
+  if (moduleId.startsWith('@')) {
+    const [scope, name] = moduleId.split('/');
+    return scope !== undefined && name !== undefined && name.length > 0 ? `${scope}/${name}` : null;
+  }
+  const [name] = moduleId.split('/');
+  return name?.length > 0 ? name : null;
+}
+
+/** Vite IDs are external only when virtual/builtin or explicitly declared by this package manifest. */
+export function classifyPf01ViteModuleId(moduleId, { repoRoot = REPO_ROOT } = {}) {
+  if (typeof moduleId !== 'string') return { kind: 'ignored' };
+  const canonical = moduleId.split('?')[0];
+  if (
+    canonical.startsWith('\0') ||
+    canonical.startsWith('/@id/') ||
+    canonical.startsWith('virtual:') ||
+    canonical.startsWith('node:')
+  ) {
+    return { kind: 'external' };
+  }
+  if (canonical.startsWith('/') || canonical.startsWith('.')) return { kind: 'candidate', value: canonical };
+  if (/\.(?:[cm]?[jt]sx?|json|html?|css|scss|sass|less|svg|md)$/i.test(canonical)) {
+    return { kind: 'candidate', value: canonical };
+  }
+  const root = packageRoot(canonical);
+  if (root !== null && declaredPackageRoots(repoRoot).has(root)) return { kind: 'external' };
+  return { kind: 'candidate', value: canonical };
+}
+
 /** evidence 脱敏：家目录绝对路径替换为 <HOME> */
 export function sanitizeText(text) {
   const home = os.homedir();
@@ -207,9 +267,10 @@ export async function capture(cmd, args, cwd = REPO_ROOT) {
 }
 
 /** git 只读查询（禁止任何 git 写操作；rev-parse/status 均为只读） */
-export async function gitInfo() {
-  const head = await capture('git', ['rev-parse', 'HEAD']);
-  const status = await capture('git', ['status', '--porcelain']);
+export async function gitInfo({ env = process.env, repoRoot = REPO_ROOT } = {}) {
+  assertNoGitAmbient(env);
+  const head = await capture('git', ['rev-parse', 'HEAD'], repoRoot);
+  const status = await capture('git', ['status', '--porcelain'], repoRoot);
   return {
     commit: head.exitCode === 0 ? head.stdout.trim() : 'unknown',
     worktreeDirty: status.exitCode === 0 ? status.stdout.trim().length > 0 : null,

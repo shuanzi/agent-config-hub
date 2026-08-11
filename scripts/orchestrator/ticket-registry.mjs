@@ -83,7 +83,9 @@ export const TICKET_REGISTRY = Object.freeze({
       budgetPath: 'performance/budgets/pf-01.budgets.json',
       // 仅供历史审计；verify:ticket 不读取它，也绝不因此跳过新的 PF 采样或产生 waiver closure。
       historicalWaiverPath: 'performance/waivers/fe-01-pf-01-l3-cold-start.json',
-      activeWaiverPath: 'performance/waivers/fe-01-pf-01-search-results-active.json',
+      historicalActiveWaiverPath: 'performance/waivers/fe-01-pf-01-search-results-active.json',
+      // 只有未来 immutable automatic-pass record 可免于重复 sampling；旧 waiver 绝不进入 closure。
+      automaticPassPath: 'performance/automatic-passes/fe-01-pf-01.json',
       profile: 'representative',
       unfrozenLabel: 'budget-not-frozen（首次完整 clean representative baseline 只收集样本；该次仍为 inconclusive）',
       frozenLabel: 'budget-frozen（performance/budgets/pf-01.budgets.json）',

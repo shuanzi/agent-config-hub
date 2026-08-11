@@ -55,7 +55,7 @@ function writeFixtureTree(root: string): void {
   execFileSync('git', ['commit', '--quiet', '-m', 'fixture'], { cwd: root });
 }
 
-describe('PF-01 independent measurement-input provenance', () => {
+describe('PF-01 independent measurement-input provenance v3', () => {
   it('版本化 digest 精确绑定闭合的实际测量输入；missing、extra、drift 均 fail-closed', () => {
     const valid = measurementInputs('clean-tracked-checkout');
     expect(validatePf01MeasurementInputs(valid, 'clean-tracked-checkout')).toBe(true);
@@ -72,6 +72,22 @@ describe('PF-01 independent measurement-input provenance', () => {
     for (const invalid of [missing, extra, drift, declaredActualMismatch]) {
       expect(validatePf01MeasurementInputs(invalid, 'clean-tracked-checkout')).toBe(false);
     }
+  });
+
+  it('measurement input 与 entry 都是 closed shape；extra key 即使重算 digest 也 fail-closed', () => {
+    const topLevelExtra = measurementInputs('clean-tracked-checkout') as Record<string, unknown>;
+    topLevelExtra.unexpected = 'forged';
+    expect(validatePf01MeasurementInputs(topLevelExtra, 'clean-tracked-checkout')).toBe(false);
+
+    const entryExtra = measurementInputs('clean-tracked-checkout');
+    entryExtra.entries[0] = { ...entryExtra.entries[0], unexpected: 'forged' };
+    entryExtra.digest = computePf01MeasurementInputsDigest({
+      schemaVersion: entryExtra.schemaVersion,
+      algorithm: entryExtra.algorithm,
+      entries: entryExtra.entries,
+      l2DevModuleGraph: entryExtra.l2DevModuleGraph,
+    });
+    expect(validatePf01MeasurementInputs(entryExtra, 'clean-tracked-checkout')).toBe(false);
   });
 
   it('measurement collector 与显式 freeze 实现本身属于闭合集合，任一 drift 都 fail-closed', () => {
@@ -105,11 +121,12 @@ describe('PF-01 independent measurement-input provenance', () => {
     const expected = expectedPf01L2ViteDevModuleGraph();
     expect(
       attestPf01L2ViteDevModuleGraph({
-        moduleIds: [
-          ...expected.actualModulePaths,
-          '\0vite/client',
-          '/outside/node_modules/react/index.js',
-        ],
+        moduleIds: [...expected.actualModulePaths, '\0vite/client'],
+      }),
+    ).toEqual(expected);
+    expect(
+      attestPf01L2ViteDevModuleGraph({
+        moduleIds: [...expected.actualModulePaths, 'react/jsx-runtime', '@tauri-apps/api/core'],
       }),
     ).toEqual(expected);
 
@@ -132,6 +149,24 @@ describe('PF-01 independent measurement-input provenance', () => {
         }),
       ).toThrow(/module graph|closure|declared/i);
     }
+
+    for (const outsidePhysicalModule of [
+      '/tmp/pf01-outside.ts',
+      '/@fs/tmp/pf01-outside.ts',
+      '/tmp/node_modules/evil/index.js',
+      '/@fs/tmp/node_modules/evil/index.js',
+    ]) {
+      expect(() =>
+        attestPf01L2ViteDevModuleGraph({
+          moduleIds: [...expected.actualModulePaths, outsidePhysicalModule],
+        }),
+      ).toThrow(/outside repository/i);
+    }
+    expect(() =>
+      attestPf01L2ViteDevModuleGraph({
+        moduleIds: [...expected.actualModulePaths, './tests/l2/l2-main.tsx'],
+      }),
+    ).toThrow(/path|module graph|closure/i);
   });
 
   it('实际 dev module graph 的 repo-local module 必须是 physical regular file', () => {

@@ -3,6 +3,7 @@
  * 此模块不参与 verdict；调用方写完 manifest 后才可调用。
  */
 import path from 'node:path';
+import { validateFe01Pf01AutomaticPassManifest } from './fe01-pf01-automatic-pass-validation.mjs';
 import {
   hasPhysicalPath,
   maybeAdvancePhysicalJsonIndex,
@@ -42,7 +43,8 @@ export async function maybeWriteLatestCleanPass({ root, evidenceRoot, ticketId, 
     !/^[0-9a-f]{40}$/i.test(manifest.commit) ||
     typeof manifest.evidenceScope !== 'string' ||
     !validCompletedAt(manifest.completedAt) ||
-    !validProvenance(manifest.steps)
+    !validProvenance(manifest.steps) ||
+    !validateFe01Pf01AutomaticPassManifest({ ticketId, manifest }).valid
   ) {
     return { updated: false };
   }

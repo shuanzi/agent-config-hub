@@ -9,7 +9,7 @@ import { describe, expect, it } from 'vitest';
 import { formatPf01BudgetJson, freezePf01Budget, migratePf01BudgetV2 } from '../../scripts/orchestrator/pf01-budget.mjs';
 // prettier-ignore
 // @ts-expect-error runtime verifier module is a plain Node ESM module.
-import { computePf01L3HarnessBuildInputsDigest } from '../../scripts/orchestrator/pf01-build-inputs.mjs';
+import { computePf01L3HarnessBuildInputsDigest, PF01_L3_BUILD_INPUTS } from '../../scripts/orchestrator/pf01-build-inputs.mjs';
 // prettier-ignore
 // @ts-expect-error runtime provenance module is a plain Node ESM module.
 import { computePf01MeasurementInputsDigest, expectedPf01L2ViteDevModuleGraph, PF01_MEASUREMENT_INPUT_PATHS, PF01_MEASUREMENT_INPUTS } from '../../scripts/orchestrator/pf01-measurement-inputs.mjs';
@@ -19,11 +19,11 @@ const HISTORICAL_BUDGET_PATH = 'performance/budgets/history/pf-01.budgets.202608
 function baselineBuildInputs(): Record<string, unknown> {
   const entries = [{ path: 'src/main.tsx', sha256: 'c'.repeat(64) }];
   return {
-    schemaVersion: 2,
-    algorithm: 'pf01-l3-harness-build-inputs-v2',
+    schemaVersion: PF01_L3_BUILD_INPUTS.schemaVersion,
+    algorithm: PF01_L3_BUILD_INPUTS.algorithm,
     digest: computePf01L3HarnessBuildInputsDigest({
-      schemaVersion: 2,
-      algorithm: 'pf01-l3-harness-build-inputs-v2',
+      schemaVersion: PF01_L3_BUILD_INPUTS.schemaVersion,
+      algorithm: PF01_L3_BUILD_INPUTS.algorithm,
       entries,
     }),
     source: {

@@ -6,19 +6,25 @@ import { describe, expect, it } from 'vitest';
 
 const importRuntimeModule = (modulePath: string) => import(modulePath);
 
-const { assertPf01OutputDirectory, assertPf01VerificationEnvironment } = (await importRuntimeModule(
-  '../../scripts/orchestrator/pf01-build-inputs.mjs',
-)) as {
+const {
+  assertPf01L3BuildEnvironment,
+  assertPf01OutputDirectory,
+  assertPf01VerificationEnvironment,
+} = (await importRuntimeModule('../../scripts/orchestrator/pf01-build-inputs.mjs')) as {
+  assertPf01L3BuildEnvironment: (environment: Record<string, string | undefined>) => {
+    overrides: readonly string[];
+  };
   assertPf01OutputDirectory: (outputDir: string, options: { artifactsRoot: string }) => string;
   assertPf01VerificationEnvironment: (environment: Record<string, string | undefined>) => {
     overrides: readonly string[];
   };
 };
 
-const { assertCurrentPfDescriptorDigest, sameGitIdentity } = (await importRuntimeModule(
+const { assertCurrentPfDescriptorDigest, gitInfo, sameGitIdentity } = (await importRuntimeModule(
   '../../scripts/orchestrator/lib.mjs',
 )) as {
   assertCurrentPfDescriptorDigest: (descriptorPath: string) => { digest: string };
+  gitInfo: (options: { env: Record<string, string | undefined> }) => Promise<unknown>;
   sameGitIdentity: (
     left: { commit: string; worktreeDirty: boolean },
     right: { commit: string; worktreeDirty: boolean },
@@ -26,6 +32,27 @@ const { assertCurrentPfDescriptorDigest, sameGitIdentity } = (await importRuntim
 };
 
 describe('PF/verify provenance guards', () => {
+  it('Git identity/object/status 入口一律拒绝可改变 repository、index、object、config 或 ref 解析的 ambient', async () => {
+    const gitOverrides = [
+      'GIT_INDEX_FILE',
+      'GIT_DIR',
+      'GIT_WORK_TREE',
+      'GIT_OBJECT_DIRECTORY',
+      'GIT_ALTERNATE_OBJECT_DIRECTORIES',
+      'GIT_CONFIG_COUNT',
+      'GIT_CONFIG_KEY_0',
+      'GIT_CONFIG_VALUE_0',
+      'GIT_CONFIG_PARAMETERS',
+      'GIT_REPLACE_REF_BASE',
+    ];
+    for (const key of gitOverrides) {
+      const env = { [key]: '/tmp/forged-git-state' };
+      expect(() => assertPf01VerificationEnvironment(env)).toThrow(/Git.*ambient/i);
+      expect(() => assertPf01L3BuildEnvironment(env)).toThrow(/Git.*ambient/i);
+      await expect(gitInfo({ env })).rejects.toThrow(/Git.*ambient/i);
+    }
+  });
+
   it('拒绝 ambient PF/fixture override，并只接受 artifacts 内的 physical output directory', () => {
     expect(() =>
       assertPf01VerificationEnvironment({

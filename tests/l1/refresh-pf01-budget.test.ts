@@ -8,8 +8,14 @@ import { describe, expect, it } from 'vitest';
 // @ts-expect-error runtime orchestrator module is plain Node ESM.
 import { freezePf01BudgetFromBaselineRun } from '../../scripts/orchestrator/refresh-pf01-budget.mjs';
 // prettier-ignore
+// @ts-expect-error runtime build-environment helper is a plain Node ESM module.
+import { assertPf01L3BuildEnvironment } from '../../scripts/orchestrator/pf01-build-inputs.mjs';
+// prettier-ignore
+// @ts-expect-error runtime build-environment helper is a plain Node ESM module.
+import { PF01_BUILD_ENVIRONMENT } from '../../scripts/orchestrator/pf01-build-inputs.mjs';
+// prettier-ignore
 // @ts-expect-error runtime orchestrator module is plain Node ESM.
-import { computePf01L3HarnessBuildInputsDigest } from '../../scripts/orchestrator/pf01-build-inputs.mjs';
+import { computePf01L3HarnessBuildInputsDigest, PF01_L3_BUILD_INPUTS } from '../../scripts/orchestrator/pf01-build-inputs.mjs';
 // prettier-ignore
 // @ts-expect-error runtime provenance module is a plain Node ESM module.
 import { computePf01MeasurementInputsDigest, expectedPf01L2ViteDevModuleGraph, PF01_MEASUREMENT_INPUT_PATHS, PF01_MEASUREMENT_INPUTS } from '../../scripts/orchestrator/pf01-measurement-inputs.mjs';
@@ -23,11 +29,11 @@ const run = '.artifacts/performance/PF-01/20260811T120000000Z-p1-000';
 function buildInputs(kind: 'clean-tracked-checkout' | 'git-object-tree') {
   const entries = [{ path: 'src/main.tsx', sha256: 'c'.repeat(64) }];
   return {
-    schemaVersion: 2,
-    algorithm: 'pf01-l3-harness-build-inputs-v2',
+    schemaVersion: PF01_L3_BUILD_INPUTS.schemaVersion,
+    algorithm: PF01_L3_BUILD_INPUTS.algorithm,
     digest: computePf01L3HarnessBuildInputsDigest({
-      schemaVersion: 2,
-      algorithm: 'pf01-l3-harness-build-inputs-v2',
+      schemaVersion: PF01_L3_BUILD_INPUTS.schemaVersion,
+      algorithm: PF01_L3_BUILD_INPUTS.algorithm,
       entries,
     }),
     source: {
@@ -120,10 +126,7 @@ function writeRun(root: string, mutate?: (summary: Record<string, unknown>) => v
       arch: 'arm64',
     },
     toolchain: { cargo: 'cargo 1.90.0', rustc: 'rustc 1.90.0' },
-    buildEnvironment: {
-      policy: 'no ambient VITE_/TAURI_/CARGO_/Rust/SDK/Node build overrides or root .env files',
-      overrides: [],
-    },
+    buildEnvironment: { ...PF01_BUILD_ENVIRONMENT, overrides: [] },
   };
   const l2DevModuleGraph = current.measurementInputs.l2DevModuleGraph;
   const summary: Record<string, unknown> = {
@@ -242,6 +245,21 @@ function argumentsFor(root: string) {
 }
 
 describe('refresh PF-01 budget public seam', () => {
+  it('producer 的当前 buildEnvironment 可直接被 freezer 接受，不能复制漂移 policy 文本', () => {
+    const root = mkdtempSync(join(tmpdir(), 'pf01-freeze-producer-build-environment-'));
+    try {
+      const producerEnvironment = assertPf01L3BuildEnvironment({}, root);
+      writeRun(root, (summary) => {
+        (
+          summary.comparisonProvenance as { current: { buildEnvironment: unknown } }
+        ).current.buildEnvironment = producerEnvironment;
+      });
+      expect(() => freezePf01BudgetFromBaselineRun(argumentsFor(root))).not.toThrow();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it('没有显式 baseline run 时 fail-closed，且不触发任何 automatic PF 采样', () => {
     const result = spawnSync(process.execPath, ['scripts/orchestrator/refresh-pf01-budget.mjs'], {
       cwd: resolve('.'),

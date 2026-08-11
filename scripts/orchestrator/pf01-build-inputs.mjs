@@ -1,6 +1,6 @@
 /* global process */
 /**
- * PF-01 L3 harness build-input digest v2.
+ * PF-01 L3 harness build-input digest v3.
  *
  * 该 digest 只刻画会影响 `build-harness.mjs` 产物的仓库输入：构建命令/配置、
  * L3 Vite 的两个入口实际产出的 module closure、FX-01 Vite raw import，以及 Tauri
@@ -20,13 +20,20 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { build } from 'vite';
-import { ARTIFACTS_ROOT, REPO_ROOT } from './lib.mjs';
+import { ARTIFACTS_ROOT, assertNoGitAmbient, classifyPf01ViteModuleId, REPO_ROOT } from './lib.mjs';
 
 export const PF01_L3_BUILD_INPUTS = {
-  schemaVersion: 2,
-  algorithm: 'pf01-l3-harness-build-inputs-v2',
+  schemaVersion: 3,
+  algorithm: 'pf01-l3-harness-build-inputs-v3',
   method: 'raw bytes SHA-256 / byte-sorted repo-relative paths',
 };
+
+/** Build-environment attestation is a versioned producer/freezer wire shape. */
+export const PF01_BUILD_ENVIRONMENT = Object.freeze({
+  schemaVersion: 1,
+  policy: 'no ambient Git/VITE_/TAURI_/CARGO_/Rust/SDK/Node build overrides or root .env files',
+  overrides: [],
+});
 
 const BUILD_COMMAND_AND_CONFIG_FILES = [
   'package.json',
@@ -94,6 +101,7 @@ function sha256Bytes(bytes) {
 }
 
 function command(repoRoot, args, encoding = 'utf8') {
+  assertNoGitAmbient();
   try {
     return execFileSync('git', args, { cwd: repoRoot, encoding, maxBuffer: 16 * 1024 * 1024 });
   } catch (error) {
@@ -137,6 +145,9 @@ function sortPaths(paths) {
   return [...paths].sort((left, right) => Buffer.compare(Buffer.from(left), Buffer.from(right)));
 }
 
+/** Fixed build-method files; dynamic .cargo/resources are added only when tracked in a real Git tree. */
+export const PF01_L3_BUILD_INPUT_PATHS = Object.freeze(sortPaths([...INPUT_FILES]));
+
 function digest(entries) {
   const payload = {
     schemaVersion: PF01_L3_BUILD_INPUTS.schemaVersion,
@@ -156,6 +167,65 @@ export function computePf01L3HarnessBuildInputsDigest({ schemaVersion, algorithm
     throw new Error('PF-01 build-input canonical payload schema invalid');
   }
   return digest(entries);
+}
+
+function isSha256(value) {
+  return typeof value === 'string' && /^[a-f0-9]{64}$/i.test(value);
+}
+
+function exactKeys(value, keys) {
+  return value !== null && typeof value === 'object' && !Array.isArray(value) &&
+    JSON.stringify(Object.keys(value).sort()) === JSON.stringify([...keys].sort());
+}
+
+function validEntries(entries) {
+  if (!Array.isArray(entries) || entries.length === 0) return false;
+  const paths = [];
+  const collisions = new Set();
+  let prior = null;
+  for (const entry of entries) {
+    try {
+      if (!exactKeys(entry, ['path', 'sha256'])) return false;
+      const pathname = canonicalPath(entry.path);
+      if (!isBuildInput(pathname) || !isSha256(entry.sha256)) return false;
+      if (prior !== null && Buffer.compare(Buffer.from(prior), Buffer.from(pathname)) >= 0) return false;
+      prior = pathname;
+      const collision = pathname.normalize('NFC').toLocaleLowerCase('en-US');
+      if (collisions.has(collision)) return false;
+      collisions.add(collision);
+      paths.push(pathname);
+    } catch {
+      return false;
+    }
+  }
+  try {
+    assertRequiredPaths(paths);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Shared schema seam for immutable evidence; recomputes the canonical v3 payload. */
+export function validatePf01L3HarnessBuildInputs(value, sourceKind) {
+  return (
+    exactKeys(value, ['schemaVersion', 'algorithm', 'digest', 'entries', 'source']) &&
+    value.schemaVersion === PF01_L3_BUILD_INPUTS.schemaVersion &&
+    value.algorithm === PF01_L3_BUILD_INPUTS.algorithm &&
+    isSha256(value.digest) &&
+    exactKeys(value.source, ['kind', 'method', 'commit']) &&
+    value.source.kind === sourceKind &&
+    value.source.method === PF01_L3_BUILD_INPUTS.method &&
+    typeof value.source.commit === 'string' &&
+    /^[a-f0-9]{40}$/i.test(value.source.commit) &&
+    validEntries(value.entries) &&
+    value.digest ===
+      computePf01L3HarnessBuildInputsDigest({
+        schemaVersion: value.schemaVersion,
+        algorithm: value.algorithm,
+        entries: value.entries,
+      })
+  );
 }
 
 function assertRequiredPaths(paths) {
@@ -186,11 +256,17 @@ function samePathList(left, right) {
 }
 
 function relativeViteModuleId(moduleId, repoRoot) {
-  if (typeof moduleId !== 'string' || moduleId.startsWith('\0')) return null;
-  const physical = moduleId.split('?')[0];
+  const classified = classifyPf01ViteModuleId(moduleId, { repoRoot });
+  if (classified.kind !== 'candidate') return null;
+  const encodedPhysical = classified.value;
+  const physical = encodedPhysical.startsWith('/@fs/')
+    ? encodedPhysical.slice('/@fs'.length)
+    : encodedPhysical;
   if (!path.isAbsolute(physical)) return canonicalPath(physical);
   const relative = path.relative(repoRoot, physical);
-  if (relative.startsWith('..') || path.isAbsolute(relative)) return null;
+  if (relative.startsWith('..') || path.isAbsolute(relative)) {
+    throw new Error(`PF-01 L3 Vite module path outside repository: ${moduleId}`);
+  }
   const normalized = relative.split(path.sep).join('/');
   if (normalized.startsWith('node_modules/')) return null;
   return canonicalPath(normalized);
@@ -431,6 +507,7 @@ function isNativeToolchainOverride(key) {
 
 /** 禁止未记录的 build override 参与当前 PF-01 attestation。 */
 export function assertPf01L3BuildEnvironment(env = process.env, repoRoot = REPO_ROOT) {
+  assertNoGitAmbient(env);
   const keys = Object.keys(env).filter(
     (key) =>
       key.startsWith('VITE_') ||
@@ -451,13 +528,15 @@ export function assertPf01L3BuildEnvironment(env = process.env, repoRoot = REPO_
     );
   }
   return {
-    policy: 'no ambient VITE_/TAURI_/CARGO_/Rust/SDK/Node build overrides or root .env files',
+    schemaVersion: PF01_BUILD_ENVIRONMENT.schemaVersion,
+    policy: PF01_BUILD_ENVIRONMENT.policy,
     overrides: [],
   };
 }
 
 /** PF/verify 入口不得继承会改变 fixture、profile 或 evidence 目的地的 ambient override。 */
 export function assertPf01VerificationEnvironment(env = process.env) {
+  assertNoGitAmbient(env);
   const keys = Object.keys(env).filter(
     (key) => key === 'PERF_OUTPUT_DIR' || key.startsWith('PF01_') || key.startsWith('ACM_'),
   );
@@ -465,7 +544,7 @@ export function assertPf01VerificationEnvironment(env = process.env) {
     throw new Error(`PF/verify ambient environment override rejected: ${keys.join(', ')}`);
   }
   return {
-    policy: 'no ambient PERF_OUTPUT_DIR/PF01_*/ACM_* overrides',
+    policy: 'no ambient Git/PERF_OUTPUT_DIR/PF01_*/ACM_* overrides',
     overrides: [],
   };
 }

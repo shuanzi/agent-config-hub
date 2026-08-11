@@ -8,7 +8,7 @@ import { describe, expect, it } from 'vitest';
 import { assertCleanPf01Baseline, collectCurrentPf01Attestation, pf01ComparisonProvenance, validateFrozenPf01Budget } from '../../scripts/orchestrator/pf01-budget.mjs';
 // prettier-ignore
 // @ts-expect-error runtime verifier module is a plain Node ESM module.
-import { computePf01L3HarnessBuildInputsDigest } from '../../scripts/orchestrator/pf01-build-inputs.mjs';
+import { computePf01L3HarnessBuildInputsDigest, PF01_L3_BUILD_INPUTS } from '../../scripts/orchestrator/pf01-build-inputs.mjs';
 // prettier-ignore
 // @ts-expect-error runtime provenance module is a plain Node ESM module.
 import { computePf01MeasurementInputsDigest, expectedPf01L2ViteDevModuleGraph, PF01_MEASUREMENT_INPUT_PATHS, PF01_MEASUREMENT_INPUTS } from '../../scripts/orchestrator/pf01-measurement-inputs.mjs';
@@ -77,11 +77,11 @@ function validBudget(): Record<string, unknown> {
       toolchain: { cargo: 'cargo 1.90.0', rustc: 'rustc 1.90.0' },
       fixture: { path: 'fixtures/fx-01/native-root', sha256: 'b'.repeat(64) },
       buildInputs: {
-        schemaVersion: 2,
-        algorithm: 'pf01-l3-harness-build-inputs-v2',
+        schemaVersion: PF01_L3_BUILD_INPUTS.schemaVersion,
+        algorithm: PF01_L3_BUILD_INPUTS.algorithm,
         digest: computePf01L3HarnessBuildInputsDigest({
-          schemaVersion: 2,
-          algorithm: 'pf01-l3-harness-build-inputs-v2',
+          schemaVersion: PF01_L3_BUILD_INPUTS.schemaVersion,
+          algorithm: PF01_L3_BUILD_INPUTS.algorithm,
           entries,
         }),
         source: {
