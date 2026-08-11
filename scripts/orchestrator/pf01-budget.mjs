@@ -1,6 +1,8 @@
 /** PF-01 版本化预算的 fail-closed schema 与阈值校验。 */
 import fs from 'node:fs';
+import { Buffer } from 'node:buffer';
 import path from 'node:path';
+import prettier from 'prettier';
 import {
   ARTIFACTS_ROOT,
   REPO_ROOT,
@@ -9,6 +11,7 @@ import {
   sha256Text,
 } from './lib.mjs';
 import { HARNESS_BINARY } from './build-harness.mjs';
+import { computePf01L3HarnessBuildInputsDigest, PF01_L3_BUILD_INPUTS } from './pf01-build-inputs.mjs';
 
 export const PF01_TIMING_METRICS = [
   'pf01.startup.first_list_visible',
@@ -34,6 +37,10 @@ const RESOURCE_SAMPLING =
   'agent-config-manager harness PID + 后代；50ms process-tree RSS bytes；排除 WDIO/Vite；成功启动至正常退出';
 const HARNESS_IDENTITY_RELATIVE_PATH = '.artifacts/test-harness/identity.json';
 const FX01_FIXTURE_RELATIVE_PATH = 'fixtures/fx-01/native-root';
+const BUDGET_SCHEMA_VERSION = 3;
+const BUILD_INPUT_SCHEMA_VERSION = PF01_L3_BUILD_INPUTS.schemaVersion;
+const BUILD_INPUT_ALGORITHM = PF01_L3_BUILD_INPUTS.algorithm;
+const BUILD_INPUT_METHOD = 'raw bytes SHA-256 / byte-sorted repo-relative paths';
 
 function isSha256(value) {
   return typeof value === 'string' && /^[a-f0-9]{64}$/i.test(value);
@@ -65,7 +72,8 @@ function matchesArtifactSchema(artifact) {
     artifact !== null &&
     typeof artifact === 'object' &&
     artifact.identityPath === HARNESS_IDENTITY_RELATIVE_PATH &&
-    isSha256(artifact.binarySha256) &&
+    isSha256(artifact.declaredBinarySha256) &&
+    isSha256(artifact.actualBinarySha256) &&
     artifact.kind === 'test-harness' &&
     typeof artifact.identifier === 'string' &&
     artifact.identifier.length > 0 &&
@@ -76,6 +84,10 @@ function matchesArtifactSchema(artifact) {
   );
 }
 
+function artifactHashesMatch(artifact) {
+  return artifact?.declaredBinarySha256 === artifact?.actualBinarySha256;
+}
+
 function sameArtifactIdentity(baseline, current) {
   return [
     'identityPath',
@@ -83,16 +95,75 @@ function sameArtifactIdentity(baseline, current) {
     'identifier',
     'profile',
     'binary',
-    'binarySha256',
     'provenance',
   ].every((field) => baseline?.[field] === current?.[field]);
+}
+
+function matchesBuildInputEntries(entries) {
+  if (!Array.isArray(entries) || entries.length === 0) return false;
+  const collisions = new Set();
+  let prior = null;
+  for (const entry of entries) {
+    const pathname = entry?.path;
+    if (
+      typeof pathname !== 'string' ||
+      pathname.length === 0 ||
+      pathname.includes('\0') ||
+      pathname.includes('\\') ||
+      pathname.startsWith('/') ||
+      pathname.split('/').some((segment) => segment === '' || segment === '.' || segment === '..') ||
+      !isSha256(entry?.sha256)
+    ) {
+      return false;
+    }
+    if (prior !== null && Buffer.compare(Buffer.from(prior), Buffer.from(pathname)) >= 0) return false;
+    prior = pathname;
+    const collisionKey = pathname.normalize('NFC').toLocaleLowerCase('en-US');
+    if (collisions.has(collisionKey)) return false;
+    collisions.add(collisionKey);
+  }
+  return true;
+}
+
+function matchesBuildInputsSchema(buildInputs, sourceKind) {
+  return (
+    buildInputs !== null &&
+    typeof buildInputs === 'object' &&
+    buildInputs.schemaVersion === BUILD_INPUT_SCHEMA_VERSION &&
+    buildInputs.algorithm === BUILD_INPUT_ALGORITHM &&
+    isSha256(buildInputs.digest) &&
+    buildInputs.source !== null &&
+    typeof buildInputs.source === 'object' &&
+    buildInputs.source.kind === sourceKind &&
+    buildInputs.source.method === BUILD_INPUT_METHOD &&
+    isCommit(buildInputs.source.commit) &&
+    matchesBuildInputEntries(buildInputs.entries) &&
+    buildInputs.digest ===
+      computePf01L3HarnessBuildInputsDigest({
+        schemaVersion: buildInputs.schemaVersion,
+        algorithm: buildInputs.algorithm,
+        entries: buildInputs.entries,
+      })
+  );
+}
+
+function sameBuildInputs(baseline, current) {
+  return (
+    baseline?.schemaVersion === current?.schemaVersion &&
+    baseline?.algorithm === current?.algorithm &&
+    baseline?.digest === current?.digest
+  );
 }
 
 /**
  * 读取当前真实 L3 harness 与 FX-01 fixture，并以此生成 comparison/freeze attestation。
  * identity.json 只提供声明元数据；binarySha256 必须由当前 HARNESS_BINARY 重算。
  */
-export function collectCurrentPf01Attestation({ repoRoot = REPO_ROOT, artifactsRoot = ARTIFACTS_ROOT } = {}) {
+export function collectCurrentPf01Attestation({
+  repoRoot = REPO_ROOT,
+  artifactsRoot = ARTIFACTS_ROOT,
+  buildInputs,
+} = {}) {
   const identityPath = path.join(artifactsRoot, 'test-harness/identity.json');
   if (!fs.existsSync(identityPath)) throw new Error('current harness artifact identity missing');
   const identity = JSON.parse(fs.readFileSync(identityPath, 'utf8'));
@@ -108,14 +179,15 @@ export function collectCurrentPf01Attestation({ repoRoot = REPO_ROOT, artifactsR
       identifier: identity.identifier,
       profile: identity.profile,
       binary: identity.binary,
-      binarySha256: identity.binarySha256,
-      provenance: identity.provenance,
+      declaredBinarySha256: identity.binarySha256,
       actualBinarySha256: sha256File(binaryPath),
+      provenance: identity.provenance,
     },
     fixture: {
       path: FX01_FIXTURE_RELATIVE_PATH,
       sha256: sha256Text(JSON.stringify(digestDirectory(fixtureRoot))),
     },
+    ...(buildInputs === undefined ? {} : { buildInputs }),
   };
 }
 
@@ -125,14 +197,17 @@ export function validateCurrentPf01Attestation(attestation) {
   const artifact = attestation?.artifact;
   if (!matchesArtifactSchema(artifact)) {
     violations.push('current harness artifact identity 不完整或不符合 PF-01 contract');
-  } else if (artifact.binarySha256 !== artifact.actualBinarySha256) {
-    violations.push('current harness identity binarySha256 与实际 binary 不匹配');
+  } else if (!artifactHashesMatch(artifact)) {
+    violations.push('current harness identity declaredBinarySha256 与实际 binary 不匹配');
   }
   if (
     attestation?.fixture?.path !== FX01_FIXTURE_RELATIVE_PATH ||
     !isSha256(attestation?.fixture?.sha256)
   ) {
     violations.push('current FX-01 fixture attestation 不完整');
+  }
+  if (!matchesBuildInputsSchema(attestation?.buildInputs, 'clean-tracked-checkout')) {
+    violations.push('current L3 harness build-input attestation 不完整');
   }
   return { valid: violations.length === 0, violations };
 }
@@ -151,7 +226,9 @@ export function assertCleanPf01Baseline(git) {
 export function validateFrozenPf01Budget(budget, descriptor, expectedProfile, currentAttestation) {
   const violations = [];
   const descriptorDigest = descriptor?.digest?.value;
-  if (budget?.schemaVersion !== 2) violations.push('schemaVersion 必须为 2');
+  if (budget?.schemaVersion !== BUDGET_SCHEMA_VERSION) {
+    violations.push(`schemaVersion 必须为 ${BUDGET_SCHEMA_VERSION}`);
+  }
   if (budget?.descriptorId !== 'PF-01' || descriptor?.descriptorId !== 'PF-01') {
     violations.push('descriptorId 必须为 PF-01');
   }
@@ -179,6 +256,8 @@ export function validateFrozenPf01Budget(budget, descriptor, expectedProfile, cu
   }
   if (!matchesArtifactSchema(provenance?.artifact)) {
     violations.push('baselineProvenance.artifact 不完整');
+  } else if (!artifactHashesMatch(provenance.artifact)) {
+    violations.push('baselineProvenance.artifact declaredBinarySha256 与实际 binary 不匹配');
   }
   if (
     provenance?.runner === undefined ||
@@ -196,6 +275,11 @@ export function validateFrozenPf01Budget(budget, descriptor, expectedProfile, cu
     !isSha256(provenance.fixture.sha256)
   ) {
     violations.push('baselineProvenance runner/toolchain/fixture 不完整');
+  }
+  if (!matchesBuildInputsSchema(provenance?.buildInputs, 'git-object-tree')) {
+    violations.push('baselineProvenance.buildInputs 不完整');
+  } else if (provenance.buildInputs.source.commit !== provenance.commit) {
+    violations.push('baselineProvenance.buildInputs commit 与 baseline commit 不匹配');
   }
   const resources = provenance?.resources;
   if (
@@ -217,6 +301,9 @@ export function validateFrozenPf01Budget(budget, descriptor, expectedProfile, cu
   } else {
     if (!sameArtifactIdentity(provenance?.artifact, currentAttestation.artifact)) {
       violations.push('baselineProvenance.artifact 与当前 harness identity 不匹配');
+    }
+    if (!sameBuildInputs(provenance?.buildInputs, currentAttestation.buildInputs)) {
+      violations.push('baselineProvenance.buildInputs 与当前 L3 harness build-input 不匹配');
     }
     if (
       provenance?.fixture?.path !== currentAttestation.fixture.path ||
@@ -258,6 +345,30 @@ export function validateFrozenPf01Budget(budget, descriptor, expectedProfile, cu
   return { valid: violations.length === 0, violations };
 }
 
+/** comparison/manifest 两条 provenance 一律带完整 artifact、fixture 与 input digest。 */
+export function pf01ComparisonProvenance(budget, currentAttestation) {
+  const baseline = budget?.baselineProvenance;
+  return {
+    baseline:
+      baseline === undefined || baseline === null
+        ? null
+        : {
+            run: baseline.run,
+            collectedAt: baseline.collectedAt,
+            commit: baseline.commit,
+            worktreeDirty: baseline.worktreeDirty,
+            artifact: baseline.artifact,
+            fixture: baseline.fixture,
+            buildInputs: baseline.buildInputs,
+          },
+    current: {
+      artifact: currentAttestation?.artifact,
+      fixture: currentAttestation?.fixture,
+      buildInputs: currentAttestation?.buildInputs,
+    },
+  };
+}
+
 /** 按已授权公式把完整实际 summary 冻结为 versioned budget payload。 */
 export function freezePf01Budget({ descriptor, profile, metrics, baselineProvenance }) {
   const metricEntries = PF01_TIMING_METRICS.map((metric) => {
@@ -279,7 +390,7 @@ export function freezePf01Budget({ descriptor, profile, metrics, baselineProvena
     };
   });
   return {
-    schemaVersion: 2,
+    schemaVersion: BUDGET_SCHEMA_VERSION,
     descriptorId: 'PF-01',
     descriptorDigest: descriptor?.digest?.value,
     profile,
@@ -290,6 +401,69 @@ export function freezePf01Budget({ descriptor, profile, metrics, baselineProvena
     },
     budgets: metricEntries,
   };
+}
+
+/** 预算生成器的唯一 JSON wire 格式；直接使用仓库 Prettier 配置。 */
+export async function formatPf01BudgetJson(budget) {
+  const filePath = path.join(REPO_ROOT, 'performance/budgets/pf-01.budgets.json');
+  const config = await prettier.resolveConfig(filePath);
+  return prettier.format(JSON.stringify(budget), { ...config, filepath: filePath, parser: 'json' });
+}
+
+/**
+ * 将方案 A 前冻结的 v2 baseline 升级、或幂等刷新 v3 budget 的 Git-object
+ * build-input provenance。仅重算 manifest provenance，不触碰历史 sampling artifact。
+ */
+export function migratePf01BudgetV2({ budget, baselineBuildInputs }) {
+  if (budget?.schemaVersion !== 2 && budget?.schemaVersion !== BUDGET_SCHEMA_VERSION) {
+    throw new Error('PF-01 budget migration requires schemaVersion 2 or 3');
+  }
+  if (budget?.descriptorId !== 'PF-01' || !isSha256(budget?.descriptorDigest)) {
+    throw new Error('PF-01 budget migration requires PF-01 descriptor identity');
+  }
+  const legacyArtifact = budget?.baselineProvenance?.artifact;
+  const declaredBinarySha256 =
+    budget.schemaVersion === 2 ? legacyArtifact?.binarySha256 : legacyArtifact?.declaredBinarySha256;
+  const actualBinarySha256 =
+    budget.schemaVersion === 2 ? legacyArtifact?.binarySha256 : legacyArtifact?.actualBinarySha256;
+  if (
+    !matchesArtifactSchema({
+      ...legacyArtifact,
+      declaredBinarySha256,
+      actualBinarySha256,
+    }) ||
+    declaredBinarySha256 !== actualBinarySha256
+  ) {
+    throw new Error('PF-01 v2 baseline artifact invalid');
+  }
+  if (
+    !matchesBuildInputsSchema(baselineBuildInputs, 'git-object-tree') ||
+    baselineBuildInputs.source.commit !== budget.baselineProvenance.commit
+  ) {
+    throw new Error('PF-01 baseline build-input digest invalid');
+  }
+  const metrics = Object.fromEntries(
+    (budget.budgets ?? []).map((entry) => [entry?.metric, entry?.baseline]),
+  );
+  return freezePf01Budget({
+    descriptor: { descriptorId: budget.descriptorId, digest: { value: budget.descriptorDigest } },
+    profile: budget.profile,
+    metrics,
+    baselineProvenance: {
+      ...budget.baselineProvenance,
+      artifact: {
+        identityPath: legacyArtifact.identityPath,
+        kind: legacyArtifact.kind,
+        identifier: legacyArtifact.identifier,
+        profile: legacyArtifact.profile,
+        binary: legacyArtifact.binary,
+        declaredBinarySha256,
+        actualBinarySha256,
+        provenance: legacyArtifact.provenance,
+      },
+      buildInputs: baselineBuildInputs,
+    },
+  });
 }
 
 export const PF01_BUDGET_CONSTANTS = {

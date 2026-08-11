@@ -5,7 +5,10 @@ import { describe, expect, it } from 'vitest';
 
 // prettier-ignore
 // @ts-expect-error runtime verifier module is a plain Node ESM module.
-import { assertCleanPf01Baseline, collectCurrentPf01Attestation, validateFrozenPf01Budget } from '../../scripts/orchestrator/pf01-budget.mjs';
+import { assertCleanPf01Baseline, collectCurrentPf01Attestation, pf01ComparisonProvenance, validateFrozenPf01Budget } from '../../scripts/orchestrator/pf01-budget.mjs';
+// prettier-ignore
+// @ts-expect-error runtime verifier module is a plain Node ESM module.
+import { computePf01L3HarnessBuildInputsDigest } from '../../scripts/orchestrator/pf01-build-inputs.mjs';
 
 const descriptor = JSON.parse(
   readFileSync(resolve('performance/descriptors/pf-01.catalog-browse.json'), 'utf8'),
@@ -13,8 +16,9 @@ const descriptor = JSON.parse(
 
 function validBudget(): Record<string, unknown> {
   const digest = (descriptor.digest as { value: string }).value;
+  const entries = [{ path: 'src/main.tsx', sha256: 'c'.repeat(64) }];
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     descriptorId: 'PF-01',
     descriptorDigest: digest,
     profile: 'representative',
@@ -30,7 +34,8 @@ function validBudget(): Record<string, unknown> {
         identifier: 'io.github.shuanzi.agent-config-manager.test-harness',
         profile: 'debug',
         binary: 'src-tauri/target/debug/agent-config-manager',
-        binarySha256: 'a'.repeat(64),
+        declaredBinarySha256: 'a'.repeat(64),
+        actualBinarySha256: 'a'.repeat(64),
         provenance: 'L3 专用隔离测试构建；非生产签名/DMG，不取得 L4 credit',
       },
       runner: {
@@ -43,6 +48,21 @@ function validBudget(): Record<string, unknown> {
       },
       toolchain: { cargo: 'cargo 1.90.0', rustc: 'rustc 1.90.0' },
       fixture: { path: 'fixtures/fx-01/native-root', sha256: 'b'.repeat(64) },
+      buildInputs: {
+        schemaVersion: 2,
+        algorithm: 'pf01-l3-harness-build-inputs-v2',
+        digest: computePf01L3HarnessBuildInputsDigest({
+          schemaVersion: 2,
+          algorithm: 'pf01-l3-harness-build-inputs-v2',
+          entries,
+        }),
+        source: {
+          kind: 'git-object-tree',
+          method: 'raw bytes SHA-256 / byte-sorted repo-relative paths',
+          commit: 'f783568e73d70411f3a7ce1e5b982b99135b5e57',
+        },
+        entries,
+      },
       resources: {
         metric: 'pf01.l3.peak_rss_bytes',
         layer: 'L3 test-harness debug（隔离临时 fixture 根；非 release-like artifact）',
@@ -82,8 +102,16 @@ function currentAttestation(budget = validBudget()): Record<string, unknown> {
   const provenance = budget.baselineProvenance as Record<string, Record<string, unknown>>;
   const artifact = provenance.artifact;
   return {
-    artifact: { ...artifact, actualBinarySha256: artifact.binarySha256 },
+    artifact: { ...artifact },
     fixture: { ...provenance.fixture },
+    buildInputs: {
+      ...JSON.parse(JSON.stringify(provenance.buildInputs)),
+      source: {
+        kind: 'clean-tracked-checkout',
+        method: 'raw bytes SHA-256 / byte-sorted repo-relative paths',
+        commit: 'f783568e73d70411f3a7ce1e5b982b99135b5e57',
+      },
+    },
   };
 }
 
@@ -166,7 +194,7 @@ describe('PF-01 frozen budget validator', () => {
       expect(first.artifact.actualBinarySha256).toBe(
         'f31314114e659732305563618e25d577242a25dd7fe1b6395222f94b81400982',
       );
-      expect(first.artifact.binarySha256).toBe('a'.repeat(64));
+      expect(first.artifact.declaredBinarySha256).toBe('a'.repeat(64));
       expect(second.fixture.sha256).not.toBe(first.fixture.sha256);
     } finally {
       rmSync(root, { recursive: true, force: true });
@@ -208,6 +236,101 @@ describe('PF-01 frozen budget validator', () => {
           .valid,
       ).toBe(false);
     }
+  });
+
+  it('只允许每次各自声明/实际 binary 一致且 build-input/fixture 相同的跨构建比较', () => {
+    const budget = validBudget();
+    const comparable = currentAttestation(budget);
+    const artifact = comparable.artifact as Record<string, unknown>;
+    artifact.declaredBinarySha256 = 'd'.repeat(64);
+    artifact.actualBinarySha256 = 'd'.repeat(64);
+
+    expect(validateFrozenPf01Budget(budget, descriptor, 'representative', comparable)).toEqual({
+      valid: true,
+      violations: [],
+    });
+
+    const inputMismatch = currentAttestation(budget);
+    ((inputMismatch.buildInputs as Record<string, unknown>).digest as string) = 'd'.repeat(64);
+    const fixtureMismatch = currentAttestation(budget);
+    ((fixtureMismatch.fixture as Record<string, unknown>).sha256 as string) = 'd'.repeat(64);
+
+    for (const invalid of [inputMismatch, fixtureMismatch]) {
+      expect(validateFrozenPf01Budget(budget, descriptor, 'representative', invalid).valid).toBe(
+        false,
+      );
+    }
+  });
+
+  it('build-input provenance 缺少版本化 entries 或篡改 method 时拒绝比较', () => {
+    const missingEntries = currentAttestation();
+    delete (missingEntries.buildInputs as Record<string, unknown>).entries;
+    const wrongMethod = currentAttestation();
+    (
+      (wrongMethod.buildInputs as Record<string, unknown>).source as Record<string, unknown>
+    ).method = 'unknown';
+
+    for (const invalid of [missingEntries, wrongMethod]) {
+      expect(
+        validateFrozenPf01Budget(validBudget(), descriptor, 'representative', invalid).valid,
+      ).toBe(false);
+    }
+  });
+
+  it('entry path/SHA 或 canonical digest 被篡改时拒绝 baseline 与 current comparison', () => {
+    const alteredBaselineEntry = validBudget();
+    (
+      (
+        (alteredBaselineEntry.baselineProvenance as Record<string, unknown>).buildInputs as Record<
+          string,
+          unknown
+        >
+      ).entries as Array<Record<string, unknown>>
+    )[0].sha256 = 'd'.repeat(64);
+
+    const alteredCurrentPath = currentAttestation();
+    (
+      (alteredCurrentPath.buildInputs as Record<string, unknown>).entries as Array<
+        Record<string, unknown>
+      >
+    )[0].path = 'src/not-main.tsx';
+
+    const alteredCurrentDigest = currentAttestation();
+    ((alteredCurrentDigest.buildInputs as Record<string, unknown>).digest as string) = 'd'.repeat(
+      64,
+    );
+
+    for (const [budget, attestation] of [
+      [alteredBaselineEntry, currentAttestation(alteredBaselineEntry)],
+      [validBudget(), alteredCurrentPath],
+      [validBudget(), alteredCurrentDigest],
+    ]) {
+      expect(
+        validateFrozenPf01Budget(budget, descriptor, 'representative', attestation).valid,
+      ).toBe(false);
+    }
+  });
+
+  it('comparison provenance 始终同时保留 baseline/current binary、build-input 与 fixture', () => {
+    const budget = validBudget();
+    const current = currentAttestation(budget);
+    expect(pf01ComparisonProvenance(budget, current)).toEqual({
+      baseline: {
+        run: (budget.baselineProvenance as Record<string, unknown>).run,
+        collectedAt: (budget.baselineProvenance as Record<string, unknown>).collectedAt,
+        commit: (budget.baselineProvenance as Record<string, unknown>).commit,
+        worktreeDirty: (budget.baselineProvenance as Record<string, unknown>).worktreeDirty,
+        artifact: (budget.baselineProvenance as Record<string, unknown>).artifact,
+        buildInputs: (budget.baselineProvenance as Record<string, unknown>).buildInputs,
+        fixture: (budget.baselineProvenance as Record<string, unknown>).fixture,
+      },
+      current: {
+        artifact: current.artifact,
+        buildInputs: current.buildInputs,
+        fixture: current.fixture,
+      },
+    });
+    expect(pf01ComparisonProvenance(null, current).baseline).toBeNull();
   });
 
   it('在采样/写预算前拒绝 dirty 或未知 worktree 状态', () => {

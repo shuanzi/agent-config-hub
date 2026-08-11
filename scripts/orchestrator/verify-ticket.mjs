@@ -34,7 +34,15 @@ import {
 } from './lib.mjs';
 import { TICKET_REGISTRY, ticketConfig } from './ticket-registry.mjs';
 import { maybeWriteLatestCleanPass } from './latest-clean-pass.mjs';
-import { collectCurrentPf01Attestation, validateFrozenPf01Budget } from './pf01-budget.mjs';
+import {
+  assertPf01L3ViteModuleClosure,
+  collectPf01L3HarnessBuildInputs,
+} from './pf01-build-inputs.mjs';
+import {
+  collectCurrentPf01Attestation,
+  pf01ComparisonProvenance,
+  validateFrozenPf01Budget,
+} from './pf01-budget.mjs';
 
 /** step 退出码 → 状态映射（ARC-06c §3.17）：0=pass，2=inconclusive，其余=fail */
 function stepStatusOf(exitCode) {
@@ -45,7 +53,7 @@ function stepStatusOf(exitCode) {
 
 const STATUS_LABEL = { pass: 'PASS', inconclusive: 'INCONCLUSIVE', fail: 'FAIL' };
 
-function budgetState(performance) {
+async function budgetState(performance) {
   const budgetPath = path.join(REPO_ROOT, performance.budgetPath);
   if (!fs.existsSync(budgetPath)) {
     return {
@@ -59,16 +67,21 @@ function budgetState(performance) {
     const descriptor = JSON.parse(
       fs.readFileSync(path.join(REPO_ROOT, performance.descriptorPath), 'utf8'),
     );
+    await assertPf01L3ViteModuleClosure();
+    const currentAttestation = collectCurrentPf01Attestation({
+      buildInputs: collectPf01L3HarnessBuildInputs(),
+    });
     const validation = validateFrozenPf01Budget(
       budget,
       descriptor,
       performance.profile ?? 'representative',
-      collectCurrentPf01Attestation(),
+      currentAttestation,
     );
     return {
       label: validation.valid ? performance.frozenLabel : 'budget-invalid（禁止作为 PF PASS 依据）',
       status: validation.valid ? 'pass' : 'fail',
       validation,
+      provenance: pf01ComparisonProvenance(budget, currentAttestation),
     };
   } catch (error) {
     return {
@@ -188,7 +201,7 @@ async function main() {
   // 整体 status：有 fail → fail；否则有 inconclusive（含 evidence 污染）→
   // inconclusive；否则 pass。未知退出码已由 stepStatusOf 归为 fail。
   const anyFailed = stepResults.some((step) => step.status === 'fail');
-  const budget = ticket.performance === undefined ? null : budgetState(ticket.performance);
+  const budget = ticket.performance === undefined ? null : await budgetState(ticket.performance);
   const anyInconclusive =
     evidenceContaminated ||
     stepResults.some((step) => step.status === 'inconclusive') ||
@@ -229,6 +242,7 @@ async function main() {
   if (ticket.performance !== undefined) {
     manifest.budgetState = budget?.label;
     manifest.budgetValidation = budget?.validation;
+    manifest.pf01Provenance = budget?.provenance;
     manifest.pfDescriptorDigest = pfDescriptorDigest(
       path.join(REPO_ROOT, ticket.performance.descriptorPath),
     );

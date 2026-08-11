@@ -40,10 +40,18 @@ import {
 } from './lib.mjs';
 import { ensureHarnessBuilt } from './build-harness.mjs';
 import {
+  assertPf01L3BuildEnvironment,
+  assertPf01L3ViteModuleClosure,
+  collectPf01L3HarnessBuildInputs,
+  collectPf01L3HarnessBuildInputsFromGit,
+} from './pf01-build-inputs.mjs';
+import {
   assertCleanPf01Baseline,
   collectCurrentPf01Attestation,
+  formatPf01BudgetJson,
   freezePf01Budget,
   PF01_BUDGET_CONSTANTS,
+  pf01ComparisonProvenance,
   validateCurrentPf01Attestation,
   validateFrozenPf01Budget,
 } from './pf01-budget.mjs';
@@ -134,6 +142,10 @@ async function completeBaselineProvenance({ outputDir, resourceEvidence, current
   if (cargo.exitCode !== 0 || rustc.exitCode !== 0 || npm.exitCode !== 0 || macosProductVersion.exitCode !== 0) {
     throw new Error('toolchain or macOS product version unavailable');
   }
+  const baselineBuildInputs = collectPf01L3HarnessBuildInputsFromGit({ commit: git.commit });
+  if (baselineBuildInputs.digest !== currentAttestation.buildInputs?.digest) {
+    throw new Error('baseline Git-object build-input digest 与当前 clean checkout 不匹配');
+  }
   return {
     run: relativeArtifactPath(outputDir),
     collectedAt: new Date().toISOString(),
@@ -146,7 +158,8 @@ async function completeBaselineProvenance({ outputDir, resourceEvidence, current
       identifier: currentAttestation.artifact.identifier,
       profile: currentAttestation.artifact.profile,
       binary: currentAttestation.artifact.binary,
-      binarySha256: currentAttestation.artifact.binarySha256,
+      declaredBinarySha256: currentAttestation.artifact.declaredBinarySha256,
+      actualBinarySha256: currentAttestation.artifact.actualBinarySha256,
       provenance: currentAttestation.artifact.provenance,
     },
     runner: {
@@ -159,6 +172,7 @@ async function completeBaselineProvenance({ outputDir, resourceEvidence, current
     },
     toolchain: { cargo: cargo.stdout.trim(), rustc: rustc.stdout.trim() },
     fixture: currentAttestation.fixture,
+    buildInputs: baselineBuildInputs,
     resources: {
       metric: resourceEvidence.metric,
       layer: resourceEvidence.layer,
@@ -235,6 +249,15 @@ async function main() {
     console.error(`INCONCLUSIVE  ${error instanceof Error ? error.message : 'clean worktree required'}`);
     process.exit(2);
   }
+  let buildEnvironment;
+  try {
+    buildEnvironment = assertPf01L3BuildEnvironment();
+  } catch (error) {
+    console.error(
+      `INCONCLUSIVE  L3 harness build environment 无法证明：${error instanceof Error ? error.message : 'unknown'}`,
+    );
+    process.exit(2);
+  }
 
   const outputDir =
     process.env.PERF_OUTPUT_DIR ?? path.join(ARTIFACTS_ROOT, 'performance/PF-01', makeRunId());
@@ -270,7 +293,10 @@ async function main() {
   }
   let currentAttestation;
   try {
-    currentAttestation = collectCurrentPf01Attestation();
+    await assertPf01L3ViteModuleClosure();
+    currentAttestation = collectCurrentPf01Attestation({
+      buildInputs: collectPf01L3HarnessBuildInputs(),
+    });
     const attestation = validateCurrentPf01Attestation(currentAttestation);
     if (!attestation.valid) throw new Error(attestation.violations.join('; '));
   } catch (error) {
@@ -384,7 +410,7 @@ async function main() {
         currentAttestation,
       );
       if (!validation.valid) throw new Error(validation.violations.join('; '));
-      writeJson(BUDGETS_PATH, generatedBudget);
+      fs.writeFileSync(BUDGETS_PATH, await formatPf01BudgetJson(generatedBudget), 'utf8');
     } catch (error) {
       generatedBudget = null;
       provenanceError = error instanceof Error ? error.message : 'baseline provenance unavailable';
@@ -398,6 +424,7 @@ async function main() {
       : budgetValidation?.valid
         ? 'budget-comparison'
         : 'budget-invalid';
+  const comparisonProvenance = pf01ComparisonProvenance(existingBudget, currentAttestation);
   const summary = {
     schemaVersion: 1,
     descriptorId: 'PF-01',
@@ -417,6 +444,13 @@ async function main() {
       resourceEvidence === null
         ? { status: 'inconclusive', reason: resourceError ?? provenanceError }
         : { status: 'collected', ...resourceEvidence },
+    comparisonProvenance: {
+      ...comparisonProvenance,
+      current: {
+        ...comparisonProvenance.current,
+        buildEnvironment,
+      },
+    },
     budgetValidation:
       budgetValidation === null
         ? { status: generatedBudget === null ? 'not-created' : 'created-for-next-rerun' }
