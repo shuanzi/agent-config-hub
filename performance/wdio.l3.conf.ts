@@ -119,12 +119,7 @@ export const config = {
       try {
         appendResourceRun(process.env.PF01_OUTPUT_DIR, await resourceSampler.finalize());
       } catch (error) {
-        appendResourceRun(process.env.PF01_OUTPUT_DIR, {
-          harnessPid: null,
-          samples: [],
-          normalExit: false,
-          inconclusive: error instanceof Error ? error.message : 'resource sampler failed',
-        });
+        appendResourceRun(process.env.PF01_OUTPUT_DIR, resourceSampler.diagnosticRun(error));
       }
     }
     const lifecyclePath = process.env.PF01_HARNESS_LIFECYCLE_PATH;
