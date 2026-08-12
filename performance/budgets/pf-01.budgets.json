@@ -1,0 +1,464 @@
+{
+  "schemaVersion": 4,
+  "descriptorId": "PF-01",
+  "descriptorDigest": "1f21a9dad1128ca4482500e1556925a8d8af2468a64e83628e7274007aa28b9a",
+  "profile": "representative",
+  "baselineProvenance": {
+    "run": ".artifacts/performance/PF-01/20260812T033832054Z-p69961-000",
+    "collectedAt": "2026-08-12T03:38:48.192Z",
+    "statusBeforeBudgetFreeze": "baseline-collected / budget-not-frozen",
+    "commit": "114298a619af40d00941efec4c959e0b13d6be83",
+    "worktreeDirty": false,
+    "artifact": {
+      "identityPath": ".artifacts/test-harness/identity.json",
+      "kind": "test-harness",
+      "identifier": "com.agentconfigmanager.testharness",
+      "profile": "debug",
+      "binary": "src-tauri/target/debug/agent-config-manager",
+      "declaredBinarySha256": "29bb905638eb65f701f612d37ca0d17a41af1eb82377ddc401ae4115910a2390",
+      "actualBinarySha256": "29bb905638eb65f701f612d37ca0d17a41af1eb82377ddc401ae4115910a2390",
+      "provenance": "L3 专用隔离测试构建；非生产签名/DMG，不取得 L4 credit"
+    },
+    "runner": {
+      "node": "v24.18.0",
+      "npm": "11.16.0",
+      "platform": "darwin",
+      "release": "25.6.0",
+      "macosProductVersion": "26.6.1",
+      "arch": "arm64"
+    },
+    "toolchain": {
+      "cargo": "cargo 1.97.1 (c980f4866 2026-06-30)",
+      "rustc": "rustc 1.97.1 (8bab26f4f 2026-07-14)"
+    },
+    "fixture": {
+      "path": "fixtures/fx-01/native-root",
+      "sha256": "ccaaf3161f651e22968d2ff6b32f4e0d06d108a18ed63977930a4ff27eab9519"
+    },
+    "buildInputs": {
+      "schemaVersion": 4,
+      "algorithm": "pf01-l3-harness-build-inputs-v4",
+      "digest": "580f2831fb7ac349a4b16cbe49fcfb37015db8265fb4f7096a9c3e55d0755238",
+      "entries": [
+        {
+          "path": "fixtures/fx-01/fixture.json",
+          "sha256": "402bf5bf4cb0399b4629eb38338edfae9947a2031a5387bea65ffcd11cac13a6"
+        },
+        {
+          "path": "fixtures/fx-01/native-root/skills/demo-skill/SKILL.md",
+          "sha256": "3f1e883bb4a03b88438f0b296d89f5db8e736df66f60e4299dd43f1191d35aa5"
+        },
+        {
+          "path": "fixtures/sensitive-masking.ts",
+          "sha256": "f18ebfc2e7488c47bd75c2ba2626300d97cd1868197980c8c0d783cce0673552"
+        },
+        {
+          "path": "index.html",
+          "sha256": "00c3855eeabdd719d9070ced054589940ae12d5b8748697cf3a538c9a86e090b"
+        },
+        {
+          "path": "package-lock.json",
+          "sha256": "ae79b38d37d743d8911ae034609df9721aa8da693062640d851ba7a1e755961a"
+        },
+        {
+          "path": "package.json",
+          "sha256": "18a357734e7b75d40e02b9e856b790db21337fb04a0e56c8a62773fd891ea24b"
+        },
+        {
+          "path": "rust-toolchain.toml",
+          "sha256": "61c1bd7112807a1344353434f8c0f337d6ad5f7ef1ef9a42fd75923e56daf636"
+        },
+        {
+          "path": "scripts/orchestrator/build-harness.mjs",
+          "sha256": "46cfe0e8365e7d0cb88a279a8f38b0bb81b5a5e4b037a85e7e1657eb9061fea2"
+        },
+        {
+          "path": "scripts/orchestrator/lib.mjs",
+          "sha256": "772def50606471d7d48a7902ce9843320e89424258ac5d7521b4bea971775dd9"
+        },
+        {
+          "path": "src-tauri/Cargo.lock",
+          "sha256": "6c6ba6d510ba284e89081d6d2899632e740fbae3d877c490aab5f1e314130384"
+        },
+        {
+          "path": "src-tauri/Cargo.toml",
+          "sha256": "f1551f11c894e92f6196acc5dc46022d191359fff75a56452a15bb59b64e99a3"
+        },
+        {
+          "path": "src-tauri/build.rs",
+          "sha256": "487059eaf8a947b80f20a9aacac038a5047b2ad69d2401b827376c67d6fe847f"
+        },
+        {
+          "path": "src-tauri/capabilities/default.json",
+          "sha256": "999e6a4c91599d555b8c6035dea185ad19bc29f230c274ac184f669002792a23"
+        },
+        {
+          "path": "src-tauri/icons/icon.png",
+          "sha256": "315a735bd741c5d86926e363ddda648a5e01f238c75c38a6a3dc75fc3046a551"
+        },
+        {
+          "path": "src-tauri/src/adapter_registry.rs",
+          "sha256": "3a24590be9b8e1aa78d94f006e6db44639e6b80c772ab6455970f4f1ef7e0440"
+        },
+        {
+          "path": "src-tauri/src/catalog.rs",
+          "sha256": "b81a1a86bd371bd8358c44a059cf97e750d1ad41ef557151f6cf8fdfda410ac8"
+        },
+        {
+          "path": "src-tauri/src/core.rs",
+          "sha256": "58c1ed0f05b4ffb92accb8d5ea600f8ed3c9f17993759d4dd9fbb135f2e3f8bb"
+        },
+        {
+          "path": "src-tauri/src/domain.rs",
+          "sha256": "13d561ec43b31241324a8cdc6dba5e9c740e3efce034ed662b62551278a322af"
+        },
+        {
+          "path": "src-tauri/src/ipc.rs",
+          "sha256": "e8b3797717308a08e154274527cb047a45c599394daa6e95307ad9fe0f69bec6"
+        },
+        {
+          "path": "src-tauri/src/lib.rs",
+          "sha256": "ff04075085e6d7a6ec6e83eb39354d8f40d1941e05f367246cb916a9e192419e"
+        },
+        {
+          "path": "src-tauri/src/main.rs",
+          "sha256": "ec0e9cf65943bf4ea1f4773792a89dae169a4fb92f15b0aa781ad33072c18816"
+        },
+        {
+          "path": "src-tauri/src/project_applicability.rs",
+          "sha256": "57eac43e04e69c820b9f1352b884e2b7cd4bef7bf5797db79e34f9618c7b6651"
+        },
+        {
+          "path": "src-tauri/src/wire.rs",
+          "sha256": "3f9d5cff1ffd9eeebea4ede8321eb48d2b96eceb69a82eb1b879245e4422ff59"
+        },
+        {
+          "path": "src-tauri/tauri.conf.json",
+          "sha256": "4310091701ad7d4d6ca0df7e0d39f63b9c8fddea2257075ef557810a6ae85ca3"
+        },
+        {
+          "path": "src-tauri/tauri.conf.test-harness.json",
+          "sha256": "0377882cd1e7c202636869a7738372ecac711410ab25fe5219c9667dada1196c"
+        },
+        {
+          "path": "src/App.tsx",
+          "sha256": "6c54e671e998cf6c1e2a89f3835db784fcb367c38e191819775f0c26d3381340"
+        },
+        {
+          "path": "src/gateway/index.ts",
+          "sha256": "7b0de803cf1272e56dcca46c961f328b8a03032f58cb34ada2e1c9f944a20a15"
+        },
+        {
+          "path": "src/gateway/mock.ts",
+          "sha256": "3aad9892620f6cc70584b4832f14caa09062fae30b5742afdefb55de3244275b"
+        },
+        {
+          "path": "src/gateway/perf-catalog.ts",
+          "sha256": "d129431c6f7893a58a6b949548869886c41e57bbe40d4796cac71b82a452f6ff"
+        },
+        {
+          "path": "src/gateway/tauri.ts",
+          "sha256": "b3e21119f7db32313eef72d2f54d2622d57f56174b1861a36469ffa46e9d9a66"
+        },
+        {
+          "path": "src/gateway/wire/gateway-wire.ts",
+          "sha256": "c2cbc07f5b0124fec3d4dda7a6d22cefd3e115c082ce2e32279811597b7156d2"
+        },
+        {
+          "path": "src/main.tsx",
+          "sha256": "85df551614bc67f07ea0bc6eda47f1f0e7fa88472f8aaaf6f10a979685218fce"
+        },
+        {
+          "path": "src/session/ReadOnlyWorkbenchSession.ts",
+          "sha256": "c5eb28d0801b0bad658d30dcdfb54cf434c93654f7e34b14e4edb34887a5c484"
+        },
+        {
+          "path": "src/ui/ReadOnlyWorkbench.tsx",
+          "sha256": "5d8f43f708686c801bd0dda683d179eca185a19751fcb097e7d1a2507ba253d0"
+        },
+        {
+          "path": "src/ui/workbench.css",
+          "sha256": "8044dc42fa33f88bb78d21d5d9e7710a556db0bdb9f95b8011ef76b805424495"
+        },
+        {
+          "path": "src/workbench/read-only-model.ts",
+          "sha256": "daa16eb6ce96eb200e9c31e046486fb204e551741999c182c66f79baa9e34036"
+        },
+        {
+          "path": "tests/contract/frontend-gateway-contract.ts",
+          "sha256": "9d5251dc89fdcf2f37bfd09058c947a0162d1b3f9ede25f5c6033537451a7afe"
+        },
+        {
+          "path": "tests/l3/contract-entry.ts",
+          "sha256": "fcd849e5db3624bb2cb65f3fe395811b0c15166059bf90437904052dc7167424"
+        },
+        {
+          "path": "tests/l3/contract.html",
+          "sha256": "f4233a956aa38640d08d1e8df8096339fe4938fdd7c65a07ff949c11f86444c9"
+        },
+        {
+          "path": "tsconfig.app.json",
+          "sha256": "c5ee6a6e4768da73194dd8823a8bd13b332f8689597a0e9b35d9b4c4da174270"
+        },
+        {
+          "path": "tsconfig.json",
+          "sha256": "e8d6f7b50828db3953e21c7e92584f9206b3cd2551b4012507372afbb7fe9ce3"
+        },
+        {
+          "path": "tsconfig.node.json",
+          "sha256": "e00beafed4644f601086951e3ce6319a264ccf0a8cd9761a3816db1e59f83330"
+        },
+        {
+          "path": "vite.l3.config.ts",
+          "sha256": "53a856fcf3d6efb638ab935bfdb6ce93b1c38f6f890fb5ae78f86013bdc84ad0"
+        }
+      ],
+      "source": {
+        "kind": "git-object-tree",
+        "method": "raw bytes SHA-256 / byte-sorted repo-relative paths",
+        "commit": "114298a619af40d00941efec4c959e0b13d6be83"
+      }
+    },
+    "measurementInputs": {
+      "schemaVersion": 4,
+      "algorithm": "pf01-measurement-inputs-v4",
+      "digest": "27991cd34d9f067a71a2985aaf9f6b6e23e5833adc05efa7767a5d8dcdb5b4bb",
+      "entries": [
+        {
+          "path": "fixtures/fx-01/fixture.json",
+          "sha256": "402bf5bf4cb0399b4629eb38338edfae9947a2031a5387bea65ffcd11cac13a6"
+        },
+        {
+          "path": "fixtures/fx-01/native-root/skills/demo-skill/SKILL.md",
+          "sha256": "3f1e883bb4a03b88438f0b296d89f5db8e736df66f60e4299dd43f1191d35aa5"
+        },
+        {
+          "path": "fixtures/sensitive-masking.ts",
+          "sha256": "f18ebfc2e7488c47bd75c2ba2626300d97cd1868197980c8c0d783cce0673552"
+        },
+        {
+          "path": "package-lock.json",
+          "sha256": "ae79b38d37d743d8911ae034609df9721aa8da693062640d851ba7a1e755961a"
+        },
+        {
+          "path": "package.json",
+          "sha256": "18a357734e7b75d40e02b9e856b790db21337fb04a0e56c8a62773fd891ea24b"
+        },
+        {
+          "path": "performance/descriptors/pf-01.catalog-browse.json",
+          "sha256": "34e12890958d9f0d86839d37931929a7c8cc46ac0f3f17e31a835212d3ece5b2"
+        },
+        {
+          "path": "performance/pf-01.coldstart.test.ts",
+          "sha256": "e0df6714988f0db4b04b4c5a6889a46c4eee1838711ee463c668f459150174fd"
+        },
+        {
+          "path": "performance/pf-01.perf.test.ts",
+          "sha256": "57739b9e662c53d4bbba4172d02677f8d88b678aba4aaa8d6530d0aa54281aa6"
+        },
+        {
+          "path": "performance/wdio.conf.ts",
+          "sha256": "0f05c9c73468e89a2842ba104c0d14a205bd0aee752aaef302a96fc09b61005a"
+        },
+        {
+          "path": "performance/wdio.l3.conf.ts",
+          "sha256": "0955ed8e73beb03975ff35ebeb5e7c43e5c95db67cc438140552606afde8bf56"
+        },
+        {
+          "path": "scripts/orchestrator/build-harness.mjs",
+          "sha256": "46cfe0e8365e7d0cb88a279a8f38b0bb81b5a5e4b037a85e7e1657eb9061fea2"
+        },
+        {
+          "path": "scripts/orchestrator/fe01-pf01-automatic-pass-validation.mjs",
+          "sha256": "1c165ccb76a847b091df4d5b4bdca02541bbae2dc68d6c77a2efa0ebf199fcef"
+        },
+        {
+          "path": "scripts/orchestrator/fe01-pf01-automatic-pass.mjs",
+          "sha256": "3fb490de94a8af0446b3e0340edd3b1acbae658c86890c789e023892fbc09ac2"
+        },
+        {
+          "path": "scripts/orchestrator/generate-fe01-pf01-automatic-pass.mjs",
+          "sha256": "d115fd2e9e058ce0f390d47b0efdb816e769e5e548b3b666dc1558bfde16ef87"
+        },
+        {
+          "path": "scripts/orchestrator/lib.mjs",
+          "sha256": "772def50606471d7d48a7902ce9843320e89424258ac5d7521b4bea971775dd9"
+        },
+        {
+          "path": "scripts/orchestrator/perf.mjs",
+          "sha256": "564abeffd07f8b9b68b73f3be6a9561abc3892d5f3f5d7905d243e34938c7eb6"
+        },
+        {
+          "path": "scripts/orchestrator/pf01-automated-result.mjs",
+          "sha256": "ff81aed0aac67c03858959bb54d8d2146ae3b8280df233a007226f038b8d9bc3"
+        },
+        {
+          "path": "scripts/orchestrator/pf01-budget.mjs",
+          "sha256": "300b21f4634af7187581808974bb85de7ca7a834e1b731b4adfb96e7d3cacb81"
+        },
+        {
+          "path": "scripts/orchestrator/pf01-build-inputs.mjs",
+          "sha256": "8fbf5e780665bb41566d86e54cf1cceeb7a0f9a598f521e1352971a0d1db4196"
+        },
+        {
+          "path": "scripts/orchestrator/pf01-lifecycle.mjs",
+          "sha256": "08d5e253a84265d28d1d2e8e76b6dc461a050e952f776a9a4181e22388b8ef0b"
+        },
+        {
+          "path": "scripts/orchestrator/pf01-measurement-inputs.mjs",
+          "sha256": "475e1e72473eb7f83c3917f09530f1a2bbed412640c5cd75dd9194a0a5119506"
+        },
+        {
+          "path": "scripts/orchestrator/pf01-resource.mjs",
+          "sha256": "df7f928948493276a6fcd644ca209da523b8d3808e5ec3bfa2e41a5fc7bf7e89"
+        },
+        {
+          "path": "scripts/orchestrator/refresh-pf01-budget.mjs",
+          "sha256": "3850cec6bcdc8795d3d95854a01a2634209266ee3389805bcecdd76e0f2065ad"
+        },
+        {
+          "path": "src/App.tsx",
+          "sha256": "6c54e671e998cf6c1e2a89f3835db784fcb367c38e191819775f0c26d3381340"
+        },
+        {
+          "path": "src/gateway/mock.ts",
+          "sha256": "3aad9892620f6cc70584b4832f14caa09062fae30b5742afdefb55de3244275b"
+        },
+        {
+          "path": "src/gateway/perf-catalog.ts",
+          "sha256": "d129431c6f7893a58a6b949548869886c41e57bbe40d4796cac71b82a452f6ff"
+        },
+        {
+          "path": "src/session/ReadOnlyWorkbenchSession.ts",
+          "sha256": "c5eb28d0801b0bad658d30dcdfb54cf434c93654f7e34b14e4edb34887a5c484"
+        },
+        {
+          "path": "src/ui/ReadOnlyWorkbench.tsx",
+          "sha256": "5d8f43f708686c801bd0dda683d179eca185a19751fcb097e7d1a2507ba253d0"
+        },
+        {
+          "path": "src/ui/workbench.css",
+          "sha256": "8044dc42fa33f88bb78d21d5d9e7710a556db0bdb9f95b8011ef76b805424495"
+        },
+        {
+          "path": "src/workbench/read-only-model.ts",
+          "sha256": "daa16eb6ce96eb200e9c31e046486fb204e551741999c182c66f79baa9e34036"
+        },
+        {
+          "path": "tests/l2/l2-main.tsx",
+          "sha256": "6c0722f10086b8112e8733e1f9f6167bd8cc03a87b6f13e76b014bf13b65ad59"
+        },
+        {
+          "path": "tests/l2/pf01-startup-eligibility.ts",
+          "sha256": "ad1bed444464447ec2543443558339493b61e14c1ca888f8dda1b08e1d4238f0"
+        },
+        {
+          "path": "tests/l2/workbench.html",
+          "sha256": "be59fc7f64da4c671c7c14c03dbc407527daafb22f1126622cfa4ac5dda5b15b"
+        },
+        {
+          "path": "tsconfig.app.json",
+          "sha256": "c5ee6a6e4768da73194dd8823a8bd13b332f8689597a0e9b35d9b4c4da174270"
+        },
+        {
+          "path": "tsconfig.json",
+          "sha256": "e8d6f7b50828db3953e21c7e92584f9206b3cd2551b4012507372afbb7fe9ce3"
+        },
+        {
+          "path": "tsconfig.node.json",
+          "sha256": "e00beafed4644f601086951e3ce6319a264ccf0a8cd9761a3816db1e59f83330"
+        },
+        {
+          "path": "vite.config.ts",
+          "sha256": "bb71d37adfe00d0cb4b067dbc810e02e1ab08606905296334c50ecca9dbc3036"
+        }
+      ],
+      "l2DevModuleGraph": {
+        "schemaVersion": 3,
+        "algorithm": "pf01-l2-vite-dev-module-graph-v3",
+        "entry": "tests/l2/workbench.html",
+        "declaredModulePaths": [
+          "fixtures/fx-01/fixture.json",
+          "fixtures/fx-01/native-root/skills/demo-skill/SKILL.md",
+          "fixtures/sensitive-masking.ts",
+          "src/App.tsx",
+          "src/gateway/mock.ts",
+          "src/gateway/perf-catalog.ts",
+          "src/session/ReadOnlyWorkbenchSession.ts",
+          "src/ui/ReadOnlyWorkbench.tsx",
+          "src/ui/workbench.css",
+          "src/workbench/read-only-model.ts",
+          "tests/l2/l2-main.tsx",
+          "tests/l2/pf01-startup-eligibility.ts"
+        ],
+        "actualModulePaths": [
+          "fixtures/fx-01/fixture.json",
+          "fixtures/fx-01/native-root/skills/demo-skill/SKILL.md",
+          "fixtures/sensitive-masking.ts",
+          "src/App.tsx",
+          "src/gateway/mock.ts",
+          "src/gateway/perf-catalog.ts",
+          "src/session/ReadOnlyWorkbenchSession.ts",
+          "src/ui/ReadOnlyWorkbench.tsx",
+          "src/ui/workbench.css",
+          "src/workbench/read-only-model.ts",
+          "tests/l2/l2-main.tsx",
+          "tests/l2/pf01-startup-eligibility.ts"
+        ]
+      },
+      "source": {
+        "kind": "git-object-tree",
+        "method": "raw bytes SHA-256 / byte-sorted repo-relative paths",
+        "commit": "114298a619af40d00941efec4c959e0b13d6be83"
+      }
+    },
+    "resources": {
+      "metric": "pf01.l3.peak_rss_bytes",
+      "layer": "L3 test-harness debug（隔离临时 fixture 根；非 release-like artifact）",
+      "sampling": "agent-config-manager harness PID + 后代；50ms process-tree RSS bytes；排除 WDIO/Vite；成功启动至正常退出",
+      "rawPeaksBytes": [117473280, 117407744, 118292480],
+      "maxBytes": 118292480
+    }
+  },
+  "formula": {
+    "absoluteCeilingMs": "ceil(p95 * 1.5 / 10) * 10",
+    "regressionAllowance": "current p50 <= baseline p50 * 1.25"
+  },
+  "budgets": [
+    {
+      "metric": "pf01.startup.first_list_visible",
+      "layer": "L2 mock renderer（headless Chrome + Vite dev server；非 release-like artifact）",
+      "baseline": { "p50": 12.6, "p95": 39, "n": 5 },
+      "absoluteCeilingMs": 60,
+      "regressionAllowance": { "relativeTo": "baseline-p50", "maxRatio": 1.25 }
+    },
+    {
+      "metric": "pf01.search.results_visible",
+      "layer": "L2 mock renderer（headless Chrome + Vite dev server；非 release-like artifact）",
+      "baseline": { "p50": 3.65, "p95": 7.625, "n": 20 },
+      "absoluteCeilingMs": 20,
+      "regressionAllowance": { "relativeTo": "baseline-p50", "maxRatio": 1.25 }
+    },
+    {
+      "metric": "pf01.filter.results_visible",
+      "layer": "L2 mock renderer（headless Chrome + Vite dev server；非 release-like artifact）",
+      "baseline": { "p50": 29.35, "p95": 76.765, "n": 20 },
+      "absoluteCeilingMs": 120,
+      "regressionAllowance": { "relativeTo": "baseline-p50", "maxRatio": 1.25 }
+    },
+    {
+      "metric": "pf01.select.skill_cells_visible",
+      "layer": "L2 mock renderer（headless Chrome + Vite dev server；非 release-like artifact）",
+      "baseline": { "p50": 80.55, "p95": 106.79, "n": 20 },
+      "absoluteCeilingMs": 170,
+      "regressionAllowance": { "relativeTo": "baseline-p50", "maxRatio": 1.25 }
+    },
+    {
+      "metric": "pf01.l3.cold_start.first_snapshot",
+      "layer": "L3 test-harness debug（隔离临时 fixture 根；非 release-like artifact）",
+      "baseline": { "p50": 813, "p95": 815.7, "n": 3 },
+      "absoluteCeilingMs": 1230,
+      "regressionAllowance": { "relativeTo": "baseline-p50", "maxRatio": 1.25 }
+    }
+  ]
+}
