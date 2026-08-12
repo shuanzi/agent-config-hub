@@ -1,6 +1,6 @@
 /* global process */
 /**
- * PF-01 L3 harness build-input digest v3.
+ * PF-01 L3 harness build-input digest v4.
  *
  * 该 digest 只刻画会影响 `build-harness.mjs` 产物的仓库输入：构建命令/配置、
  * L3 Vite 的两个入口实际产出的 module closure、FX-01 Vite raw import，以及 Tauri
@@ -23,8 +23,8 @@ import { build } from 'vite';
 import { ARTIFACTS_ROOT, assertNoGitAmbient, classifyPf01ViteModuleId, REPO_ROOT } from './lib.mjs';
 
 export const PF01_L3_BUILD_INPUTS = {
-  schemaVersion: 3,
-  algorithm: 'pf01-l3-harness-build-inputs-v3',
+  schemaVersion: 4,
+  algorithm: 'pf01-l3-harness-build-inputs-v4',
   method: 'raw bytes SHA-256 / byte-sorted repo-relative paths',
 };
 
@@ -157,7 +157,7 @@ function digest(entries) {
   return sha256Bytes(Buffer.from(`${JSON.stringify(payload)}\n`, 'utf8'));
 }
 
-/** v2 canonical payload 的唯一 digest 实现；schema validator 也必须通过此函数复算。 */
+/** v4 canonical payload 的唯一 digest 实现；schema validator 也必须通过此函数复算。 */
 export function computePf01L3HarnessBuildInputsDigest({ schemaVersion, algorithm, entries }) {
   if (
     schemaVersion !== PF01_L3_BUILD_INPUTS.schemaVersion ||
@@ -206,7 +206,7 @@ function validEntries(entries) {
   }
 }
 
-/** Shared schema seam for immutable evidence; recomputes the canonical v3 payload. */
+/** Shared schema seam for immutable evidence; recomputes the canonical v4 payload. */
 export function validatePf01L3HarnessBuildInputs(value, sourceKind) {
   return (
     exactKeys(value, ['schemaVersion', 'algorithm', 'digest', 'entries', 'source']) &&
@@ -514,7 +514,7 @@ export function assertPf01L3BuildEnvironment(env = process.env, repoRoot = REPO_
       key.startsWith('TAURI_') ||
       key.startsWith('CARGO_') ||
       isNativeToolchainOverride(key) ||
-      ['MACOSX_DEPLOYMENT_TARGET', 'SDKROOT', 'NODE_OPTIONS'].includes(key) ||
+      ['MACOSX_DEPLOYMENT_TARGET', 'SDKROOT', 'NODE_OPTIONS', 'NVM_INC', 'NVM_BIN'].includes(key) ||
       (key === 'NODE_ENV' && env[key] !== 'production'),
   );
   const dotEnv = fs.readdirSync(repoRoot).filter((name) => name === '.env' || name.startsWith('.env.'));

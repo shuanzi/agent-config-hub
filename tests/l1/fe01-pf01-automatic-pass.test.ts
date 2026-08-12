@@ -1,9 +1,17 @@
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  cpSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 // prettier-ignore
 // @ts-expect-error ticket-specific automatic-pass validator is a plain Node ESM module.
@@ -449,7 +457,122 @@ function writeImmutableComparisonFixture(root: string) {
   return inputs;
 }
 
+type ImmutableComparisonFailure = {
+  name: string;
+  mutate: (root: string, inputs: ReturnType<typeof validComparisonInputs>) => void;
+};
+
+const immutableComparisonFailures: readonly ImmutableComparisonFailure[] = [
+  {
+    name: 'rss',
+    mutate: (root, inputs) =>
+      writeFileSync(
+        join(root, inputs.comparison.run, 'l3-resource-runs.json'),
+        JSON.stringify({ runs: [{ harnessPid: null, normalExit: false, samples: [] }] }),
+      ),
+  },
+  {
+    name: 'raw-timing',
+    mutate: (root, inputs) =>
+      writeFileSync(
+        join(root, inputs.comparison.run, 'samples.json'),
+        JSON.stringify({ metrics: { 'pf01.search.results_visible': { samples: [1] } } }),
+      ),
+  },
+  {
+    name: 'contamination',
+    mutate: (root, inputs) =>
+      writeFileSync(
+        join(root, inputs.comparison.run, 'proposed-budgets.json'),
+        JSON.stringify({ note: 'SYNTHETIC-SECRET-automatic-pass' }),
+      ),
+  },
+  {
+    name: 'automated-result',
+    mutate: (root, inputs) => {
+      const summaryPath = join(root, inputs.comparison.run, 'summary.json');
+      const summary = JSON.parse(readFileSync(summaryPath, 'utf8')) as {
+        automatedResult: { exitCode: number };
+      };
+      summary.automatedResult.exitCode = 2;
+      writeFileSync(summaryPath, JSON.stringify(summary));
+    },
+  },
+  {
+    name: 'identity',
+    mutate: (root, inputs) => {
+      const summaryPath = join(root, inputs.comparison.run, 'summary.json');
+      const summary = JSON.parse(readFileSync(summaryPath, 'utf8')) as {
+        runIdentity: { consistent: boolean };
+      };
+      summary.runIdentity.consistent = false;
+      writeFileSync(summaryPath, JSON.stringify(summary));
+    },
+  },
+  {
+    name: 'comparison-source',
+    mutate: (root, inputs) => {
+      const summaryPath = join(root, inputs.comparison.run, 'summary.json');
+      const summary = JSON.parse(readFileSync(summaryPath, 'utf8')) as {
+        comparisonProvenance: { current: { buildInputs: { source: { commit: string } } } };
+      };
+      summary.comparisonProvenance.current.buildInputs.source.commit = 'f'.repeat(40);
+      writeFileSync(summaryPath, JSON.stringify(summary));
+    },
+  },
+  {
+    name: 'comparison-fixture',
+    mutate: (root, inputs) => {
+      const summaryPath = join(root, inputs.comparison.run, 'summary.json');
+      const summary = JSON.parse(readFileSync(summaryPath, 'utf8')) as {
+        comparisonProvenance: { current: { fixture: { sha256: string } } };
+      };
+      summary.comparisonProvenance.current.fixture.sha256 = 'f'.repeat(64);
+      writeFileSync(summaryPath, JSON.stringify(summary));
+    },
+  },
+  {
+    name: 'comparison-harness-identity',
+    mutate: (root, inputs) => {
+      const identityPath = join(root, inputs.comparison.run, 'harness-identity.json');
+      const identity = JSON.parse(readFileSync(identityPath, 'utf8')) as {
+        artifact: { actualBinarySha256: string };
+      };
+      identity.artifact.actualBinarySha256 = 'f'.repeat(64);
+      writeFileSync(identityPath, JSON.stringify(identity));
+    },
+  },
+];
+
 describe('FE-01 PF-01 ticket-specific automatic-pass current binding', () => {
+  let immutableComparisonFixtureRoot: string | undefined;
+  let immutableComparisonFixture: ReturnType<typeof writeImmutableComparisonFixture> | undefined;
+
+  beforeAll(() => {
+    immutableComparisonFixtureRoot = mkdtempSync(join(tmpdir(), 'pf01-automatic-pass-base-'));
+    immutableComparisonFixture = writeImmutableComparisonFixture(immutableComparisonFixtureRoot);
+  });
+
+  afterAll(() => {
+    if (immutableComparisonFixtureRoot !== undefined) {
+      rmSync(immutableComparisonFixtureRoot, { recursive: true, force: true });
+    }
+  });
+
+  function isolatedImmutableComparisonFixture(name: string) {
+    if (immutableComparisonFixtureRoot === undefined || immutableComparisonFixture === undefined) {
+      throw new Error('immutable comparison base fixture missing');
+    }
+    const parent = mkdtempSync(join(tmpdir(), `pf01-automatic-pass-${name}-`));
+    const root = join(parent, 'fixture');
+    cpSync(immutableComparisonFixtureRoot, root, {
+      recursive: true,
+      dereference: false,
+      errorOnExist: true,
+      verbatimSymlinks: true,
+    });
+    return { parent, root, inputs: clone(immutableComparisonFixture) };
+  }
   it('只有当前 HEAD 的预算、descriptor、inputs/graph、fixture 与 runtime 全部精确等价才可作为 automatic pass', () => {
     expect(validateFe01Pf01AutomaticPassCurrentBinding({ record, current })).toEqual({
       valid: true,
@@ -577,114 +700,28 @@ describe('FE-01 PF-01 ticket-specific automatic-pass current binding', () => {
     }
   });
 
-  it('summary/预算全过也必须拒绝不完整 RSS、raw timing、contamination 或不一致 run identity', async () => {
-    const previousNodeEnv = process.env.NODE_ENV;
-    delete process.env.NODE_ENV;
-    const cases: Array<
-      [string, (root: string, inputs: ReturnType<typeof validComparisonInputs>) => void]
-    > = [
-      [
-        'rss',
-        (root, inputs) =>
-          writeFileSync(
-            join(root, inputs.comparison.run, 'l3-resource-runs.json'),
-            JSON.stringify({ runs: [{ harnessPid: null, normalExit: false, samples: [] }] }),
-          ),
-      ],
-      [
-        'raw-timing',
-        (root, inputs) =>
-          writeFileSync(
-            join(root, inputs.comparison.run, 'samples.json'),
-            JSON.stringify({ metrics: { 'pf01.search.results_visible': { samples: [1] } } }),
-          ),
-      ],
-      [
-        'contamination',
-        (root, inputs) =>
-          writeFileSync(
-            join(root, inputs.comparison.run, 'proposed-budgets.json'),
-            JSON.stringify({ note: 'SYNTHETIC-SECRET-automatic-pass' }),
-          ),
-      ],
-      [
-        'automated-result',
-        (root, inputs) => {
-          const summaryPath = join(root, inputs.comparison.run, 'summary.json');
-          const summary = JSON.parse(readFileSync(summaryPath, 'utf8')) as {
-            automatedResult: { exitCode: number };
-          };
-          summary.automatedResult.exitCode = 2;
-          writeFileSync(summaryPath, JSON.stringify(summary));
-        },
-      ],
-      [
-        'identity',
-        (root, inputs) => {
-          const summaryPath = join(root, inputs.comparison.run, 'summary.json');
-          const summary = JSON.parse(readFileSync(summaryPath, 'utf8')) as {
-            runIdentity: { consistent: boolean };
-          };
-          summary.runIdentity.consistent = false;
-          writeFileSync(summaryPath, JSON.stringify(summary));
-        },
-      ],
-      [
-        'comparison-source',
-        (root, inputs) => {
-          const summaryPath = join(root, inputs.comparison.run, 'summary.json');
-          const summary = JSON.parse(readFileSync(summaryPath, 'utf8')) as {
-            comparisonProvenance: { current: { buildInputs: { source: { commit: string } } } };
-          };
-          summary.comparisonProvenance.current.buildInputs.source.commit = 'f'.repeat(40);
-          writeFileSync(summaryPath, JSON.stringify(summary));
-        },
-      ],
-      [
-        'comparison-fixture',
-        (root, inputs) => {
-          const summaryPath = join(root, inputs.comparison.run, 'summary.json');
-          const summary = JSON.parse(readFileSync(summaryPath, 'utf8')) as {
-            comparisonProvenance: { current: { fixture: { sha256: string } } };
-          };
-          summary.comparisonProvenance.current.fixture.sha256 = 'f'.repeat(64);
-          writeFileSync(summaryPath, JSON.stringify(summary));
-        },
-      ],
-      [
-        'comparison-harness-identity',
-        (root, inputs) => {
-          const identityPath = join(root, inputs.comparison.run, 'harness-identity.json');
-          const identity = JSON.parse(readFileSync(identityPath, 'utf8')) as {
-            artifact: { actualBinarySha256: string };
-          };
-          identity.artifact.actualBinarySha256 = 'f'.repeat(64);
-          writeFileSync(identityPath, JSON.stringify(identity));
-        },
-      ],
-    ];
-    try {
-      for (const [name, mutate] of cases) {
-        const root = mkdtempSync(join(tmpdir(), `pf01-automatic-pass-${name}-`));
-        try {
-          const inputs = writeImmutableComparisonFixture(root);
-          mutate(root, inputs);
-          await expect(
-            writeFe01Pf01AutomaticPassRecord({
-              repoRoot: root,
-              comparisonRun: inputs.comparison.runId,
-            }),
-          ).rejects.toThrow(/automatic-pass/i);
-          expect(
-            existsSync(join(root, 'performance', 'automatic-passes', 'fe-01-pf-01.json')),
-          ).toBe(false);
-        } finally {
-          rmSync(root, { recursive: true, force: true });
-        }
+  it.each(immutableComparisonFailures)(
+    '拒绝 immutable comparison $name 漂移且不生成 record',
+    async ({ name, mutate }) => {
+      const previousNodeEnv = process.env.NODE_ENV;
+      const { parent, root, inputs } = isolatedImmutableComparisonFixture(name);
+      try {
+        delete process.env.NODE_ENV;
+        mutate(root, inputs);
+        await expect(
+          writeFe01Pf01AutomaticPassRecord({
+            repoRoot: root,
+            comparisonRun: inputs.comparison.runId,
+          }),
+        ).rejects.toThrow(/automatic-pass/i);
+        expect(existsSync(join(root, 'performance', 'automatic-passes', 'fe-01-pf-01.json'))).toBe(
+          false,
+        );
+      } finally {
+        if (previousNodeEnv === undefined) delete process.env.NODE_ENV;
+        else process.env.NODE_ENV = previousNodeEnv;
+        rmSync(parent, { recursive: true, force: true });
       }
-    } finally {
-      if (previousNodeEnv === undefined) delete process.env.NODE_ENV;
-      else process.env.NODE_ENV = previousNodeEnv;
-    }
-  }, 30_000);
+    },
+  );
 });

@@ -30,7 +30,7 @@ const EXPECTED_VITE_MODULES = [
   'tests/l3/contract.html',
 ];
 
-describe('PF-01 L3 harness build-input digest v3', () => {
+describe('PF-01 L3 harness build-input digest v4', () => {
   it('actual Cargo/native toolchain overrides（含 target、HOST/TARGET 与 cc-rs）一律不允许未 attested', () => {
     const root = mkdtempSync(join(tmpdir(), 'pf01-native-toolchain-'));
     try {
@@ -69,6 +69,20 @@ describe('PF-01 L3 harness build-input digest v3', () => {
     }
   });
 
+  it('实际 Node 与 NVM runtime 路径冲突时，精确 NVM_INC/NVM_BIN 一律拒绝', () => {
+    const root = mkdtempSync(join(tmpdir(), 'pf01-node-runtime-'));
+    try {
+      mkdirSync(root, { recursive: true });
+      for (const key of ['NVM_INC', 'NVM_BIN']) {
+        expect(() => assertPf01L3BuildEnvironment({ [key]: '/tmp/node-v25' }, root)).toThrow(
+          new RegExp(`build-input environment.*${key}`, 'i'),
+        );
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it('从 immutable baseline Git objects 与当前实现分别得到可追溯摘要，并暴露 output-affecting drift', () => {
     const baseline = collectPf01L3HarnessBuildInputsFromGit({ commit: BASELINE_COMMIT });
     // 注入 clean-status 仅覆盖 digest 算法；当前实现改动了 mock/UI/wire 等实际
@@ -76,13 +90,13 @@ describe('PF-01 L3 harness build-input digest v3', () => {
     const current = collectPf01L3HarnessBuildInputs({ gitStatus: '' });
 
     expect(baseline).toMatchObject({
-      schemaVersion: 3,
-      algorithm: 'pf01-l3-harness-build-inputs-v3',
+      schemaVersion: 4,
+      algorithm: 'pf01-l3-harness-build-inputs-v4',
       source: { kind: 'git-object-tree', commit: BASELINE_COMMIT },
     });
     expect(current).toMatchObject({
-      schemaVersion: 3,
-      algorithm: 'pf01-l3-harness-build-inputs-v3',
+      schemaVersion: 4,
+      algorithm: 'pf01-l3-harness-build-inputs-v4',
       source: { kind: 'clean-tracked-checkout' },
     });
     expect(current.digest).not.toBe(baseline.digest);
@@ -98,6 +112,11 @@ describe('PF-01 L3 harness build-input digest v3', () => {
     await expect(
       assertPf01L3ViteModuleClosure({
         moduleIds: [...EXPECTED_VITE_MODULES, 'react/jsx-runtime', '@tauri-apps/api/core'],
+      }),
+    ).resolves.toEqual(EXPECTED_VITE_MODULES);
+    await expect(
+      assertPf01L3ViteModuleClosure({
+        moduleIds: [...EXPECTED_VITE_MODULES, '/@react-refresh?v=locked-runtime'],
       }),
     ).resolves.toEqual(EXPECTED_VITE_MODULES);
 
@@ -128,6 +147,9 @@ describe('PF-01 L3 harness build-input digest v3', () => {
       '/@fs/tmp/pf01-outside.ts',
       '/tmp/node_modules/evil/index.js',
       '/@fs/tmp/node_modules/evil/index.js',
+      '/@react-refresh-evil',
+      '/@react-refresh/extra',
+      '/@unknown-runtime',
     ]) {
       await expect(
         assertPf01L3ViteModuleClosure({
@@ -143,8 +165,8 @@ describe('PF-01 L3 harness build-input digest v3', () => {
   it('canonical digest 一旦 entry path、entry SHA 或 digest 本身被篡改就不可用', () => {
     const entries = [{ path: 'src/main.tsx', sha256: 'a'.repeat(64) }];
     const digest = computePf01L3HarnessBuildInputsDigest({
-      schemaVersion: 3,
-      algorithm: 'pf01-l3-harness-build-inputs-v3',
+      schemaVersion: 4,
+      algorithm: 'pf01-l3-harness-build-inputs-v4',
       entries,
     });
     expect(digest).toMatch(/^[a-f0-9]{64}$/);

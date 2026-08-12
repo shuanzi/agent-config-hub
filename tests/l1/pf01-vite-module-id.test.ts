@@ -41,6 +41,13 @@ describe('PF-01 Vite module-id package allowlist', () => {
     }
   });
 
+  it('只将锁定 plugin-react 的精确 virtual runtime ID（query 标准化后）视为 external', () => {
+    const root = declaredPackageRoot();
+    for (const moduleId of ['/@react-refresh', '/@react-refresh?v=locked-runtime']) {
+      expect(classifyPf01ViteModuleId(moduleId, { repoRoot: root })).toEqual({ kind: 'external' });
+    }
+  });
+
   it('unknown/bare/dotted/repo-local/absolute IDs 都进入 candidate 路径，而非静默 external', () => {
     const root = declaredPackageRoot();
     for (const moduleId of [
@@ -51,6 +58,9 @@ describe('PF-01 Vite module-id package allowlist', () => {
       'src/untracked',
       '/tmp/node_modules/evil/index.js',
       '/@fs/tmp/node_modules/evil/index.js',
+      '/@react-refresh-evil',
+      '/@react-refresh/extra',
+      '/@unknown-runtime',
     ]) {
       expect(classifyPf01ViteModuleId(moduleId, { repoRoot: root })).toMatchObject({
         kind: 'candidate',

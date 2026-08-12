@@ -1,5 +1,5 @@
 /**
- * PF-01 measurement-method inputs v2.
+ * PF-01 measurement-method inputs v4.
  *
  * This provenance is deliberately independent from L3 harness `buildInputs`: the latter
  * establishes the binary inputs, while this module pins the actual L2 Vite dev-server/browser
@@ -14,14 +14,14 @@ import path from 'node:path';
 import { assertNoGitAmbient, classifyPf01ViteModuleId, REPO_ROOT } from './lib.mjs';
 
 export const PF01_MEASUREMENT_INPUTS = Object.freeze({
-  schemaVersion: 3,
-  algorithm: 'pf01-measurement-inputs-v3',
+  schemaVersion: 4,
+  algorithm: 'pf01-measurement-inputs-v4',
   method: 'raw bytes SHA-256 / byte-sorted repo-relative paths',
 });
 
 export const PF01_L2_VITE_DEV_MODULE_GRAPH = Object.freeze({
-  schemaVersion: 2,
-  algorithm: 'pf01-l2-vite-dev-module-graph-v2',
+  schemaVersion: 3,
+  algorithm: 'pf01-l2-vite-dev-module-graph-v3',
   entry: 'tests/l2/workbench.html',
 });
 

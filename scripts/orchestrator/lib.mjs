@@ -76,11 +76,15 @@ function packageRoot(moduleId) {
   return name?.length > 0 ? name : null;
 }
 
+/** Lock the one plugin-react development runtime route; all other `/@…` IDs remain physical candidates. */
+const PF01_VITE_EXACT_VIRTUAL_MODULE_IDS = new Set(['/@react-refresh']);
+
 /** Vite IDs are external only when virtual/builtin or explicitly declared by this package manifest. */
 export function classifyPf01ViteModuleId(moduleId, { repoRoot = REPO_ROOT } = {}) {
   if (typeof moduleId !== 'string') return { kind: 'ignored' };
   const canonical = moduleId.split('?')[0];
   if (
+    PF01_VITE_EXACT_VIRTUAL_MODULE_IDS.has(canonical) ||
     canonical.startsWith('\0') ||
     canonical.startsWith('/@id/') ||
     canonical.startsWith('virtual:') ||

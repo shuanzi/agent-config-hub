@@ -46,9 +46,9 @@ import {
  * automatic-pass record 才可通过本 binding；调用方必须再验证 immutable run/record 文件。
  */
 
-const BUILD_INPUTS = { schemaVersion: 3, algorithm: 'pf01-l3-harness-build-inputs-v3' };
-const MEASUREMENT_INPUTS = { schemaVersion: 3, algorithm: 'pf01-measurement-inputs-v3' };
-const L2_DEV_GRAPH = { schemaVersion: 2, algorithm: 'pf01-l2-vite-dev-module-graph-v2' };
+const BUILD_INPUTS = { schemaVersion: 4, algorithm: 'pf01-l3-harness-build-inputs-v4' };
+const MEASUREMENT_INPUTS = { schemaVersion: 4, algorithm: 'pf01-measurement-inputs-v4' };
+const L2_DEV_GRAPH = { schemaVersion: 3, algorithm: 'pf01-l2-vite-dev-module-graph-v3' };
 const RECORD_PATH = 'performance/automatic-passes/fe-01-pf-01.json';
 const BUDGET_PATH = 'performance/budgets/pf-01.budgets.json';
 const DESCRIPTOR_PATH = 'performance/descriptors/pf-01.catalog-browse.json';
@@ -395,7 +395,7 @@ export function validateFe01Pf01AutomaticPassCurrentBinding({ record, current } 
     !validInputs(record.current.buildInputs, BUILD_INPUTS, 'clean-tracked-checkout') ||
     !validInputs(current.buildInputs, BUILD_INPUTS, 'clean-tracked-checkout')
   ) {
-    violations.push('automatic-pass buildInputs v3 invalid');
+    violations.push('automatic-pass buildInputs v4 invalid');
   }
   if (
     !validInputs(record.current.measurementInputs, MEASUREMENT_INPUTS, 'clean-tracked-checkout') ||
@@ -403,7 +403,7 @@ export function validateFe01Pf01AutomaticPassCurrentBinding({ record, current } 
     !validDevGraph(record.current.measurementInputs?.l2DevModuleGraph) ||
     !validDevGraph(current.measurementInputs?.l2DevModuleGraph)
   ) {
-    violations.push('automatic-pass measurementInputs/dev graph v3/v2 invalid');
+    violations.push('automatic-pass measurementInputs/dev graph v4/v3 invalid');
   }
   if (!selfConsistentArtifact(record.current.artifact)) {
     violations.push('automatic-pass comparison artifact declared/actual binary SHA invalid');

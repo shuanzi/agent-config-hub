@@ -55,7 +55,7 @@ function writeFixtureTree(root: string): void {
   execFileSync('git', ['commit', '--quiet', '-m', 'fixture'], { cwd: root });
 }
 
-describe('PF-01 independent measurement-input provenance v3', () => {
+describe('PF-01 independent measurement-input provenance v4', () => {
   it('版本化 digest 精确绑定闭合的实际测量输入；missing、extra、drift 均 fail-closed', () => {
     const valid = measurementInputs('clean-tracked-checkout');
     expect(validatePf01MeasurementInputs(valid, 'clean-tracked-checkout')).toBe(true);
@@ -129,6 +129,11 @@ describe('PF-01 independent measurement-input provenance v3', () => {
         moduleIds: [...expected.actualModulePaths, 'react/jsx-runtime', '@tauri-apps/api/core'],
       }),
     ).toEqual(expected);
+    expect(
+      attestPf01L2ViteDevModuleGraph({
+        moduleIds: [...expected.actualModulePaths, '/@react-refresh?v=locked-runtime'],
+      }),
+    ).toEqual(expected);
 
     const invalidGraphs = [
       { ...expected, actualModulePaths: expected.actualModulePaths.slice(1) },
@@ -155,6 +160,9 @@ describe('PF-01 independent measurement-input provenance v3', () => {
       '/@fs/tmp/pf01-outside.ts',
       '/tmp/node_modules/evil/index.js',
       '/@fs/tmp/node_modules/evil/index.js',
+      '/@react-refresh-evil',
+      '/@react-refresh/extra',
+      '/@unknown-runtime',
     ]) {
       expect(() =>
         attestPf01L2ViteDevModuleGraph({
