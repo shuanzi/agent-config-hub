@@ -41,6 +41,7 @@ import {
   maybeWriteLatestCleanSubjectAcceptedWithWaiver,
   validateFe01SubjectAcceptedWithWaiverCandidate,
 } from './latest-clean-subject-accepted-with-waiver.mjs';
+import { finalizeFe01RunLocalHarnessCapture } from './fe01-run-local-harness-capture.mjs';
 import {
   FE01_SUBJECT_PHYSICAL_CANDIDATE,
   finalizeFe01SubjectWaiverPhysicalDisposition,
@@ -372,21 +373,33 @@ async function main() {
         subjectLineage,
       })
     : undefined;
-  const overallStatus = gitIdentityConsistent
+  let overallStatus = gitIdentityConsistent
     ? subjectWaiverVerdict?.status ?? computedOverallStatus
     : 'inconclusive';
 
+  const fe01HarnessCapture = finalizeFe01RunLocalHarnessCapture({
+    ticketId,
+    overallStatus,
+    steps: stepResults,
+    repoRoot: REPO_ROOT,
+    evidenceRoot,
+    artifact: ticket.artifact,
+  });
+  if (fe01HarnessCapture !== null) overallStatus = fe01HarnessCapture.status;
   // harness artifact identity（test:tauri 写入；production 标 N/A）
   const identityPath = path.join(REPO_ROOT, ticket.artifact.identityPath);
-  const artifactIdentity = fs.existsSync(identityPath)
-    ? {
-        ...JSON.parse(fs.readFileSync(identityPath, 'utf8')),
-        production: ticket.artifact.production,
-      }
-    : { ...ticket.artifact.fallback, production: ticket.artifact.production };
+  const artifactIdentity =
+    fe01HarnessCapture === null
+      ? fs.existsSync(identityPath)
+        ? {
+            ...JSON.parse(fs.readFileSync(identityPath, 'utf8')),
+            production: ticket.artifact.production,
+          }
+        : { ...ticket.artifact.fallback, production: ticket.artifact.production }
+      : fe01HarnessCapture.artifactIdentity;
 
   let manifest = {
-    schemaVersion: 1,
+    schemaVersion: ticketId === 'FE-01' ? 2 : 1,
     runId,
     scope: ticket.scope,
     evidenceScope: ticket.evidenceScope,
@@ -410,6 +423,12 @@ async function main() {
     ),
     steps: stepResults,
     artifactIdentity,
+    ...(fe01HarnessCapture?.runLocalHarnessAttestation === undefined
+      ? {}
+      : { runLocalHarnessAttestation: fe01HarnessCapture.runLocalHarnessAttestation }),
+    ...(fe01HarnessCapture === null || fe01HarnessCapture.capture.disposition === 'captured'
+      ? {}
+      : { runLocalHarnessCapture: fe01HarnessCapture?.capture }),
     startAt,
     endAt,
     completedAt: endAt,

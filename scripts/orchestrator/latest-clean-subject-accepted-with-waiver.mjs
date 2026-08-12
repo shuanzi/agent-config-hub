@@ -1,6 +1,8 @@
 /**
  * 本次 FE-01 subject accepted-with-waiver 的独立 clean index。
- * 它不读取或更新旧 accepted index，也绝不触碰 latest-clean-pass.json。
+ * 它会读取并重验已有 subject index 的 backing evidence；只有 exact 授权的 legacy v1
+ * global identity/binary mutable failure 可由新的 run-local attestation supersede，且绝不触碰
+ * latest-clean-pass.json。
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -19,11 +21,17 @@ import { PF01_BUILD_ENVIRONMENT } from './pf01-build-inputs.mjs';
 import { ticketConfig } from './ticket-registry.mjs';
 import { scanEvidenceText, sha256File } from './lib.mjs';
 import {
+  isPhysicalRegularFile,
+  readExactPhysicalJson,
+  validateFe01RunLocalHarnessAttestation,
+} from './fe01-run-local-harness-attestation.mjs';
+import {
   FE01_SUBJECT_PHYSICAL_CANDIDATE,
   FE01_SUBJECT_PHYSICAL_VALIDATED,
 } from './fe01-subject-waiver-physical-disposition.mjs';
 import {
   hasPhysicalPath,
+  isNewerCompletion,
   maybeAdvancePhysicalJsonIndex,
   relativeFrom,
   validCompletedAt,
@@ -74,6 +82,7 @@ const FE01_ACCEPTED_MANIFEST_KEYS = Object.freeze([
   'fixtureDigests',
   'steps',
   'artifactIdentity',
+  'runLocalHarnessAttestation',
   'startAt',
   'endAt',
   'completedAt',
@@ -88,6 +97,9 @@ const FE01_ACCEPTED_MANIFEST_KEYS = Object.freeze([
   'physicalValidation',
   'uncoveredBoundaries',
 ]);
+const FE01_LEGACY_ACCEPTED_MANIFEST_KEYS = Object.freeze(
+  FE01_ACCEPTED_MANIFEST_KEYS.filter((key) => key !== 'runLocalHarnessAttestation'),
+);
 const FE01_ACCEPTED_INDEX_KEYS = Object.freeze([
   'schemaVersion',
   'ticket',
@@ -103,7 +115,21 @@ const FE01_ACCEPTED_INDEX_KEYS = Object.freeze([
   'subjectLineage',
   'physicalValidation',
   'provenance',
+  'runLocalHarnessAttestation',
+  'legacySupersede',
 ]);
+const FE01_LEGACY_ACCEPTED_INDEX_KEYS = Object.freeze(
+  FE01_ACCEPTED_INDEX_KEYS.filter(
+    (key) => key !== 'runLocalHarnessAttestation' && key !== 'legacySupersede',
+  ),
+);
+const LEGACY_GLOBAL_HARNESS_FAILURE = 'final-harness-identity-or-binary-invalid';
+const LEGACY_SUPERSEDE_REASON = 'legacy-global-harness-identity-or-binary-invalid';
+const LEGACY_STABLE_RUN_ID = '20260812T115759948Z-p90022-000';
+const LEGACY_STABLE_MANIFEST_SHA256 =
+  '7b63502cd2d5b39c008eb176f8d731763dc65801603f79622f14d52d9d956921';
+const LEGACY_STABLE_BINARY_SHA256 =
+  '25f95d26bb245d8dab47cab214a04fdbadca0db71746748512a81d56fe26e249';
 const SUBJECT_WAIVER_BUDGET_STATE =
   'historical-subject-waiver-validation（immutable automatic fail/exit 1；未启动当前 PF sampling）';
 
@@ -410,16 +436,6 @@ function exactFinalPhysicalValidation(value) {
   return sameJson(value, FE01_SUBJECT_PHYSICAL_VALIDATED);
 }
 
-function physicalRegularFile(root, filePath) {
-  if (!hasPhysicalPath(root, filePath)) return false;
-  try {
-    const stats = fs.lstatSync(filePath);
-    return stats.isFile() && !stats.isSymbolicLink();
-  } catch {
-    return false;
-  }
-}
-
 function physicalDirectoryDigest(root, directoryPath) {
   if (!hasPhysicalPath(root, directoryPath)) return null;
   try {
@@ -474,125 +490,42 @@ function exactFinalFixtureDigests(root, value) {
   });
 }
 
-function exactFinalArtifactIdentity(root, value) {
+/**
+ * Legacy v1 has no run-local binary. It may be superseded only after the current
+ * global harness proves a normal, self-consistent rebuild different from that old SHA.
+ */
+function validateLegacyGlobalHarnessRebuild(root) {
   const artifact = ticketConfig('FE-01')?.artifact;
-  if (artifact === undefined || !exactArtifactIdentity(value)) return false;
+  if (artifact === undefined) return { valid: false, reason: 'legacy-global-harness-configuration-invalid' };
   const identityPath = path.resolve(root, artifact.identityPath);
-  if (relativeFrom(root, identityPath) !== artifact.identityPath || !physicalRegularFile(root, identityPath)) {
-    return false;
+  if (relativeFrom(root, identityPath) !== artifact.identityPath || !isPhysicalRegularFile(root, identityPath)) {
+    return { valid: false, reason: 'legacy-global-harness-identity-not-physical' };
   }
-  const identity = readExactPhysicalJson(root, identityPath).value;
-  if (
-    !exactKeys(identity, ['kind', 'identifier', 'profile', 'binary', 'binarySha256', 'provenance']) ||
-    !sameJson(value, { ...identity, production: artifact.production })
-  ) {
-    return false;
+  const parsedIdentity = readExactPhysicalJson(root, identityPath);
+  if (parsedIdentity.value === null) {
+    return {
+      valid: false,
+      reason:
+        parsedIdentity.reason === 'raw-contaminated'
+          ? 'legacy-global-harness-identity-raw-contaminated'
+          : 'legacy-global-harness-identity-invalid-or-duplicate-key',
+    };
+  }
+  const identity = parsedIdentity.value;
+  if (!exactArtifactIdentity({ ...identity, production: artifact.production })) {
+    return { valid: false, reason: 'legacy-global-harness-identity-schema-invalid' };
   }
   const binaryPath = path.resolve(root, identity.binary);
-  return (
-    relativeFrom(root, binaryPath) === identity.binary &&
-    physicalRegularFile(root, binaryPath) &&
-    sha256File(binaryPath) === identity.binarySha256
-  );
-}
-
-function parseJsonWithUniqueKeys(raw) {
-  let offset = 0;
-  const whitespace = /\s/;
-  const skipWhitespace = () => {
-    while (whitespace.test(raw[offset] ?? '')) offset += 1;
-  };
-  const parseString = () => {
-    const start = offset;
-    if (raw[offset] !== '"') throw new Error('expected JSON string');
-    offset += 1;
-    while (offset < raw.length) {
-      if (raw[offset] === '\\') {
-        offset += 2;
-      } else if (raw[offset] === '"') {
-        offset += 1;
-        return JSON.parse(raw.slice(start, offset));
-      } else {
-        offset += 1;
-      }
-    }
-    throw new Error('unterminated JSON string');
-  };
-  const parseValue = () => {
-    skipWhitespace();
-    if (raw[offset] === '{') {
-      offset += 1;
-      skipWhitespace();
-      const keys = new Set();
-      if (raw[offset] === '}') {
-        offset += 1;
-        return;
-      }
-      while (true) {
-        skipWhitespace();
-        const key = parseString();
-        if (keys.has(key)) throw new Error('duplicate JSON object key');
-        keys.add(key);
-        skipWhitespace();
-        if (raw[offset] !== ':') throw new Error('expected JSON object colon');
-        offset += 1;
-        parseValue();
-        skipWhitespace();
-        if (raw[offset] === '}') {
-          offset += 1;
-          return;
-        }
-        if (raw[offset] !== ',') throw new Error('expected JSON object separator');
-        offset += 1;
-      }
-    }
-    if (raw[offset] === '[') {
-      offset += 1;
-      skipWhitespace();
-      if (raw[offset] === ']') {
-        offset += 1;
-        return;
-      }
-      while (true) {
-        parseValue();
-        skipWhitespace();
-        if (raw[offset] === ']') {
-          offset += 1;
-          return;
-        }
-        if (raw[offset] !== ',') throw new Error('expected JSON array separator');
-        offset += 1;
-      }
-    }
-    if (raw[offset] === '"') {
-      parseString();
-      return;
-    }
-    const literal = raw.slice(offset).match(/^(?:true|false|null|-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?)/);
-    if (literal === null) throw new Error('invalid JSON literal');
-    offset += literal[0].length;
-  };
-  parseValue();
-  skipWhitespace();
-  if (offset !== raw.length) throw new Error('unexpected trailing JSON bytes');
-  return JSON.parse(raw);
-}
-
-/** Evidence JSON 必须在解析前通过物理路径、原始字节污染与嵌套 duplicate-key 审计。 */
-function readExactPhysicalJson(root, filePath) {
-  if (!physicalRegularFile(root, filePath)) return { value: null, reason: 'not-physical' };
-  let raw;
-  try {
-    raw = fs.readFileSync(filePath, 'utf8');
-  } catch {
-    return { value: null, reason: 'unreadable' };
+  if (relativeFrom(root, binaryPath) !== identity.binary || !isPhysicalRegularFile(root, binaryPath)) {
+    return { valid: false, reason: 'legacy-global-harness-binary-not-physical' };
   }
-  if (!scanEvidenceText(raw).clean) return { value: null, reason: 'raw-contaminated' };
-  try {
-    return { value: parseJsonWithUniqueKeys(raw), reason: null };
-  } catch {
-    return { value: null, reason: 'raw-invalid-or-duplicate-key' };
+  if (sha256File(binaryPath) !== identity.binarySha256) {
+    return { valid: false, reason: 'legacy-global-harness-binary-hash-mismatch' };
   }
+  if (identity.binarySha256 === LEGACY_STABLE_BINARY_SHA256) {
+    return { valid: false, reason: 'legacy-global-harness-binary-not-rebuilt' };
+  }
+  return { valid: true, reason: 'legacy-global-harness-rebuild-exact' };
 }
 
 function physicalStepEvidenceViolation(root, evidenceRoot, steps) {
@@ -601,9 +534,9 @@ function physicalStepEvidenceViolation(root, evidenceRoot, steps) {
     const stderrPath = path.join(evidenceRoot, step.logs.stderr);
     const metaPath = path.join(evidenceRoot, step.logs.meta);
     if (
-      !physicalRegularFile(root, stdoutPath) ||
-      !physicalRegularFile(root, stderrPath) ||
-      !physicalRegularFile(root, metaPath)
+      !isPhysicalRegularFile(root, stdoutPath) ||
+      !isPhysicalRegularFile(root, stderrPath) ||
+      !isPhysicalRegularFile(root, metaPath)
     ) {
       return `step-${step.id}-physical-file-missing-or-symlink`;
     }
@@ -641,10 +574,13 @@ function exactUncoveredBoundaries(value) {
   return sameJson(value, ticketConfig('FE-01')?.uncoveredBoundaries);
 }
 
-function exactAcceptedManifestSchema(manifest) {
+function exactAcceptedManifestSchema(manifest, { legacy = false } = {}) {
   return (
-    exactKeys(manifest, FE01_ACCEPTED_MANIFEST_KEYS) &&
-    manifest.schemaVersion === 1 &&
+    exactKeys(
+      manifest,
+      legacy ? FE01_LEGACY_ACCEPTED_MANIFEST_KEYS : FE01_ACCEPTED_MANIFEST_KEYS,
+    ) &&
+    manifest.schemaVersion === (legacy ? 1 : 2) &&
     manifest.scope === 'FE-01' &&
     manifest.evidenceScope === 'ticket-closure' &&
     manifest.status === 'accepted-with-waiver' &&
@@ -667,9 +603,9 @@ function exactAcceptedManifestSchema(manifest) {
   );
 }
 
-function exactManifest(manifest) {
+function exactManifest(manifest, options) {
   return (
-    exactAcceptedManifestSchema(manifest) &&
+    exactAcceptedManifestSchema(manifest, options) &&
     manifest?.status === 'accepted-with-waiver' &&
     manifest?.manualDisposition?.status === 'accepted-with-waiver' &&
     manifest?.manualDisposition?.waiverValidation === 'valid' &&
@@ -730,7 +666,50 @@ function rejected(reason) {
   return { eligible: false, validated: false, reason };
 }
 
-function acceptedIndexForManifest({ ticketId, manifest, relativeManifestPath }) {
+function acceptedIndexProvenance(manifest, legacySupersede = null) {
+  return {
+    evidenceScope: manifest.evidenceScope,
+    steps: manifest.steps.map(({ id, layer, provenance }) => ({ id, layer, provenance })),
+    statement:
+      legacySupersede === null
+        ? '仅指向本次 exact FE-01 subject waiver：historical automatic PF fail/exit 1、显式 manual disposition、final subject lineage、worktreeDirty=false、无 contamination；不代表 automatic pass 或 release gate。'
+        : '仅指向本次 exact FE-01 subject waiver：以新的 run-local harness attestation 取代旧 schema 的唯一 global identity/binary mutable failure；旧 binary 未被重新物理证明，不代表 automatic pass 或 release gate。',
+  };
+}
+
+function exactLegacySupersede(value) {
+  return (
+    value === null ||
+    (exactKeys(value, ['mode', 'reason', 'previousRunId', 'previousManifestPath']) &&
+      value.mode === 'legacy-global-harness-identity-only' &&
+      value.reason === LEGACY_SUPERSEDE_REASON &&
+      value.previousRunId === LEGACY_STABLE_RUN_ID &&
+      value.previousManifestPath === `.artifacts/verification/FE-01/${LEGACY_STABLE_RUN_ID}/manifest.json`)
+  );
+}
+
+function acceptedIndexForManifest({ ticketId, manifest, relativeManifestPath, legacySupersede = null }) {
+  return {
+    schemaVersion: 2,
+    ticket: ticketId,
+    scope: manifest.scope,
+    status: 'accepted-with-waiver',
+    runId: manifest.runId,
+    commit: manifest.commit,
+    completedAt: manifest.completedAt,
+    manifestPath: relativeManifestPath,
+    manualDisposition: manifest.manualDisposition,
+    pfAutomaticResult: manifest.pfAutomaticResult,
+    performanceDebt: manifest.performanceDebt,
+    subjectLineage: manifest.subjectLineage,
+    physicalValidation: manifest.physicalValidation,
+    runLocalHarnessAttestation: manifest.runLocalHarnessAttestation,
+    legacySupersede,
+    provenance: acceptedIndexProvenance(manifest, legacySupersede),
+  };
+}
+
+function legacyAcceptedIndexForManifest({ ticketId, manifest, relativeManifestPath }) {
   return {
     schemaVersion: 1,
     ticket: ticketId,
@@ -745,25 +724,28 @@ function acceptedIndexForManifest({ ticketId, manifest, relativeManifestPath }) 
     performanceDebt: manifest.performanceDebt,
     subjectLineage: manifest.subjectLineage,
     physicalValidation: manifest.physicalValidation,
-    provenance: {
-      evidenceScope: manifest.evidenceScope,
-      steps: manifest.steps.map(({ id, layer, provenance }) => ({ id, layer, provenance })),
-      statement:
-        '仅指向本次 exact FE-01 subject waiver：historical automatic PF fail/exit 1、显式 manual disposition、final subject lineage、worktreeDirty=false、无 contamination；不代表 automatic pass 或 release gate。',
-    },
+    provenance: acceptedIndexProvenance(manifest),
   };
 }
 
-function exactAcceptedIndex(index, { ticketId, manifest, relativeManifestPath }) {
+function exactAcceptedIndex(index, { ticketId, manifest, relativeManifestPath, legacySupersede = null }) {
   return (
     exactKeys(index, FE01_ACCEPTED_INDEX_KEYS) &&
-    sameJson(index, acceptedIndexForManifest({ ticketId, manifest, relativeManifestPath }))
+    exactLegacySupersede(index.legacySupersede) &&
+    sameJson(index, acceptedIndexForManifest({ ticketId, manifest, relativeManifestPath, legacySupersede }))
+  );
+}
+
+function exactLegacyAcceptedIndex(index, { ticketId, manifest, relativeManifestPath }) {
+  return (
+    exactKeys(index, FE01_LEGACY_ACCEPTED_INDEX_KEYS) &&
+    sameJson(index, legacyAcceptedIndexForManifest({ ticketId, manifest, relativeManifestPath }))
   );
 }
 
 /** 已有 index 是 latest truth，须按候选同一 public validator 重验其所有 backing evidence。 */
 function validateExistingAcceptedIndex({ root, indexPath }) {
-  if (!physicalRegularFile(root, indexPath)) {
+  if (!isPhysicalRegularFile(root, indexPath)) {
     return rejected('existing-accepted-index-not-physical');
   }
   const parsedIndex = readExactPhysicalJson(root, indexPath);
@@ -771,8 +753,9 @@ function validateExistingAcceptedIndex({ root, indexPath }) {
     return rejected('existing-accepted-index-raw-invalid-or-contaminated');
   }
   const index = parsedIndex.value;
+  const legacy = index?.schemaVersion === 1;
   if (
-    !exactKeys(index, FE01_ACCEPTED_INDEX_KEYS) ||
+    !exactKeys(index, legacy ? FE01_LEGACY_ACCEPTED_INDEX_KEYS : FE01_ACCEPTED_INDEX_KEYS) ||
     index.ticket !== 'FE-01' ||
     !exactFinalPhysicalValidation(index.physicalValidation) ||
     typeof index.manifestPath !== 'string'
@@ -783,7 +766,7 @@ function validateExistingAcceptedIndex({ root, indexPath }) {
   if (
     relativeFrom(root, manifestPath) !== index.manifestPath ||
     index.manifestPath !== `.artifacts/verification/FE-01/${index.runId}/manifest.json` ||
-    !physicalRegularFile(root, manifestPath)
+    !isPhysicalRegularFile(root, manifestPath)
   ) {
     return rejected('existing-accepted-index-manifest-not-physical');
   }
@@ -799,31 +782,68 @@ function validateExistingAcceptedIndex({ root, indexPath }) {
   ) {
     return rejected('existing-accepted-index-manifest-binding-invalid');
   }
-  const backing = validateFe01SubjectAcceptedWithWaiverCandidate({
+  if (
+    legacy &&
+    (index.runId !== LEGACY_STABLE_RUN_ID ||
+      sha256File(manifestPath) !== LEGACY_STABLE_MANIFEST_SHA256 ||
+      manifest.artifactIdentity?.binarySha256 !== LEGACY_STABLE_BINARY_SHA256)
+  ) {
+    return rejected('existing-accepted-index-legacy-identity-not-the-authorized-stable-run');
+  }
+  const backing = validateAcceptedWithWaiverCandidate({
     root,
     evidenceRoot: path.dirname(manifestPath),
     ticketId: 'FE-01',
     manifest,
+    legacy,
   });
   if (!backing.eligible || !backing.validated) {
     return rejected(`existing-accepted-index-backing-${backing.reason}`);
   }
-  if (!exactAcceptedIndex(index, {
-    ticketId: 'FE-01',
-    manifest,
-    relativeManifestPath: index.manifestPath,
-  })) {
+  const exactIndex = legacy
+    ? exactLegacyAcceptedIndex(index, {
+        ticketId: 'FE-01',
+        manifest,
+        relativeManifestPath: index.manifestPath,
+      })
+    : exactAcceptedIndex(index, {
+        ticketId: 'FE-01',
+        manifest,
+        relativeManifestPath: index.manifestPath,
+        legacySupersede: index.legacySupersede,
+      });
+  if (!exactIndex) {
     return rejected('existing-accepted-index-binding-invalid');
   }
-  return { eligible: true, validated: true, reason: 'existing-accepted-index-backing-exact' };
+  if (!legacy) {
+    return {
+      eligible: true,
+      validated: true,
+      reason: 'existing-accepted-index-backing-exact',
+      runId: index.runId,
+      completedAt: index.completedAt,
+    };
+  }
+  const currentRebuild = validateLegacyGlobalHarnessRebuild(root);
+  if (!currentRebuild.valid) {
+    return rejected(`existing-accepted-index-backing-${currentRebuild.reason}`);
+  }
+  return {
+    ...rejected(`existing-accepted-index-backing-${LEGACY_GLOBAL_HARNESS_FAILURE}`),
+    legacySupersedeEligible: true,
+    runId: index.runId,
+    completedAt: index.completedAt,
+    manifestPath: index.manifestPath,
+  };
 }
 
 /** 候选的 physical eligibility 独立于 accepted index 是否可前进。 */
-export function validateFe01SubjectAcceptedWithWaiverCandidate({
+function validateAcceptedWithWaiverCandidate({
   root,
   evidenceRoot,
   ticketId,
   manifest,
+  legacy = false,
 }) {
   if (
     ticketId !== 'FE-01' ||
@@ -840,7 +860,7 @@ export function validateFe01SubjectAcceptedWithWaiverCandidate({
     !validProvenance(manifest.steps) ||
     !exactClosureSteps(manifest.steps) ||
     !exactHistoricalPerfStep(manifest.steps) ||
-    !exactManifest(manifest)
+    !exactManifest(manifest, { legacy })
   ) {
     return rejected('manifest-schema-or-step-identity-invalid');
   }
@@ -877,10 +897,22 @@ export function validateFe01SubjectAcceptedWithWaiverCandidate({
   if (!exactFinalFixtureDigests(root, manifest.fixtureDigests)) {
     return rejected('final-fixture-digest-invalid');
   }
-  if (!exactFinalArtifactIdentity(root, manifest.artifactIdentity)) {
-    return rejected('final-harness-identity-or-binary-invalid');
+  if (!legacy) {
+    const runLocalAttestation = validateFe01RunLocalHarnessAttestation({
+      root,
+      evidenceRoot,
+      artifactIdentity: manifest.artifactIdentity,
+      attestation: manifest.runLocalHarnessAttestation,
+    });
+    if (!runLocalAttestation.valid) {
+      return rejected(runLocalAttestation.reason);
+    }
   }
   return { eligible: true, validated: true, reason: 'final-physical-evidence-exact' };
+}
+
+export function validateFe01SubjectAcceptedWithWaiverCandidate(input) {
+  return validateAcceptedWithWaiverCandidate({ ...input, legacy: false });
 }
 
 /** 仅 final-validated 的 clean、physical、exact candidate 才能前进 subject 专属 index。 */
@@ -904,25 +936,85 @@ export async function maybeWriteLatestCleanSubjectAcceptedWithWaiver(input) {
     ticketId,
     'latest-clean-subject-accepted-with-waiver.json',
   );
-  const candidateIndex = acceptedIndexForManifest({
-    ticketId,
-    manifest,
-    relativeManifestPath,
-  });
-  if (!exactAcceptedIndex(candidateIndex, { ticketId, manifest, relativeManifestPath })) {
-    return { ...rejected('accepted-index-schema-or-physical-validation-invalid'), updated: false };
-  }
-  if (fs.existsSync(indexPath)) {
-    const existing = validateExistingAcceptedIndex({ root, indexPath });
-    if (!existing.eligible || !existing.validated) return { ...existing, updated: false };
-  }
   const advancement = await maybeAdvancePhysicalJsonIndex({
     root,
     indexPath,
     candidate: { completedAt: manifest.completedAt, runId: manifest.runId },
     temporaryPrefix: 'latest-clean-subject-accepted-with-waiver',
-    createIndex: () => candidateIndex,
+    lockOptions: input.lockOptions,
+    revalidateCandidate: () => {
+      const lockedEligibility = validateFe01SubjectAcceptedWithWaiverCandidate({
+        root,
+        evidenceRoot,
+        ticketId,
+        manifest,
+      });
+      if (!lockedEligibility.eligible || !lockedEligibility.validated) {
+        return { valid: false, result: lockedEligibility };
+      }
+      if (!exactFinalPhysicalValidation(manifest.physicalValidation)) {
+        return {
+          valid: false,
+          result: {
+            ...lockedEligibility,
+            updated: false,
+            reason: 'physical-validation-disposition-not-finalized',
+          },
+        };
+      }
+      return { valid: true };
+    },
+    revalidateExisting: ({ exists }) => {
+      if (!exists) return { valid: true, existing: null, context: { legacySupersede: null } };
+      const existing = validateExistingAcceptedIndex({ root, indexPath });
+      if (existing.eligible && existing.validated) {
+        return {
+          valid: true,
+          existing: { completedAt: existing.completedAt, runId: existing.runId },
+          context: { legacySupersede: null },
+        };
+      }
+      if (
+        existing.legacySupersedeEligible !== true ||
+        !isNewerCompletion(
+          { completedAt: manifest.completedAt, runId: manifest.runId },
+          { completedAt: existing.completedAt, runId: existing.runId },
+        )
+      ) {
+        return { valid: false, result: existing };
+      }
+      return {
+        valid: true,
+        existing: { completedAt: existing.completedAt, runId: existing.runId },
+        context: {
+          legacySupersede: {
+            mode: 'legacy-global-harness-identity-only',
+            reason: LEGACY_SUPERSEDE_REASON,
+            previousRunId: existing.runId,
+            previousManifestPath: existing.manifestPath,
+          },
+        },
+      };
+    },
+    createIndex: (context = {}) => {
+      const legacySupersede = context.legacySupersede ?? null;
+      const candidateIndex = acceptedIndexForManifest({
+        ticketId,
+        manifest,
+        relativeManifestPath,
+        legacySupersede,
+      });
+      return exactAcceptedIndex(candidateIndex, {
+        ticketId,
+        manifest,
+        relativeManifestPath,
+        legacySupersede,
+      })
+        ? candidateIndex
+        : null;
+    },
   });
+  if (advancement.validation !== undefined) return { ...advancement.validation, updated: false };
   return {
     ...eligibility,
     ...advancement,

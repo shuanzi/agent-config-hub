@@ -77,7 +77,10 @@ async function acquireIndexLock(lockPath, { attempts = 40, delayMs = 10 } = {}) 
 
 /**
  * The caller keeps eligibility and index shape local; this helper owns only the shared
- * physical-path check, regular-file read, serialization lock, completion ordering, and atomic rename.
+ * physical-path check, serialization lock, completion ordering, and atomic rename.
+ * `revalidateExisting` and `revalidateCandidate` are optional: consumers that need
+ * evidence-specific validation receive the already-locked index path and decide their own
+ * exact records without changing other users.
  */
 export async function maybeAdvancePhysicalJsonIndex({
   root,
@@ -85,6 +88,9 @@ export async function maybeAdvancePhysicalJsonIndex({
   candidate,
   temporaryPrefix,
   createIndex,
+  revalidateExisting,
+  revalidateCandidate,
+  lockOptions,
 }) {
   if (
     !validCompletedAt(candidate?.completedAt) ||
@@ -93,6 +99,8 @@ export async function maybeAdvancePhysicalJsonIndex({
     typeof temporaryPrefix !== 'string' ||
     temporaryPrefix.length === 0 ||
     typeof createIndex !== 'function' ||
+    (revalidateExisting !== undefined && typeof revalidateExisting !== 'function') ||
+    (revalidateCandidate !== undefined && typeof revalidateCandidate !== 'function') ||
     !hasPhysicalPath(root, path.dirname(indexPath))
   ) {
     return { updated: false };
@@ -101,17 +109,37 @@ export async function maybeAdvancePhysicalJsonIndex({
   if (!hasPhysicalPath(root, path.dirname(indexPath))) return { updated: false };
 
   const lockPath = `${indexPath}.lock`;
-  const lockHandle = await acquireIndexLock(lockPath);
+  const lockHandle = await acquireIndexLock(lockPath, lockOptions);
   if (lockHandle === null) return { updated: false };
   try {
     let existing = null;
-    if (fs.existsSync(indexPath)) {
+    let context;
+    if (revalidateExisting !== undefined) {
+      const validation = await revalidateExisting({
+        root,
+        indexPath,
+        candidate,
+        exists: fs.existsSync(indexPath),
+      });
+      if (validation?.valid !== true) return { updated: false, validation: validation?.result };
+      existing = validation.existing ?? null;
+      context = validation.context;
+    } else if (fs.existsSync(indexPath)) {
       existing = readPhysicalJson(indexPath);
       if (existing === null) return { updated: false };
     }
+    if (revalidateCandidate !== undefined) {
+      const validation = await revalidateCandidate({
+        root,
+        indexPath,
+        candidate,
+      });
+      if (validation?.valid !== true) return { updated: false, validation: validation?.result };
+    }
+
     if (!isNewerCompletion(candidate, existing)) return { updated: false };
 
-    const index = createIndex();
+    const index = createIndex(context);
     if (index === null || typeof index !== 'object') return { updated: false };
     const temporaryPath = path.join(
       path.dirname(indexPath),

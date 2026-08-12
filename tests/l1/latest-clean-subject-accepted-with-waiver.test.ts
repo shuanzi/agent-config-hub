@@ -34,6 +34,9 @@ import { validateFe01SubjectClosureLineage } from '../../scripts/orchestrator/fe
 // @ts-expect-error runtime evidence helper is a plain Node ESM module.
 import { digestDirectory, sha256File } from '../../scripts/orchestrator/lib.mjs';
 // prettier-ignore
+// @ts-expect-error runtime evidence helper is a plain Node ESM module.
+import { captureFe01RunLocalHarnessAttestation, validateFe01RunLocalHarnessAttestation } from '../../scripts/orchestrator/fe01-run-local-harness-attestation.mjs';
+// prettier-ignore
 // @ts-expect-error runtime registry is a plain Node ESM module.
 import { ticketConfig } from '../../scripts/orchestrator/ticket-registry.mjs';
 
@@ -72,6 +75,11 @@ function setup() {
   writeFileSync(join(root, identityPath), `${JSON.stringify(identity, null, 2)}\n`);
   const runId = '20260812T060000000Z-p1-000';
   const evidenceRoot = join(root, '.artifacts/verification/FE-01', runId);
+  const runLocalHarnessAttestation = captureFe01RunLocalHarnessAttestation({
+    repoRoot: root,
+    evidenceRoot,
+    artifact: ticketConfig('FE-01').artifact,
+  });
   const waiver = validateFe01Pf01SubjectWaiver({ repoRoot: root });
   const lineage = validateFe01SubjectClosureLineage({
     repoRoot: root,
@@ -86,7 +94,7 @@ function setup() {
   const perfStep = expectedSteps.find((step) => step.id === 'perf');
   if (perfStep === undefined) throw new Error('FE-01 perf step missing from registry');
   const manifest = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     runId,
     scope: 'FE-01',
     evidenceScope: 'ticket-closure',
@@ -172,6 +180,7 @@ function setup() {
       ...identity,
       production: 'N/A（FE-01 不产出生产 artifact）',
     },
+    runLocalHarnessAttestation,
     budgetState:
       'historical-subject-waiver-validation（immutable automatic fail/exit 1；未启动当前 PF sampling）',
     budgetValidation: { valid: true, violations: [] },
@@ -237,6 +246,814 @@ function writeCompleteManifest(evidenceRoot: string, manifest: Record<string, un
   writeManifest(evidenceRoot, manifest);
   writeStepEvidence(evidenceRoot, manifest);
 }
+
+function installAuthorizedLegacyBacking(root: string) {
+  const runId = '20260812T115759948Z-p90022-000';
+  const indexPath = join(
+    root,
+    '.artifacts/verification/FE-01/latest-clean-subject-accepted-with-waiver.json',
+  );
+  cpSync(
+    resolve('.artifacts/verification/FE-01', runId),
+    join(root, '.artifacts/verification/FE-01', runId),
+    { recursive: true },
+  );
+  mkdirSync(dirname(indexPath), { recursive: true });
+  copyFileSync(
+    '.artifacts/verification/FE-01/latest-clean-subject-accepted-with-waiver.json',
+    indexPath,
+  );
+  return JSON.parse(readFileSync(indexPath, 'utf8'));
+}
+
+function nextRunLocalCandidate(
+  root: string,
+  evidenceRoot: string,
+  manifest: Record<string, unknown>,
+  runId = '20260812T123000000Z-p2-000',
+  completedAt = '2026-08-12T12:30:00.000Z',
+) {
+  const globalBinary = join(root, (manifest.artifactIdentity as Record<string, string>).binary);
+  writeFileSync(globalBinary, `a distinct later L3 binary for ${runId}\n`);
+  const identityPath = join(root, '.artifacts/test-harness/identity.json');
+  const identity = {
+    ...JSON.parse(readFileSync(identityPath, 'utf8')),
+    binarySha256: sha256File(globalBinary),
+  };
+  writeFileSync(identityPath, `${JSON.stringify(identity, null, 2)}\n`);
+  const runLocalHarnessAttestation = captureFe01RunLocalHarnessAttestation({
+    repoRoot: root,
+    evidenceRoot,
+    artifact: ticketConfig('FE-01').artifact,
+  });
+  return {
+    ...manifest,
+    runId,
+    startAt: new Date(Date.parse(completedAt) - 60_000).toISOString(),
+    endAt: completedAt,
+    completedAt,
+    artifactIdentity: {
+      kind: 'test-harness',
+      ...identity,
+      production: 'N/A（FE-01 不产出生产 artifact）',
+    },
+    runLocalHarnessAttestation,
+  };
+}
+
+function withRunLocalHarnessAttestation<T extends Record<string, unknown>>(
+  root: string,
+  evidenceRoot: string,
+  manifest: T,
+): T {
+  return {
+    ...manifest,
+    runLocalHarnessAttestation: captureFe01RunLocalHarnessAttestation({
+      repoRoot: root,
+      evidenceRoot,
+      artifact: ticketConfig('FE-01').artifact,
+    }),
+  } as T;
+}
+
+function wait(milliseconds: number) {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+async function releaseIndexLockAfterPreflight(
+  root: string,
+  action: () => void,
+  input: Record<string, unknown>,
+) {
+  const indexPath = join(
+    root,
+    '.artifacts/verification/FE-01/latest-clean-subject-accepted-with-waiver.json',
+  );
+  const lockPath = `${indexPath}.lock`;
+  writeFileSync(lockPath, 'test lock\n');
+  const pending = maybeWriteLatestCleanSubjectAcceptedWithWaiver({
+    ...input,
+    lockOptions: { attempts: 1_000, delayMs: 10 },
+  });
+  await wait(1_000);
+  action();
+  rmSync(lockPath);
+  return pending;
+}
+
+describe('FE-01 run-local harness attestation', () => {
+  it('把 capture 时的 identity 与 binary 固化在本次 evidence root，之后不读取可变的全局 binary', () => {
+    const { root, evidenceRoot, manifest } = setup();
+    const attestation = captureFe01RunLocalHarnessAttestation({
+      repoRoot: root,
+      evidenceRoot,
+      artifact: ticketConfig('FE-01').artifact,
+    });
+
+    expect(
+      validateFe01RunLocalHarnessAttestation({
+        root,
+        evidenceRoot,
+        artifactIdentity: manifest.artifactIdentity,
+        attestation,
+      }),
+    ).toMatchObject({ valid: true });
+
+    const globalBinary = join(root, (manifest.artifactIdentity as Record<string, string>).binary);
+    writeFileSync(globalBinary, 'a later L3 binary must not invalidate the prior run\n');
+    const globalIdentity = join(root, '.artifacts/test-harness/identity.json');
+    const nextIdentity = {
+      ...JSON.parse(readFileSync(globalIdentity, 'utf8')),
+      binarySha256: sha256File(globalBinary),
+    };
+    writeFileSync(globalIdentity, `${JSON.stringify(nextIdentity, null, 2)}\n`);
+
+    expect(
+      validateFe01RunLocalHarnessAttestation({
+        root,
+        evidenceRoot,
+        artifactIdentity: manifest.artifactIdentity,
+        attestation,
+      }),
+    ).toMatchObject({ valid: true });
+  });
+
+  it('连续三次自洽 binary SHA 只由各自 run-local attestation 验证，不回读全局 harness', async () => {
+    const { root, evidenceRoot, manifest } = setup();
+    writeCompleteManifest(evidenceRoot, manifest);
+    await expect(
+      maybeWriteLatestCleanSubjectAcceptedWithWaiver({
+        root,
+        evidenceRoot,
+        ticketId: 'FE-01',
+        manifest,
+      }),
+    ).resolves.toMatchObject({ eligible: true, validated: true, updated: true });
+
+    const secondEvidenceRoot = join(
+      root,
+      '.artifacts/verification/FE-01',
+      '20260812T123000000Z-p2-000',
+    );
+    const second = nextRunLocalCandidate(root, secondEvidenceRoot, manifest);
+    writeCompleteManifest(secondEvidenceRoot, second);
+    await expect(
+      maybeWriteLatestCleanSubjectAcceptedWithWaiver({
+        root,
+        evidenceRoot: secondEvidenceRoot,
+        ticketId: 'FE-01',
+        manifest: second,
+      }),
+    ).resolves.toMatchObject({ eligible: true, validated: true, updated: true });
+
+    const thirdEvidenceRoot = join(
+      root,
+      '.artifacts/verification/FE-01',
+      '20260812T133000000Z-p3-000',
+    );
+    const third = nextRunLocalCandidate(
+      root,
+      thirdEvidenceRoot,
+      second,
+      '20260812T133000000Z-p3-000',
+      '2026-08-12T13:30:00.000Z',
+    );
+    writeCompleteManifest(thirdEvidenceRoot, third);
+    await expect(
+      maybeWriteLatestCleanSubjectAcceptedWithWaiver({
+        root,
+        evidenceRoot: thirdEvidenceRoot,
+        ticketId: 'FE-01',
+        manifest: third,
+      }),
+    ).resolves.toMatchObject({ eligible: true, validated: true, updated: true });
+
+    const shas = [manifest, second, third].map(
+      (candidate) => (candidate.artifactIdentity as Record<string, string>).binarySha256,
+    );
+    expect(new Set(shas).size).toBe(3);
+    expect(
+      [manifest, second, third].every(
+        (candidate) =>
+          (candidate.runLocalHarnessAttestation as Record<string, string>).binarySha256 ===
+          (candidate.artifactIdentity as Record<string, string>).binarySha256,
+      ),
+    ).toBe(true);
+
+    const latestIndexPath = join(
+      root,
+      '.artifacts/verification/FE-01/latest-clean-subject-accepted-with-waiver.json',
+    );
+    const latestIndex = readFileSync(latestIndexPath, 'utf8');
+    const globalBinary = join(root, (third.artifactIdentity as Record<string, string>).binary);
+    writeFileSync(globalBinary, 'a fourth mutable global binary must not affect v2 evidence\n');
+    const globalIdentityPath = join(root, '.artifacts/test-harness/identity.json');
+    writeFileSync(
+      globalIdentityPath,
+      `${JSON.stringify(
+        {
+          ...JSON.parse(readFileSync(globalIdentityPath, 'utf8')),
+          binarySha256: sha256File(globalBinary),
+        },
+        null,
+        2,
+      )}\n`,
+    );
+
+    await expect(
+      maybeWriteLatestCleanSubjectAcceptedWithWaiver({
+        root,
+        evidenceRoot: secondEvidenceRoot,
+        ticketId: 'FE-01',
+        manifest: second,
+      }),
+    ).resolves.toMatchObject({ eligible: true, validated: true, updated: false });
+    expect(readFileSync(latestIndexPath, 'utf8')).toBe(latestIndex);
+  }, 60_000);
+
+  it('仅以旧 schema 的唯一 global harness 漂移 supersede，写入下一次 run-local index', async () => {
+    const { root, evidenceRoot: _evidenceRoot, manifest } = setup();
+    const legacy = installAuthorizedLegacyBacking(root);
+
+    const candidateEvidenceRoot = join(
+      root,
+      '.artifacts/verification/FE-01',
+      '20260812T123000000Z-p2-000',
+    );
+    const candidate = nextRunLocalCandidate(root, candidateEvidenceRoot, manifest);
+    writeCompleteManifest(candidateEvidenceRoot, candidate);
+
+    await expect(
+      maybeWriteLatestCleanSubjectAcceptedWithWaiver({
+        root,
+        evidenceRoot: candidateEvidenceRoot,
+        ticketId: 'FE-01',
+        manifest: candidate,
+      }),
+    ).resolves.toMatchObject({ eligible: true, validated: true, updated: true });
+
+    const index = JSON.parse(
+      readFileSync(
+        join(root, '.artifacts/verification/FE-01/latest-clean-subject-accepted-with-waiver.json'),
+        'utf8',
+      ),
+    );
+    expect(index).toMatchObject({
+      schemaVersion: 2,
+      runId: candidate.runId,
+      runLocalHarnessAttestation: candidate.runLocalHarnessAttestation,
+      legacySupersede: {
+        mode: 'legacy-global-harness-identity-only',
+        reason: 'legacy-global-harness-identity-or-binary-invalid',
+        previousRunId: legacy.runId,
+      },
+    });
+
+    const globalBinary = join(root, (candidate.artifactIdentity as Record<string, string>).binary);
+    writeFileSync(globalBinary, 'a third binary must not reactivate legacy validation\n');
+    const globalIdentityPath = join(root, '.artifacts/test-harness/identity.json');
+    writeFileSync(
+      globalIdentityPath,
+      `${JSON.stringify(
+        {
+          ...JSON.parse(readFileSync(globalIdentityPath, 'utf8')),
+          binarySha256: sha256File(globalBinary),
+        },
+        null,
+        2,
+      )}\n`,
+    );
+    await expect(
+      maybeWriteLatestCleanSubjectAcceptedWithWaiver({
+        root,
+        evidenceRoot: candidateEvidenceRoot,
+        ticketId: 'FE-01',
+        manifest: candidate,
+      }),
+    ).resolves.toMatchObject({ eligible: true, validated: true, updated: false });
+  }, 60_000);
+
+  it('锁等待期间已有 index 前进为 v2 时，不携带锁外读取的 legacy supersede', async () => {
+    const { root, evidenceRoot, manifest } = setup();
+    writeCompleteManifest(evidenceRoot, manifest);
+    await maybeWriteLatestCleanSubjectAcceptedWithWaiver({
+      root,
+      evidenceRoot,
+      ticketId: 'FE-01',
+      manifest,
+    });
+    const competingEvidenceRoot = join(
+      root,
+      '.artifacts/verification/FE-01',
+      '20260812T123000000Z-p2-000',
+    );
+    const competing = nextRunLocalCandidate(root, competingEvidenceRoot, manifest);
+    writeCompleteManifest(competingEvidenceRoot, competing);
+    await maybeWriteLatestCleanSubjectAcceptedWithWaiver({
+      root,
+      evidenceRoot: competingEvidenceRoot,
+      ticketId: 'FE-01',
+      manifest: competing,
+    });
+    const indexPath = join(
+      root,
+      '.artifacts/verification/FE-01/latest-clean-subject-accepted-with-waiver.json',
+    );
+    const advancedV2Index = readFileSync(indexPath, 'utf8');
+    installAuthorizedLegacyBacking(root);
+
+    const candidateEvidenceRoot = join(
+      root,
+      '.artifacts/verification/FE-01',
+      '20260812T133000000Z-p3-000',
+    );
+    const candidate = nextRunLocalCandidate(
+      root,
+      candidateEvidenceRoot,
+      competing,
+      '20260812T133000000Z-p3-000',
+      '2026-08-12T13:30:00.000Z',
+    );
+    writeCompleteManifest(candidateEvidenceRoot, candidate);
+
+    await expect(
+      releaseIndexLockAfterPreflight(root, () => writeFileSync(indexPath, advancedV2Index), {
+        root,
+        evidenceRoot: candidateEvidenceRoot,
+        ticketId: 'FE-01',
+        manifest: candidate,
+      }),
+    ).resolves.toMatchObject({ eligible: true, validated: true, updated: true });
+    expect(JSON.parse(readFileSync(indexPath, 'utf8'))).toMatchObject({
+      schemaVersion: 2,
+      runId: candidate.runId,
+      legacySupersede: null,
+    });
+  }, 60_000);
+
+  it('锁等待期间 legacy backing 被篡改时 fail-closed，且不覆盖旧 index', async () => {
+    const { root, manifest } = setup();
+    installAuthorizedLegacyBacking(root);
+    const candidateEvidenceRoot = join(
+      root,
+      '.artifacts/verification/FE-01',
+      '20260812T123000000Z-p2-000',
+    );
+    const candidate = nextRunLocalCandidate(root, candidateEvidenceRoot, manifest);
+    writeCompleteManifest(candidateEvidenceRoot, candidate);
+    const indexPath = join(
+      root,
+      '.artifacts/verification/FE-01/latest-clean-subject-accepted-with-waiver.json',
+    );
+    const originalIndex = readFileSync(indexPath, 'utf8');
+    const legacyStdout = join(
+      root,
+      '.artifacts/verification/FE-01/20260812T115759948Z-p90022-000/steps/static/stdout.log',
+    );
+
+    await expect(
+      releaseIndexLockAfterPreflight(root, () => rmSync(legacyStdout), {
+        root,
+        evidenceRoot: candidateEvidenceRoot,
+        ticketId: 'FE-01',
+        manifest: candidate,
+      }),
+    ).resolves.toMatchObject({ eligible: false, validated: false, updated: false });
+    expect(readFileSync(indexPath, 'utf8')).toBe(originalIndex);
+  }, 60_000);
+
+  it.each([
+    [
+      'candidate manifest 原始 bytes',
+      (evidenceRoot: string, _candidate: Record<string, unknown>) =>
+        writeFileSync(join(evidenceRoot, 'manifest.json'), '{"tampered":true}\n'),
+    ],
+    [
+      'candidate manifest 缺失',
+      (evidenceRoot: string, _candidate: Record<string, unknown>) =>
+        rmSync(join(evidenceRoot, 'manifest.json')),
+    ],
+    [
+      'candidate manifest duplicate key',
+      (evidenceRoot: string, _candidate: Record<string, unknown>) => {
+        const manifestPath = join(evidenceRoot, 'manifest.json');
+        writeFileSync(manifestPath, rawWithDuplicateStatus(readFileSync(manifestPath, 'utf8')));
+      },
+    ],
+    [
+      'candidate manifest symlink',
+      (evidenceRoot: string, _candidate: Record<string, unknown>) => {
+        const manifestPath = join(evidenceRoot, 'manifest.json');
+        const source = join(evidenceRoot, 'candidate-manifest-source.json');
+        writeFileSync(source, readFileSync(manifestPath));
+        rmSync(manifestPath);
+        symlinkSync(source, manifestPath);
+      },
+    ],
+    [
+      'candidate step evidence',
+      (evidenceRoot: string, _candidate: Record<string, unknown>) =>
+        writeFileSync(
+          join(evidenceRoot, 'steps/static/stdout.log'),
+          'SYNTHETIC-SECRET-candidate-step-replaced-while-index-lock-is-held\n',
+        ),
+    ],
+    [
+      'candidate run-local binary',
+      (evidenceRoot: string, candidate: Record<string, unknown>) =>
+        writeFileSync(
+          join(
+            evidenceRoot,
+            (candidate.runLocalHarnessAttestation as Record<string, string>).binaryPath,
+          ),
+          'candidate run-local binary replaced while index lock is held\n',
+        ),
+    ],
+    [
+      'candidate run-local identity 缺失',
+      (evidenceRoot: string, candidate: Record<string, unknown>) =>
+        rmSync(
+          join(
+            evidenceRoot,
+            (candidate.runLocalHarnessAttestation as Record<string, string>).identityPath,
+          ),
+        ),
+    ],
+    [
+      'candidate run-local identity symlink',
+      (evidenceRoot: string, candidate: Record<string, unknown>) => {
+        const identityPath = join(
+          evidenceRoot,
+          (candidate.runLocalHarnessAttestation as Record<string, string>).identityPath,
+        );
+        const source = join(evidenceRoot, 'candidate-run-local-identity-source.json');
+        writeFileSync(source, readFileSync(identityPath));
+        rmSync(identityPath);
+        symlinkSync(source, identityPath);
+      },
+    ],
+    [
+      'candidate run-local identity hash 漂移',
+      (evidenceRoot: string, candidate: Record<string, unknown>) => {
+        const identityPath = join(
+          evidenceRoot,
+          (candidate.runLocalHarnessAttestation as Record<string, string>).identityPath,
+        );
+        writeFileSync(identityPath, `${readFileSync(identityPath, 'utf8')}\n`);
+      },
+    ],
+  ])(
+    '锁等待期间篡改 %s 时，锁内必须重验 candidate 且不得写入 index',
+    async (_name, mutate) => {
+      const { root, evidenceRoot, manifest } = setup();
+      writeCompleteManifest(evidenceRoot, manifest);
+      const indexPath = join(
+        root,
+        '.artifacts/verification/FE-01/latest-clean-subject-accepted-with-waiver.json',
+      );
+
+      await expect(
+        releaseIndexLockAfterPreflight(root, () => mutate(evidenceRoot, manifest), {
+          root,
+          evidenceRoot,
+          ticketId: 'FE-01',
+          manifest,
+        }),
+      ).resolves.toMatchObject({ eligible: false, validated: false, updated: false });
+      expect(existsSync(indexPath)).toBe(false);
+    },
+    60_000,
+  );
+
+  it.each([
+    [
+      'step meta 篡改',
+      (root: string) =>
+        writeFileSync(
+          join(
+            root,
+            '.artifacts/verification/FE-01/20260812T115759948Z-p90022-000/steps/static/meta.json',
+          ),
+          '{"tampered":true}\n',
+        ),
+    ],
+    [
+      'step stdout symlink',
+      (root: string) => {
+        const stdout = join(
+          root,
+          '.artifacts/verification/FE-01/20260812T115759948Z-p90022-000/steps/static/stdout.log',
+        );
+        const source = join(root, 'legacy-static-stdout-source.log');
+        writeFileSync(source, readFileSync(stdout));
+        rmSync(stdout);
+        symlinkSync(source, stdout);
+      },
+    ],
+    [
+      'step stdout raw 污染',
+      (root: string) =>
+        writeFileSync(
+          join(
+            root,
+            '.artifacts/verification/FE-01/20260812T115759948Z-p90022-000/steps/static/stdout.log',
+          ),
+          'SYNTHETIC-SECRET-lock-existing-backing\n',
+        ),
+    ],
+  ])(
+    '锁等待期间 legacy backing %s 时锁内重验并拒绝覆盖',
+    async (_name, mutate) => {
+      const { root, manifest } = setup();
+      installAuthorizedLegacyBacking(root);
+      const candidateEvidenceRoot = join(
+        root,
+        '.artifacts/verification/FE-01',
+        '20260812T123000000Z-p2-000',
+      );
+      const candidate = nextRunLocalCandidate(root, candidateEvidenceRoot, manifest);
+      writeCompleteManifest(candidateEvidenceRoot, candidate);
+      const indexPath = join(
+        root,
+        '.artifacts/verification/FE-01/latest-clean-subject-accepted-with-waiver.json',
+      );
+      const originalIndex = readFileSync(indexPath, 'utf8');
+
+      await expect(
+        releaseIndexLockAfterPreflight(root, () => mutate(root), {
+          root,
+          evidenceRoot: candidateEvidenceRoot,
+          ticketId: 'FE-01',
+          manifest: candidate,
+        }),
+      ).resolves.toMatchObject({ eligible: false, validated: false, updated: false });
+      expect(readFileSync(indexPath, 'utf8')).toBe(originalIndex);
+    },
+    60_000,
+  );
+
+  it('两个并发的 v2 candidates 在锁内按 completion/runId 排序，最终只保留较新且无 legacy supersede', async () => {
+    const { root, evidenceRoot, manifest } = setup();
+    writeCompleteManifest(evidenceRoot, manifest);
+    const secondEvidenceRoot = join(
+      root,
+      '.artifacts/verification/FE-01',
+      '20260812T123000000Z-p2-000',
+    );
+    const second = nextRunLocalCandidate(root, secondEvidenceRoot, manifest);
+    writeCompleteManifest(secondEvidenceRoot, second);
+    const thirdEvidenceRoot = join(
+      root,
+      '.artifacts/verification/FE-01',
+      '20260812T123000000Z-p3-000',
+    );
+    const third = nextRunLocalCandidate(
+      root,
+      thirdEvidenceRoot,
+      second,
+      '20260812T123000000Z-p3-000',
+      second.completedAt as string,
+    );
+    writeCompleteManifest(thirdEvidenceRoot, third);
+
+    const [secondResult, thirdResult] = await Promise.all([
+      maybeWriteLatestCleanSubjectAcceptedWithWaiver({
+        root,
+        evidenceRoot: secondEvidenceRoot,
+        ticketId: 'FE-01',
+        manifest: second,
+      }),
+      maybeWriteLatestCleanSubjectAcceptedWithWaiver({
+        root,
+        evidenceRoot: thirdEvidenceRoot,
+        ticketId: 'FE-01',
+        manifest: third,
+      }),
+    ]);
+    expect(secondResult).toMatchObject({ eligible: true, validated: true });
+    expect(thirdResult).toMatchObject({ eligible: true, validated: true, updated: true });
+    expect(
+      JSON.parse(
+        readFileSync(
+          join(
+            root,
+            '.artifacts/verification/FE-01/latest-clean-subject-accepted-with-waiver.json',
+          ),
+          'utf8',
+        ),
+      ),
+    ).toMatchObject({ schemaVersion: 2, runId: third.runId, legacySupersede: null });
+  }, 60_000);
+
+  const legacyGlobalRebuildInvalidCases: Array<
+    [string, (root: string, binaryPath: string) => void]
+  > = [
+    [
+      'missing global identity',
+      (root) => rmSync(join(root, '.artifacts/test-harness/identity.json')),
+    ],
+    ['missing global binary', (_root, binaryPath) => rmSync(binaryPath)],
+    [
+      'global identity symlink',
+      (root) => {
+        const identityPath = join(root, '.artifacts/test-harness/identity.json');
+        const source = join(root, 'global-identity-source.json');
+        writeFileSync(source, readFileSync(identityPath));
+        rmSync(identityPath);
+        symlinkSync(source, identityPath);
+      },
+    ],
+    [
+      'global binary symlink',
+      (root, binaryPath) => {
+        const source = join(root, 'global-binary-source');
+        writeFileSync(source, readFileSync(binaryPath));
+        rmSync(binaryPath);
+        symlinkSync(source, binaryPath);
+      },
+    ],
+    [
+      'global identity raw contamination',
+      (root) => {
+        const identityPath = join(root, '.artifacts/test-harness/identity.json');
+        writeFileSync(
+          identityPath,
+          readFileSync(identityPath, 'utf8').replace(
+            'L3 专用隔离测试构建；非生产签名/DMG，不取得 L4 credit',
+            'SYNTHETIC-SECRET-legacy-global-identity',
+          ),
+        );
+      },
+    ],
+    [
+      'global identity declares a mismatched binary hash',
+      (root) => {
+        const identityPath = join(root, '.artifacts/test-harness/identity.json');
+        const identity = JSON.parse(readFileSync(identityPath, 'utf8'));
+        identity.binarySha256 = '0'.repeat(64);
+        writeFileSync(identityPath, `${JSON.stringify(identity, null, 2)}\n`);
+      },
+    ],
+  ];
+  for (const [name, mutate] of legacyGlobalRebuildInvalidCases) {
+    it(`legacy supersede 不把失效的全局 identity 或 binary 误作正常后续构建覆盖：${name}`, async () => {
+      const { root, evidenceRoot: _evidenceRoot, manifest } = setup();
+      const legacy = installAuthorizedLegacyBacking(root);
+      const candidateEvidenceRoot = join(
+        root,
+        '.artifacts/verification/FE-01',
+        '20260812T123000000Z-p2-000',
+      );
+      const candidate = nextRunLocalCandidate(root, candidateEvidenceRoot, manifest);
+      writeCompleteManifest(candidateEvidenceRoot, candidate);
+      const indexPath = join(
+        root,
+        '.artifacts/verification/FE-01/latest-clean-subject-accepted-with-waiver.json',
+      );
+      const originalIndex = readFileSync(indexPath, 'utf8');
+      const globalBinary = join(
+        root,
+        (candidate.artifactIdentity as Record<string, string>).binary,
+      );
+      mutate(root, globalBinary);
+
+      await expect(
+        maybeWriteLatestCleanSubjectAcceptedWithWaiver({
+          root,
+          evidenceRoot: candidateEvidenceRoot,
+          ticketId: 'FE-01',
+          manifest: candidate,
+        }),
+      ).resolves.toMatchObject({ eligible: false, validated: false, updated: false });
+      expect(readFileSync(indexPath, 'utf8')).toBe(originalIndex);
+
+      const final = finalizeFe01SubjectWaiverPhysicalDisposition({
+        manifest: candidate,
+        eligibility: await maybeWriteLatestCleanSubjectAcceptedWithWaiver({
+          root,
+          evidenceRoot: candidateEvidenceRoot,
+          ticketId: 'FE-01',
+          manifest: candidate,
+        }),
+      });
+      expect(final.manifest.status).toBe('fail');
+      expect(
+        ticketManifestExitCode(final.manifest.status, {
+          ticketId: 'FE-01',
+          exactSubjectWaiver: final.exactSubjectWaiver,
+        }),
+      ).toBe(1);
+      expect(legacy.runId).toBe('20260812T115759948Z-p90022-000');
+    }, 60_000);
+  }
+
+  it('拒绝缺失、symlink、hash 漂移或污染的 run-local identity/binary', () => {
+    const cases: Array<
+      [string, (root: string, evidenceRoot: string, attestation: Record<string, unknown>) => void]
+    > = [
+      [
+        'missing binary',
+        (_root, evidenceRoot, attestation) =>
+          rmSync(join(evidenceRoot, attestation.binaryPath as string)),
+      ],
+      [
+        'binary symlink',
+        (_root, evidenceRoot, attestation) => {
+          const binaryPath = join(evidenceRoot, attestation.binaryPath as string);
+          const source = join(evidenceRoot, 'run-local-binary-source');
+          writeFileSync(source, 'not a physical attested binary\n');
+          rmSync(binaryPath);
+          symlinkSync(source, binaryPath);
+        },
+      ],
+      [
+        'binary hash drift',
+        (_root, evidenceRoot, attestation) =>
+          writeFileSync(join(evidenceRoot, attestation.binaryPath as string), 'tampered bytes\n'),
+      ],
+      [
+        'identity contamination',
+        (_root, evidenceRoot, attestation) => {
+          const raw = readFileSync(
+            join(evidenceRoot, attestation.identityPath as string),
+            'utf8',
+          ).replace(
+            'L3 专用隔离测试构建；非生产签名/DMG，不取得 L4 credit',
+            'SYNTHETIC-SECRET-run-local-identity',
+          );
+          const probe = join(evidenceRoot, 'identity-contamination-probe.json');
+          writeFileSync(probe, raw);
+          const identitySha256 = sha256File(probe);
+          attestation.identitySha256 = identitySha256;
+          attestation.identityPath = `attestations/test-harness/${identitySha256}.identity.json`;
+          writeFileSync(join(evidenceRoot, attestation.identityPath as string), raw);
+        },
+      ],
+    ];
+    for (const [_name, mutate] of cases) {
+      const { root, evidenceRoot, manifest } = setup();
+      const attestation = structuredClone(manifest.runLocalHarnessAttestation) as Record<
+        string,
+        unknown
+      >;
+      mutate(root, evidenceRoot, attestation);
+      expect(
+        validateFe01RunLocalHarnessAttestation({
+          root,
+          evidenceRoot,
+          artifactIdentity: manifest.artifactIdentity,
+          attestation,
+        }),
+      ).toMatchObject({ valid: false });
+    }
+  });
+
+  it('legacy supersede 不接受未前进或缺失 run-local evidence 的 candidate', async () => {
+    const { root, evidenceRoot, manifest } = setup();
+    installAuthorizedLegacyBacking(root);
+    writeCompleteManifest(evidenceRoot, manifest);
+    await expect(
+      maybeWriteLatestCleanSubjectAcceptedWithWaiver({
+        root,
+        evidenceRoot,
+        ticketId: 'FE-01',
+        manifest,
+      }),
+    ).resolves.toMatchObject({
+      eligible: false,
+      validated: false,
+      reason: 'existing-accepted-index-backing-final-harness-identity-or-binary-invalid',
+      updated: false,
+    });
+
+    const newerEvidenceRoot = join(
+      root,
+      '.artifacts/verification/FE-01',
+      '20260812T070000000Z-p10-000',
+    );
+    const newer = nextRunLocalCandidate(
+      root,
+      newerEvidenceRoot,
+      manifest,
+      '20260812T070000000Z-p10-000',
+    );
+    rmSync(join(newerEvidenceRoot, newer.runLocalHarnessAttestation.binaryPath));
+    writeCompleteManifest(newerEvidenceRoot, newer);
+    await expect(
+      maybeWriteLatestCleanSubjectAcceptedWithWaiver({
+        root,
+        evidenceRoot: newerEvidenceRoot,
+        ticketId: 'FE-01',
+        manifest: newer,
+      }),
+    ).resolves.toMatchObject({
+      eligible: false,
+      validated: false,
+      reason: 'run-local-harness-attestation-file-missing-or-symlink',
+      updated: false,
+    });
+  });
+});
 
 function rawWithDuplicateStatus(raw: string) {
   return raw.replace('{\n', '{\n  "status": "accepted-with-waiver",\n');
@@ -335,7 +1152,10 @@ describe('latest clean subject accepted-with-waiver index', () => {
         symlinkSync(source, stdout);
       },
       () => {
-        const identity = join(root, '.artifacts/test-harness/identity.json');
+        const identity = join(
+          evidenceRoot,
+          (candidateManifest.runLocalHarnessAttestation as Record<string, string>).identityPath,
+        );
         const value = JSON.parse(readFileSync(identity, 'utf8'));
         value.binarySha256 = '0'.repeat(64);
         writeFileSync(identity, `${JSON.stringify(value)}\n`);
@@ -343,7 +1163,10 @@ describe('latest clean subject accepted-with-waiver index', () => {
     ];
     for (const mutate of invalidEvidence) {
       writeCompleteManifest(evidenceRoot, candidateManifest);
-      const identity = join(root, '.artifacts/test-harness/identity.json');
+      const identity = join(
+        evidenceRoot,
+        (candidateManifest.runLocalHarnessAttestation as Record<string, string>).identityPath,
+      );
       const originalIdentity = readFileSync(identity, 'utf8');
       mutate();
       const rejected = finalizeFe01SubjectWaiverPhysicalDisposition({
@@ -475,7 +1298,7 @@ describe('latest clean subject accepted-with-waiver index', () => {
       });
       expect(readFileSync(indexPath, 'utf8')).toBe(written);
     }
-  });
+  }, 60_000);
 
   it('candidate manifest 原始 bytes 含 duplicate key、synthetic secret 或个人路径时拒绝且 root 非零', async () => {
     const { root, evidenceRoot, manifest } = setup();
@@ -527,7 +1350,7 @@ describe('latest clean subject accepted-with-waiver index', () => {
 
   it('existing index 与 backing manifest 的原始 bytes 含 duplicate key 或污染时拒绝且不覆盖', async () => {
     const { root, evidenceRoot, manifest } = setup();
-    const olderManifest = {
+    let olderManifest = {
       ...manifest,
       runId: '20260812T055900000Z-p0-000',
       startAt: '2026-08-12T05:58:00.000Z',
@@ -535,6 +1358,7 @@ describe('latest clean subject accepted-with-waiver index', () => {
       completedAt: '2026-08-12T05:59:00.000Z',
     };
     const olderEvidenceRoot = join(root, '.artifacts/verification/FE-01', olderManifest.runId);
+    olderManifest = withRunLocalHarnessAttestation(root, olderEvidenceRoot, olderManifest);
     writeCompleteManifest(evidenceRoot, manifest);
     writeCompleteManifest(olderEvidenceRoot, olderManifest);
     await expect(
@@ -620,11 +1444,11 @@ describe('latest clean subject accepted-with-waiver index', () => {
       expect(readFileSync(indexPath, 'utf8')).toBe(originalIndex);
       writeFileSync(manifestPath, originalManifest);
     }
-  });
+  }, 60_000);
 
   it('嵌套 raw JSON、harness identity 与 physical containment 皆不能覆盖 existing index', async () => {
     const { root, evidenceRoot, manifest } = setup();
-    const olderManifest = {
+    let olderManifest = {
       ...manifest,
       runId: '20260812T055900000Z-p0-000',
       startAt: '2026-08-12T05:58:00.000Z',
@@ -632,6 +1456,7 @@ describe('latest clean subject accepted-with-waiver index', () => {
       completedAt: '2026-08-12T05:59:00.000Z',
     };
     const olderEvidenceRoot = join(root, '.artifacts/verification/FE-01', olderManifest.runId);
+    olderManifest = withRunLocalHarnessAttestation(root, olderEvidenceRoot, olderManifest);
     writeCompleteManifest(evidenceRoot, manifest);
     writeCompleteManifest(olderEvidenceRoot, olderManifest);
     await expect(
@@ -662,7 +1487,10 @@ describe('latest clean subject accepted-with-waiver index', () => {
     );
     const currentManifestPath = join(evidenceRoot, 'manifest.json');
     const olderManifestPath = join(olderEvidenceRoot, 'manifest.json');
-    const identityPath = join(root, '.artifacts/test-harness/identity.json');
+    const identityPath = join(
+      olderEvidenceRoot,
+      (olderManifest.runLocalHarnessAttestation as Record<string, string>).identityPath,
+    );
     const originalIndex = readFileSync(indexPath, 'utf8');
     const originalCurrentManifest = readFileSync(currentManifestPath, 'utf8');
     const originalOlderManifest = readFileSync(olderManifestPath, 'utf8');
@@ -715,7 +1543,7 @@ describe('latest clean subject accepted-with-waiver index', () => {
       writeFileSync(identityPath, originalIdentity);
     }
 
-    const identitySource = join(root, 'identity-source.json');
+    const identitySource = join(olderEvidenceRoot, 'identity-source.json');
     writeFileSync(identitySource, originalIdentity);
     rmSync(identityPath);
     symlinkSync(identitySource, identityPath);
@@ -752,7 +1580,7 @@ describe('latest clean subject accepted-with-waiver index', () => {
 
   it('existing latest 的 backing physical evidence 漂移时，拒绝较旧但自身完整的 candidate 且不覆盖', async () => {
     const { root, evidenceRoot, manifest } = setup();
-    const olderManifest = {
+    let olderManifest = {
       ...manifest,
       runId: '20260812T055900000Z-p0-000',
       startAt: '2026-08-12T05:58:00.000Z',
@@ -760,6 +1588,7 @@ describe('latest clean subject accepted-with-waiver index', () => {
       completedAt: '2026-08-12T05:59:00.000Z',
     };
     const olderEvidenceRoot = join(root, '.artifacts/verification/FE-01', olderManifest.runId);
+    olderManifest = withRunLocalHarnessAttestation(root, olderEvidenceRoot, olderManifest);
     writeCompleteManifest(evidenceRoot, manifest);
     writeCompleteManifest(olderEvidenceRoot, olderManifest);
     await expect(
@@ -825,7 +1654,7 @@ describe('latest clean subject accepted-with-waiver index', () => {
       expect(readFileSync(indexPath, 'utf8')).toBe(originalIndex);
       writeCompleteManifest(evidenceRoot, manifest);
     }
-  });
+  }, 60_000);
 
   it('拒绝篡改、污染、symlink 或 final fixture/harness identity 漂移的 physical evidence，且不覆盖既有 index', async () => {
     const { root, evidenceRoot, manifest } = setup();
@@ -966,7 +1795,10 @@ describe('latest clean subject accepted-with-waiver index', () => {
     await assertNotUpdated();
     writeFileSync(fixture, fixtureOriginal);
 
-    const identity = join(root, '.artifacts/test-harness/identity.json');
+    const identity = join(
+      evidenceRoot,
+      (manifest.runLocalHarnessAttestation as Record<string, string>).identityPath,
+    );
     const identityOriginal = readFileSync(identity, 'utf8');
     const forgedIdentity = JSON.parse(identityOriginal);
     forgedIdentity.binarySha256 = '0'.repeat(64);
@@ -974,7 +1806,10 @@ describe('latest clean subject accepted-with-waiver index', () => {
     await assertNotUpdated();
     writeFileSync(identity, identityOriginal);
 
-    const binary = join(root, manifest.artifactIdentity.binary);
+    const binary = join(
+      evidenceRoot,
+      (manifest.runLocalHarnessAttestation as Record<string, string>).binaryPath,
+    );
     const binaryOriginal = readFileSync(binary);
     writeFileSync(binary, 'tampered test-harness binary\n');
     await assertNotUpdated();
