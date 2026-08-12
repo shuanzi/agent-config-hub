@@ -84,6 +84,8 @@ export const TICKET_REGISTRY = Object.freeze({
       // 仅供历史审计；verify:ticket 不读取它，也绝不因此跳过新的 PF 采样或产生 waiver closure。
       historicalWaiverPath: 'performance/waivers/fe-01-pf-01-l3-cold-start.json',
       historicalActiveWaiverPath: 'performance/waivers/fe-01-pf-01-search-results-active.json',
+      // 仅本次 FE-01 subject 的 exact manual disposition 可启动 historical validation；旧 waiver 仍只读历史审计。
+      subjectWaiverPath: 'performance/waivers/fe-01-pf-01-subject-startup-p50.json',
       // 只有未来 immutable automatic-pass record 可免于重复 sampling；旧 waiver 绝不进入 closure。
       automaticPassPath: 'performance/automatic-passes/fe-01-pf-01.json',
       profile: 'representative',
@@ -95,6 +97,11 @@ export const TICKET_REGISTRY = Object.freeze({
       fallback: { kind: 'test-harness', identifier: 'unknown', profile: 'unknown' },
       production: 'N/A（FE-01 不产出生产 artifact）',
     },
+    uncoveredBoundaries: [
+      'PF-01 仅为 L2 Vite dev/mock 与 L3 debug test-harness 的 development acceptance profile',
+      '不证明 reference-Mac、release-like 或 production artifact',
+      '不更新 automatic-pass index，不能解除 RELEASE-GATE；仍需独立 release/reference evidence',
+    ],
     manifestAssertions: { runIdMatchesEvidenceDirectory: true },
   },
   'FE-07R': {

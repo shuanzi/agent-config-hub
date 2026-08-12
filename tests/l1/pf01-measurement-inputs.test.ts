@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest';
 
 // prettier-ignore
 // @ts-expect-error runtime provenance module is a plain Node ESM module.
-import { PF01_MEASUREMENT_INPUTS, PF01_MEASUREMENT_INPUT_PATHS, attestPf01L2ViteDevModuleGraph, expectedPf01L2ViteDevModuleGraph, assertPf01L2ViteModuleClosure, collectPf01MeasurementInputs, collectPf01MeasurementInputsFromGit, computePf01MeasurementInputsDigest, validatePf01MeasurementInputs } from '../../scripts/orchestrator/pf01-measurement-inputs.mjs';
+import { PF01_L2_VITE_MODULES, PF01_MEASUREMENT_INPUTS, PF01_MEASUREMENT_INPUT_PATHS, attestPf01L2ViteDevModuleGraph, expectedPf01L2ViteDevModuleGraph, assertPf01L2ViteModuleClosure, collectPf01MeasurementInputs, collectPf01MeasurementInputsFromGit, computePf01MeasurementInputsDigest, validatePf01MeasurementInputs } from '../../scripts/orchestrator/pf01-measurement-inputs.mjs';
 
 const REQUIRED_MEASUREMENT_METHOD_FILES = [
   'scripts/orchestrator/pf01-measurement-inputs.mjs',
@@ -43,7 +43,10 @@ function measurementInputs(kind: 'clean-tracked-checkout' | 'git-object-tree') {
 }
 
 function writeFixtureTree(root: string): void {
-  for (const pathname of PF01_MEASUREMENT_INPUT_PATHS as string[]) {
+  for (const pathname of new Set([
+    ...(PF01_MEASUREMENT_INPUT_PATHS as string[]),
+    ...(PF01_L2_VITE_MODULES as string[]),
+  ])) {
     const file = join(root, pathname);
     mkdirSync(dirname(file), { recursive: true });
     writeFileSync(file, pathname, 'utf8');
@@ -55,7 +58,29 @@ function writeFixtureTree(root: string): void {
   execFileSync('git', ['commit', '--quiet', '-m', 'fixture'], { cwd: root });
 }
 
-describe('PF-01 independent measurement-input provenance v4', () => {
+describe('PF-01 independent measurement-contract provenance', () => {
+  it('v5 contract 不将每次 L2 SUT graph 折入 measurement digest，但仍独立记录并校验 graph', () => {
+    const inputEntries = entries();
+    const withoutGraph = computePf01MeasurementInputsDigest({
+      schemaVersion: PF01_MEASUREMENT_INPUTS.schemaVersion,
+      algorithm: PF01_MEASUREMENT_INPUTS.algorithm,
+      entries: inputEntries,
+    });
+    const withGraph = computePf01MeasurementInputsDigest({
+      schemaVersion: PF01_MEASUREMENT_INPUTS.schemaVersion,
+      algorithm: PF01_MEASUREMENT_INPUTS.algorithm,
+      entries: inputEntries,
+      l2DevModuleGraph: expectedPf01L2ViteDevModuleGraph(),
+    });
+
+    expect(PF01_MEASUREMENT_INPUTS).toMatchObject({
+      schemaVersion: 5,
+      algorithm: 'pf01-measurement-contract-v5',
+    });
+    expect(PF01_MEASUREMENT_INPUT_PATHS).not.toContain('src/App.tsx');
+    expect(withGraph).toBe(withoutGraph);
+  });
+
   it('版本化 digest 精确绑定闭合的实际测量输入；missing、extra、drift 均 fail-closed', () => {
     const valid = measurementInputs('clean-tracked-checkout');
     expect(validatePf01MeasurementInputs(valid, 'clean-tracked-checkout')).toBe(true);

@@ -12,6 +12,9 @@ import { computePf01L3HarnessBuildInputsDigest, PF01_L3_BUILD_INPUTS } from '../
 // prettier-ignore
 // @ts-expect-error runtime provenance module is a plain Node ESM module.
 import { computePf01MeasurementInputsDigest, expectedPf01L2ViteDevModuleGraph, PF01_MEASUREMENT_INPUT_PATHS, PF01_MEASUREMENT_INPUTS } from '../../scripts/orchestrator/pf01-measurement-inputs.mjs';
+// prettier-ignore
+// @ts-expect-error runtime build environment is a plain Node ESM module.
+import { PF01_BUILD_ENVIRONMENT } from '../../scripts/orchestrator/pf01-build-inputs.mjs';
 
 const descriptor = JSON.parse(
   readFileSync(resolve('performance/descriptors/pf-01.catalog-browse.json'), 'utf8'),
@@ -135,6 +138,7 @@ function currentAttestation(budget = validBudget()): Record<string, unknown> {
     fixture: { ...provenance.fixture },
     runner: { ...provenance.runner },
     toolchain: { ...provenance.toolchain },
+    buildEnvironment: structuredClone(PF01_BUILD_ENVIRONMENT),
     measurementInputs: {
       ...JSON.parse(JSON.stringify(provenance.measurementInputs)),
       source: {
@@ -165,7 +169,7 @@ describe('PF-01 frozen budget validator', () => {
     });
   });
 
-  it('当前 binary/identity/fixture attestation 任一漂移时拒绝冻结或 clean evidence', () => {
+  it('当前 binary 的自证不一致、非法 harness shape 或 fixture 漂移时拒绝比较', () => {
     const declaredHashMismatch = validBudget();
     const declaredHashAttestation = currentAttestation(declaredHashMismatch);
     ((declaredHashAttestation.artifact as Record<string, unknown>).actualBinarySha256 as string) =
@@ -175,11 +179,6 @@ describe('PF-01 frozen budget validator', () => {
     const fixtureAttestation = currentAttestation(fixtureMismatch);
     ((fixtureAttestation.fixture as Record<string, unknown>).sha256 as string) = 'c'.repeat(64);
 
-    const identityMismatch = validBudget();
-    const identityAttestation = currentAttestation(identityMismatch);
-    ((identityAttestation.artifact as Record<string, unknown>).identifier as string) =
-      'io.github.shuanzi.other.test-harness';
-
     const malformedCurrentIdentity = validBudget();
     const malformedIdentityAttestation = currentAttestation(malformedCurrentIdentity);
     ((malformedIdentityAttestation.artifact as Record<string, unknown>).binary as string) =
@@ -188,7 +187,6 @@ describe('PF-01 frozen budget validator', () => {
     for (const [budget, attestation] of [
       [declaredHashMismatch, declaredHashAttestation],
       [fixtureMismatch, fixtureAttestation],
-      [identityMismatch, identityAttestation],
       [malformedCurrentIdentity, malformedIdentityAttestation],
     ]) {
       expect(
@@ -277,24 +275,30 @@ describe('PF-01 frozen budget validator', () => {
     }
   });
 
-  it('只允许每次各自声明/实际 binary 一致且 build-input/fixture 相同的跨构建比较', () => {
+  it('允许每次各自自证的不同 SUT binary/build identity 参与同一 measurement contract 数值比较', () => {
     const budget = validBudget();
     const comparable = currentAttestation(budget);
     const artifact = comparable.artifact as Record<string, unknown>;
     artifact.declaredBinarySha256 = 'd'.repeat(64);
     artifact.actualBinarySha256 = 'd'.repeat(64);
+    const inputs = comparable.buildInputs as Record<string, unknown>;
+    const entries = inputs.entries as Array<Record<string, unknown>>;
+    entries[0].sha256 = 'd'.repeat(64);
+    inputs.digest = computePf01L3HarnessBuildInputsDigest({
+      schemaVersion: inputs.schemaVersion as number,
+      algorithm: inputs.algorithm as string,
+      entries: entries as Array<{ path: string; sha256: string }>,
+    });
 
     expect(validateFrozenPf01Budget(budget, descriptor, 'representative', comparable)).toEqual({
       valid: true,
       violations: [],
     });
 
-    const inputMismatch = currentAttestation(budget);
-    ((inputMismatch.buildInputs as Record<string, unknown>).digest as string) = 'd'.repeat(64);
     const fixtureMismatch = currentAttestation(budget);
     ((fixtureMismatch.fixture as Record<string, unknown>).sha256 as string) = 'd'.repeat(64);
 
-    for (const invalid of [inputMismatch, fixtureMismatch]) {
+    for (const invalid of [fixtureMismatch]) {
       expect(validateFrozenPf01Budget(budget, descriptor, 'representative', invalid).valid).toBe(
         false,
       );
@@ -309,8 +313,10 @@ describe('PF-01 frozen budget validator', () => {
     (alienOs.runner as Record<string, unknown>).platform = 'linux';
     const bogusRust = currentAttestation(budget);
     (bogusRust.toolchain as Record<string, unknown>).rustc = 'rustc 99.0.0';
+    const buildEnvironmentDrift = currentAttestation(budget);
+    (buildEnvironmentDrift.buildEnvironment as Record<string, unknown>).overrides = ['VITE_X'];
 
-    for (const invalid of [bogusNode, alienOs, bogusRust]) {
+    for (const invalid of [bogusNode, alienOs, bogusRust, buildEnvironmentDrift]) {
       expect(validateFrozenPf01Budget(budget, descriptor, 'representative', invalid).valid).toBe(
         false,
       );
@@ -402,6 +408,7 @@ describe('PF-01 frozen budget validator', () => {
         fixture: (budget.baselineProvenance as Record<string, unknown>).fixture,
         runner: (budget.baselineProvenance as Record<string, unknown>).runner,
         toolchain: (budget.baselineProvenance as Record<string, unknown>).toolchain,
+        buildEnvironment: PF01_BUILD_ENVIRONMENT,
       },
       current: {
         artifact: current.artifact,
@@ -410,6 +417,7 @@ describe('PF-01 frozen budget validator', () => {
         fixture: current.fixture,
         runner: current.runner,
         toolchain: current.toolchain,
+        buildEnvironment: current.buildEnvironment,
       },
     });
     expect(pf01ComparisonProvenance(null, current).baseline).toBeNull();

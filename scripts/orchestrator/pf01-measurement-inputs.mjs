@@ -1,10 +1,11 @@
 /**
- * PF-01 measurement-method inputs v4.
+ * PF-01 measurement contract v5.
  *
  * This provenance is deliberately independent from L3 harness `buildInputs`: the latter
  * establishes the binary inputs, while this module pins the actual L2 Vite dev-server/browser
  * module graph, L2/L3 measurement protocol, samplers, statistics and comparison logic that
- * determine samples and verdicts.
+ * determine samples and verdicts. v5 keeps the per-run L2 SUT graph as a separately attested
+ * identity: a SUT change must fail comparison, but is not a measurement-method digest drift.
  */
 import { execFileSync } from 'node:child_process';
 import { Buffer } from 'node:buffer';
@@ -14,6 +15,12 @@ import path from 'node:path';
 import { assertNoGitAmbient, classifyPf01ViteModuleId, REPO_ROOT } from './lib.mjs';
 
 export const PF01_MEASUREMENT_INPUTS = Object.freeze({
+  schemaVersion: 5,
+  algorithm: 'pf01-measurement-contract-v5',
+  method: 'raw bytes SHA-256 / byte-sorted repo-relative paths',
+});
+
+const PF01_HISTORICAL_V4_MEASUREMENT_INPUTS = Object.freeze({
   schemaVersion: 4,
   algorithm: 'pf01-measurement-inputs-v4',
   method: 'raw bytes SHA-256 / byte-sorted repo-relative paths',
@@ -73,11 +80,14 @@ function sortPaths(paths) {
   return [...paths].sort((left, right) => Buffer.compare(Buffer.from(left), Buffer.from(right)));
 }
 
-export const PF01_MEASUREMENT_INPUT_PATHS = Object.freeze(
+/** v5 contract only: SUT graph is stored independently in each run attestation. */
+export const PF01_MEASUREMENT_INPUT_PATHS = Object.freeze(sortPaths([...new Set(METHOD_FILES)]));
+const PF01_HISTORICAL_V4_MEASUREMENT_INPUT_PATHS = Object.freeze(
   sortPaths([...new Set([...METHOD_FILES, ...PF01_L2_VITE_MODULES])]),
 );
 
 const INPUT_PATH_SET = new Set(PF01_MEASUREMENT_INPUT_PATHS);
+const HISTORICAL_V4_INPUT_PATH_SET = new Set(PF01_HISTORICAL_V4_MEASUREMENT_INPUT_PATHS);
 
 function sha256Bytes(bytes) {
   return createHash('sha256').update(bytes).digest('hex');
@@ -153,7 +163,6 @@ function formatResult(entries, source, l2DevModuleGraph) {
       schemaVersion: PF01_MEASUREMENT_INPUTS.schemaVersion,
       algorithm: PF01_MEASUREMENT_INPUTS.algorithm,
       entries,
-      l2DevModuleGraph,
     }),
     entries,
     l2DevModuleGraph,
@@ -166,18 +175,33 @@ export function computePf01MeasurementInputsDigest({
   schemaVersion,
   algorithm,
   entries,
-  l2DevModuleGraph,
 }) {
   if (
     schemaVersion !== PF01_MEASUREMENT_INPUTS.schemaVersion ||
     algorithm !== PF01_MEASUREMENT_INPUTS.algorithm ||
-    !Array.isArray(entries) ||
-    !validatePf01L2ViteDevModuleGraph(l2DevModuleGraph)
+    !Array.isArray(entries)
   ) {
     throw new Error('PF-01 measurement-input canonical payload schema invalid');
   }
   return sha256Bytes(
-    Buffer.from(`${JSON.stringify({ schemaVersion, algorithm, entries, l2DevModuleGraph })}\n`, 'utf8'),
+    Buffer.from(`${JSON.stringify({ schemaVersion, algorithm, entries })}\n`, 'utf8'),
+  );
+}
+
+function computeHistoricalV4MeasurementInputsDigest({ entries, l2DevModuleGraph }) {
+  if (!Array.isArray(entries) || !validatePf01L2ViteDevModuleGraph(l2DevModuleGraph)) {
+    throw new Error('PF-01 historical v4 measurement-input canonical payload schema invalid');
+  }
+  return sha256Bytes(
+    Buffer.from(
+      `${JSON.stringify({
+        schemaVersion: PF01_HISTORICAL_V4_MEASUREMENT_INPUTS.schemaVersion,
+        algorithm: PF01_HISTORICAL_V4_MEASUREMENT_INPUTS.algorithm,
+        entries,
+        l2DevModuleGraph,
+      })}\n`,
+      'utf8',
+    ),
   );
 }
 
@@ -490,4 +514,66 @@ export function collectPf01MeasurementInputsFromGit({
     method: PF01_MEASUREMENT_INPUTS.method,
     commit: resolvedCommit,
   }, l2DevModuleGraph);
+}
+
+/**
+ * Immutable v4 compatibility reader for historical evidence only.
+ * New runs use v5 above; this preserves the original v4 digest which included the L2 graph.
+ */
+export function collectPf01MeasurementInputsFromGitV4({
+  repoRoot = REPO_ROOT,
+  commit,
+  l2DevModuleGraph,
+} = {}) {
+  if (!/^[a-f0-9]{40}$/i.test(commit ?? '') && commit !== 'HEAD') {
+    throw new Error('PF-01 historical v4 measurement-input baseline commit invalid');
+  }
+  if (!validatePf01L2ViteDevModuleGraph(l2DevModuleGraph)) {
+    throw new Error('PF-01 historical v4 measurement-input L2 Vite dev module graph invalid');
+  }
+  const resolvedCommit = command(repoRoot, ['rev-parse', commit]).trim();
+  const raw = command(repoRoot, ['ls-tree', '-r', '-z', '--full-tree', resolvedCommit], 'buffer');
+  const selected = [];
+  for (const record of raw.toString('binary').split('\0').filter(Boolean)) {
+    const bytes = Buffer.from(record, 'binary');
+    const tab = bytes.indexOf(0x09);
+    if (tab <= 0) throw new Error('PF-01 historical v4 measurement-input Git tree record malformed');
+    const header = bytes.subarray(0, tab).toString('ascii').split(' ');
+    const pathname = decodeGitPath(bytes.subarray(tab + 1));
+    if (!HISTORICAL_V4_INPUT_PATH_SET.has(pathname)) continue;
+    selected.push({ mode: header[0], type: header[1], object: header[2], path: canonicalPath(pathname) });
+  }
+  const paths = sortPaths(selected.map((entry) => entry.path));
+  assertNoPathCollisions(paths);
+  if (!samePathList(paths, PF01_HISTORICAL_V4_MEASUREMENT_INPUT_PATHS)) {
+    throw new Error('PF-01 historical v4 measurement-input set missing, extra, or out of order');
+  }
+  const byPath = new Map(selected.map((entry) => [entry.path, entry]));
+  const entries = paths.map((pathname) => {
+    const entry = byPath.get(pathname);
+    if (
+      entry === undefined ||
+      !/^100[0-7]{3}$/.test(entry.mode) ||
+      entry.type !== 'blob' ||
+      !/^[a-f0-9]{40}$/i.test(entry.object)
+    ) {
+      throw new Error(`PF-01 historical v4 measurement-input Git object invalid: ${pathname}`);
+    }
+    return {
+      path: pathname,
+      sha256: sha256Bytes(command(repoRoot, ['cat-file', 'blob', entry.object], 'buffer')),
+    };
+  });
+  return {
+    schemaVersion: PF01_HISTORICAL_V4_MEASUREMENT_INPUTS.schemaVersion,
+    algorithm: PF01_HISTORICAL_V4_MEASUREMENT_INPUTS.algorithm,
+    digest: computeHistoricalV4MeasurementInputsDigest({ entries, l2DevModuleGraph }),
+    entries,
+    l2DevModuleGraph,
+    source: {
+      kind: 'git-object-tree',
+      method: PF01_HISTORICAL_V4_MEASUREMENT_INPUTS.method,
+      commit: resolvedCommit,
+    },
+  };
 }

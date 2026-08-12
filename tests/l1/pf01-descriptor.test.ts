@@ -46,10 +46,10 @@ describe('PF-01 descriptor', () => {
       measurementInputs?: { schemaVersion: number; algorithm: string; responsibility: string };
     };
     expect(descriptor.measurementInputs).toEqual({
-      schemaVersion: 4,
-      algorithm: 'pf01-measurement-inputs-v4',
+      schemaVersion: 5,
+      algorithm: 'pf01-measurement-contract-v5',
       responsibility:
-        '独立固定 performance/wdio.conf.ts 实际 createServer+browser ModuleGraph closure、PF/L3 WDIO、cold-start/RSS、统计与预算比较、collector 与显式 freeze 输入；不替代 L3 harness buildInputs 或 binary SHA。',
+        '独立固定 PF/L3 WDIO、cold-start/RSS、统计与预算比较、collector 与显式 freeze 输入；L2 actual Vite dev ModuleGraph 为每 run SUT identity，不能折入 measurement contract digest；不替代 L3 harness buildInputs 或 binary SHA。',
     });
   });
 
@@ -69,6 +69,19 @@ describe('PF-01 descriptor', () => {
     });
     expect(descriptorDigest(readFileSync(descriptorPath, 'utf8'), descriptor.digest.value)).toBe(
       descriptor.digest.value,
+    );
+  });
+
+  it('将 L3 cold-start 作为 development acceptance 的独立受控指标', () => {
+    const descriptor = JSON.parse(readFileSync(descriptorPath, 'utf8'));
+
+    expect(descriptor.metrics).toContainEqual(
+      expect.objectContaining({
+        id: 'pf01.l3.cold_start.first_snapshot',
+        surface: 'L3 冷启动与首个可信 snapshot',
+        layer: 'L3 test-harness debug（隔离临时 fixture 根；非 release-like artifact）',
+        minSamples: 3,
+      }),
     );
   });
 });

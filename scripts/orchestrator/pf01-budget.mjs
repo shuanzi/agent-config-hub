@@ -14,7 +14,11 @@ import {
   sha256Text,
 } from './lib.mjs';
 import { HARNESS_BINARY } from './build-harness.mjs';
-import { computePf01L3HarnessBuildInputsDigest, PF01_L3_BUILD_INPUTS } from './pf01-build-inputs.mjs';
+import {
+  computePf01L3HarnessBuildInputsDigest,
+  PF01_BUILD_ENVIRONMENT,
+  PF01_L3_BUILD_INPUTS,
+} from './pf01-build-inputs.mjs';
 import { validatePf01MeasurementInputs } from './pf01-measurement-inputs.mjs';
 
 export const PF01_TIMING_METRICS = [
@@ -92,17 +96,6 @@ function artifactHashesMatch(artifact) {
   return artifact?.declaredBinarySha256 === artifact?.actualBinarySha256;
 }
 
-function sameArtifactIdentity(baseline, current) {
-  return [
-    'identityPath',
-    'kind',
-    'identifier',
-    'profile',
-    'binary',
-    'provenance',
-  ].every((field) => baseline?.[field] === current?.[field]);
-}
-
 const RUNNER_FIELDS = ['node', 'npm', 'platform', 'release', 'macosProductVersion', 'arch'];
 const TOOLCHAIN_FIELDS = ['cargo', 'rustc'];
 
@@ -176,22 +169,17 @@ function matchesBuildInputsSchema(buildInputs, sourceKind) {
   );
 }
 
-function sameBuildInputs(baseline, current) {
-  return (
-    baseline?.schemaVersion === current?.schemaVersion &&
-    baseline?.algorithm === current?.algorithm &&
-    baseline?.digest === current?.digest
-  );
-}
-
 function sameMeasurementInputs(baseline, current) {
   return (
     baseline?.schemaVersion === current?.schemaVersion &&
     baseline?.algorithm === current?.algorithm &&
     baseline?.digest === current?.digest &&
-    JSON.stringify(baseline?.entries) === JSON.stringify(current?.entries) &&
-    JSON.stringify(baseline?.l2DevModuleGraph) === JSON.stringify(current?.l2DevModuleGraph)
+    JSON.stringify(baseline?.entries) === JSON.stringify(current?.entries)
   );
+}
+
+function matchesBuildEnvironment(value) {
+  return JSON.stringify(value) === JSON.stringify(PF01_BUILD_ENVIRONMENT);
 }
 
 /** Sampling, freezing and verification use the same runtime reference shape. */
@@ -260,6 +248,7 @@ export function collectCurrentPf01Attestation({
     ...(buildInputs === undefined ? {} : { buildInputs }),
     ...(measurementInputs === undefined ? {} : { measurementInputs }),
     ...(runtimeProvenance === undefined ? {} : runtimeProvenance),
+    buildEnvironment: { ...PF01_BUILD_ENVIRONMENT, overrides: [...PF01_BUILD_ENVIRONMENT.overrides] },
   };
 }
 
@@ -286,6 +275,9 @@ export function validateCurrentPf01Attestation(attestation) {
   }
   if (!matchesRuntimeProvenance(attestation)) {
     violations.push('current runner/toolchain provenance 不完整');
+  }
+  if (!matchesBuildEnvironment(attestation?.buildEnvironment)) {
+    violations.push('current buildEnvironment attestation 不完整或发生漂移');
   }
   return { valid: violations.length === 0, violations };
 }
@@ -373,17 +365,14 @@ export function validateFrozenPf01Budget(budget, descriptor, expectedProfile, cu
   if (!attestation.valid) {
     violations.push(...attestation.violations);
   } else {
-    if (!sameArtifactIdentity(provenance?.artifact, currentAttestation.artifact)) {
-      violations.push('baselineProvenance.artifact 与当前 harness identity 不匹配');
-    }
-    if (!sameBuildInputs(provenance?.buildInputs, currentAttestation.buildInputs)) {
-      violations.push('baselineProvenance.buildInputs 与当前 L3 harness build-input 不匹配');
-    }
     if (!sameMeasurementInputs(provenance?.measurementInputs, currentAttestation.measurementInputs)) {
       violations.push('baselineProvenance.measurementInputs 与当前测量方法不匹配');
     }
     if (!sameRuntimeProvenance(provenance, currentAttestation)) {
       violations.push('baselineProvenance runner/toolchain 与当前执行环境不匹配');
+    }
+    if (!matchesBuildEnvironment(currentAttestation.buildEnvironment)) {
+      violations.push('当前 buildEnvironment 与 PF-01 measurement contract 不匹配');
     }
     if (
       provenance?.fixture?.path !== currentAttestation.fixture.path ||
@@ -443,6 +432,7 @@ export function pf01ComparisonProvenance(budget, currentAttestation) {
             measurementInputs: baseline.measurementInputs,
             runner: baseline.runner,
             toolchain: baseline.toolchain,
+            buildEnvironment: PF01_BUILD_ENVIRONMENT,
           },
     current: {
       artifact: currentAttestation?.artifact,
@@ -451,6 +441,7 @@ export function pf01ComparisonProvenance(budget, currentAttestation) {
       measurementInputs: currentAttestation?.measurementInputs,
       runner: currentAttestation?.runner,
       toolchain: currentAttestation?.toolchain,
+      buildEnvironment: currentAttestation?.buildEnvironment,
     },
   };
 }

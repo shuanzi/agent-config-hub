@@ -1281,7 +1281,7 @@ macOS 的 L3 使用 WebdriverIO Tauri service 的 embedded provider，但测试�
 
 首个 tracer 按以下顺序执行：
 
-1. 在固定 Apple Silicon reference Mac、固定 macOS 15+ exact version/toolchain、外接电源、隔离临时数据根和 release-like profile 上运行；
+1. 开发票据在冻结的 development profile 上运行；其中 FE-01 `PF-01` 明确为 L2 Vite dev/mock 与 L3 debug test-harness（隔离临时 fixture 根），不是 reference-Mac 或 release-like artifact。固定 Apple Silicon reference Mac、release-like/production artifact 的独立复测只属于 `RELEASE-GATE`；
 2. 记录 commit、artifact identity、runner、OS、toolchain、fixture digest、profile、样本数和原始测量；
 3. 分别给出 p50、p95、资源峰值及失败/不确定样本，不只保留汇总 PASS；
 4. 基于真实分布同时确定 absolute experience ceiling 与相对 regression allowance；
@@ -1289,6 +1289,10 @@ macOS 的 L3 使用 WebdriverIO Tauri service 的 embedded provider，但测试�
 6. 对该 surface 有直接依赖的后续票据开始前，预算必须已存在且其验证命令实际可运行。
 
 FE-01 负责 `PF-01` 与启动/read 的第一条 baseline；其他 PF 由首次引入相应 surface 的票据在完成前校准。`RELEASE-GATE` 在固定 reference environment 对所有已冻结预算复测，并另记生产 artifact 数据。
+
+`PF-01` 的 measurement contract（descriptor、L2/L3 测量方法、fixture、runtime/toolchain、buildEnvironment、统计和预算）必须与每次 run 的 SUT/build identity 分开：SUT/binary 变化由该 run 的 Git build inputs、binary digest 与 provenance 自证，不自动改写为 measurement drift；方法变化才要求新的 contract digest。补全后的当前 descriptor 仅向前适用，历史 run 必须按其 subject Git object 中的 descriptor digest 验证，不能伪称使用了新 descriptor。
+
+若唯一 numeric latency violation 被显式人工 disposition 接受，manifest 仍必须保留 automatic `fail`/exit `1`、exact run/commit/metric/预算与 deferred performance debt；hard gate、污染、dirty、额外 violation 或 final lineage 漂移一律不可 waive。它仅是 development acceptance，绝不更新 clean automatic-pass index，也不解除 `RELEASE-GATE` 对独立 reference/release evidence 的阻塞。
 
 预算失败时先定位实际瓶颈，不自动引入 virtualization、worker、sidecar、cache 或新索引。安全校验、revision 重读、敏感保护、事务和回滚不能为达标而跳过。
 
@@ -1331,7 +1335,7 @@ FE-01 负责 `PF-01` 与启动/read 的第一条 baseline；其他 PF 由首次�
 | `npm run verify:ticket -- <FE-ID>` | 按固定 registry 编排一张票据的最小 L0–L3/PF 集合 | 票据关闭入口 |
 | `npm run verify:release` | 全回归、生产 artifact、发布与负向范围验收 | `RELEASE-GATE` 关闭入口 |
 
-根 scripts 只能是薄 wrapper。涉及多个进程的顺序、超时、信号转发和 evidence manifest 由小型 Node ESM orchestrator 使用参数数组与 `spawn` 实现，不使用拼接 shell command、动态 `eval` 或通用任务 DSL。未知 ticket/PF ID、缺少前置条件、子命令非零、超时或 evidence 写入失败都使根命令非零退出。
+根 scripts 只能是薄 wrapper。涉及多个进程的顺序、超时、信号转发和 evidence manifest 由小型 Node ESM orchestrator 使用参数数组与 `spawn` 实现，不使用拼接 shell command、动态 `eval` 或通用任务 DSL。未知 ticket/PF ID、缺少前置条件、子命令非零、超时或 evidence 写入失败都使根命令非零退出；唯一例外是本次 FE-01 exact subject waiver：PF step 保留 automatic `fail`/exit `1`，但仅在其余六项 hard gate、final physical evidence、clean final lineage、唯一 numeric latency violation 与 exact manual disposition 全部成立时，根 `verify:ticket` 以 `accepted-with-waiver` exit `0` 交付。任何 hard gate、污染、dirty、额外 violation 或 binding 漂移仍使根命令非零。
 
 #### 票据层级 registry
 
@@ -1365,7 +1369,7 @@ FE-01 负责 `PF-01` 与启动/read 的第一条 baseline；其他 PF 由首次�
   performance/
 ```
 
-`manifest.json` 至少记录 schema version、scope、status、commit、worktree dirty state、toolchain、fixture/PF digest、步骤与退出码、开始/结束时间、test harness 或 production artifact identity，以及每项 evidence 的 provenance。状态只允许 `pass`、`fail`、`inconclusive`；后两者都不能关闭票据或门禁。
+`manifest.json` 至少记录 schema version、scope、status、commit、worktree dirty state、toolchain、fixture/PF digest、步骤与退出码、开始/结束时间、test harness 或 production artifact identity，以及每项 evidence 的 provenance。状态通常只允许 `pass`、`fail`、`inconclusive`；本次 FE-01 exact subject waiver 是唯一封闭例外，可记录 `accepted-with-waiver`，且必须同时保留 PF automatic `fail`/exit `1`、exact manual disposition、deferred debt 与 final physical evidence/lineage binding。它不是 automatic clean-pass、不会更新 clean-pass index，不能关闭 `RELEASE-GATE`；其他 `fail` 或 `inconclusive` 一律不能取得 gate credit。
 
 - `.artifacts/` 不提交仓库，也不作为长期产品存储；
 - 证据不得包含真实路径、配置正文、diff、Token、敏感明文、签名凭证或可重放写入 payload；

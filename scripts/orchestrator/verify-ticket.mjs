@@ -9,8 +9,8 @@
  * 状态模型：step 退出码映射 0=pass / 2=inconclusive / 其余=fail；
  * 常规整体 status 有 fail→fail，否则有 inconclusive→inconclusive，否则 pass。
  * registry 默认执行新的 automatic sampling。仅未来 FE-01 registry 的精确 automatic-pass
- * record 经 immutable comparison 与 current-HEAD input validator 成功后，才将 perf 改为
- * 不采样的 historical validation；historical waiver 永不进入 ticket closure。
+ * record，或本次 subject-bound exact manual disposition，经 immutable validation 成功后，
+ * 才将 perf 改为不采样的 historical validation；旧 waiver 仍永不进入 ticket closure。
  *
  * evidence：.artifacts/verification/<scope>/<run-id>/
  *   manifest.json
@@ -38,17 +38,36 @@ import {
 import { TICKET_REGISTRY, ticketConfig } from './ticket-registry.mjs';
 import { maybeWriteLatestCleanPass } from './latest-clean-pass.mjs';
 import {
+  maybeWriteLatestCleanSubjectAcceptedWithWaiver,
+  validateFe01SubjectAcceptedWithWaiverCandidate,
+} from './latest-clean-subject-accepted-with-waiver.mjs';
+import {
+  FE01_SUBJECT_PHYSICAL_CANDIDATE,
+  finalizeFe01SubjectWaiverPhysicalDisposition,
+} from './fe01-subject-waiver-physical-disposition.mjs';
+import {
   FE01_PF01_AUTOMATIC_PASS_PATH,
   validateFe01Pf01AutomaticPass,
 } from './fe01-pf01-automatic-pass.mjs';
 import {
+  FE01_PF01_SUBJECT_WAIVER_PATH,
+  validateFe01Pf01SubjectWaiver,
+} from './fe01-pf01-subject-waiver.mjs';
+import {
   automaticPassPf01BudgetState,
   executeTicketStep,
   finalizeAutomaticPassValidation,
+  finalizeSubjectWaiverValidation,
   hasExactAutomaticPassConfiguration,
+  hasExactSubjectWaiverConfiguration,
   isAutomaticPassPerfStep,
+  isSubjectWaiverPerfStep,
   planTicketExecutionSteps,
+  subjectWaiverPf01BudgetState,
+  ticketManifestExitCode,
 } from './verify-ticket-execution.mjs';
+import { deriveFe01SubjectWaiverClosureStatus } from './fe01-subject-waiver-verdict.mjs';
+import { validateFe01SubjectClosureLineage } from './fe01-subject-lineage.mjs';
 import {
   assertPf01L3ViteModuleClosure,
   assertPf01L3BuildEnvironment,
@@ -177,6 +196,10 @@ async function main() {
 
   const startAt = new Date().toISOString();
   const startingGit = await gitInfo();
+  const subjectWaiverPathExact = hasExactSubjectWaiverConfiguration({ ticketId, ticket });
+  const initialSubjectWaiverValidation = subjectWaiverPathExact
+    ? validateFe01Pf01SubjectWaiver({ recordPath: FE01_PF01_SUBJECT_WAIVER_PATH })
+    : undefined;
   const automaticPassPathExact = hasExactAutomaticPassConfiguration({ ticketId, ticket });
   const initialAutomaticPassValidation = automaticPassPathExact
     ? await validateFe01Pf01AutomaticPass({
@@ -187,6 +210,7 @@ async function main() {
     ticketId,
     ticket,
     automaticPassValidation: initialAutomaticPassValidation,
+    subjectWaiverValidation: initialSubjectWaiverValidation,
   });
   const runId = makeRunId();
   const evidenceRoot = path.join(ARTIFACTS_ROOT, 'verification', ticketId, runId);
@@ -247,7 +271,12 @@ async function main() {
               mode: step.executionMode,
               samplingRun: step.samplingRun,
               historicalRunId: step.historicalRunId,
-              initialAutomaticPassValidation: step.initialAutomaticPassValidation,
+              ...(step.initialAutomaticPassValidation === undefined
+                ? {}
+                : { initialAutomaticPassValidation: step.initialAutomaticPassValidation }),
+              ...(step.initialWaiverValidation === undefined
+                ? {}
+                : { initialWaiverValidation: step.initialWaiverValidation }),
             },
           }),
     };
@@ -280,11 +309,19 @@ async function main() {
   }
 
   const historicalAutomaticPassValidation = executionSteps.some(isAutomaticPassPerfStep);
+  const historicalSubjectWaiverValidation = executionSteps.some(isSubjectWaiverPerfStep);
   const automaticPassCompletion = historicalAutomaticPassValidation
     ? await finalizeAutomaticPassValidation({
         initialAutomaticPassValidation,
         validateAutomaticPass: () =>
           validateFe01Pf01AutomaticPass({ recordPath: FE01_PF01_AUTOMATIC_PASS_PATH }),
+      })
+    : undefined;
+  const subjectWaiverCompletion = historicalSubjectWaiverValidation
+    ? await finalizeSubjectWaiverValidation({
+        initialSubjectWaiverValidation,
+        validateSubjectWaiver: () =>
+          validateFe01Pf01SubjectWaiver({ recordPath: FE01_PF01_SUBJECT_WAIVER_PATH }),
       })
     : undefined;
   const perfResult = stepResults.find((step) => step.id === 'perf');
@@ -295,14 +332,26 @@ async function main() {
     const { logs: _logs, ...perfMeta } = perfResult;
     writeJson(path.join(evidenceRoot, 'steps', 'perf', 'meta.json'), perfMeta);
   }
+  if (perfResult?.execution !== undefined && subjectWaiverCompletion !== undefined) {
+    perfResult.execution.finalWaiverValidation =
+      subjectWaiverCompletion.finalSubjectWaiverValidationStatus;
+    perfResult.execution.bindingStable = subjectWaiverCompletion.bindingStable;
+    const { logs: _logs, ...perfMeta } = perfResult;
+    writeJson(path.join(evidenceRoot, 'steps', 'perf', 'meta.json'), perfMeta);
+  }
   const budget =
     ticket.performance === undefined
       ? null
+      : historicalSubjectWaiverValidation
+        ? subjectWaiverPf01BudgetState({ subjectWaiverCompletion })
       : historicalAutomaticPassValidation
         ? automaticPassPf01BudgetState({ automaticPassCompletion })
         : await budgetState(ticket.performance, path.join(performanceDir, 'l2-dev-module-graph.json'));
   const git = await gitInfo();
   const gitIdentityConsistent = sameGitIdentity(startingGit, git);
+  const subjectLineage = historicalSubjectWaiverValidation
+    ? validateFe01SubjectClosureLineage({ finalCommit: git.commit })
+    : undefined;
   const computedOverallStatus =
     stepResults.some((step) => step.status === 'fail') || budget?.status === 'fail'
       ? 'fail'
@@ -311,7 +360,21 @@ async function main() {
           budget?.status === 'inconclusive'
         ? 'inconclusive'
         : 'pass';
-  const overallStatus = gitIdentityConsistent ? computedOverallStatus : 'inconclusive';
+  const subjectWaiverVerdict = historicalSubjectWaiverValidation
+    ? deriveFe01SubjectWaiverClosureStatus({
+        ticketId,
+        steps: stepResults,
+        budgetStatus: budget?.status,
+        evidenceContaminated,
+        worktreeDirty: git.worktreeDirty,
+        initialWaiverValidation: initialSubjectWaiverValidation,
+        finalWaiverValidation: subjectWaiverCompletion?.finalSubjectWaiverValidation,
+        subjectLineage,
+      })
+    : undefined;
+  const overallStatus = gitIdentityConsistent
+    ? subjectWaiverVerdict?.status ?? computedOverallStatus
+    : 'inconclusive';
 
   // harness artifact identity（test:tauri 写入；production 标 N/A）
   const identityPath = path.join(REPO_ROOT, ticket.artifact.identityPath);
@@ -322,7 +385,7 @@ async function main() {
       }
     : { ...ticket.artifact.fallback, production: ticket.artifact.production };
 
-  const manifest = {
+  let manifest = {
     schemaVersion: 1,
     runId,
     scope: ticket.scope,
@@ -373,6 +436,29 @@ async function main() {
         : { violations: automaticPassCompletion.finalAutomaticPassValidation.violations }),
     };
   }
+  if (historicalSubjectWaiverValidation && subjectWaiverCompletion !== undefined) {
+    manifest.subjectLineage = subjectLineage;
+    manifest.manualDisposition = {
+      status: 'accepted-with-waiver',
+      waiverValidation: initialSubjectWaiverValidation?.valid === true ? 'valid' : 'invalid',
+      initialWaiverValidation: initialSubjectWaiverValidation?.valid === true ? 'valid' : 'invalid',
+      finalWaiverValidation: subjectWaiverCompletion.finalSubjectWaiverValidationStatus,
+      bindingStable: subjectWaiverCompletion.bindingStable,
+      ...(subjectWaiverCompletion.finalSubjectWaiverValidation?.waiverPath === undefined
+        ? {}
+        : {
+            waiverPath: subjectWaiverCompletion.finalSubjectWaiverValidation.waiverPath,
+            waiverSha256: subjectWaiverCompletion.finalSubjectWaiverValidation.waiverSha256,
+          }),
+      source:
+        '用户授权的 exact FE-01 subject PF-01 disposition；immutable subject artifact raw samples 与 frozen budget 重算，非本次 perf sampling。',
+    };
+    manifest.pfAutomaticResult = budget?.automaticResult;
+    manifest.performanceDebt = budget?.performanceDebt;
+    if (overallStatus === 'accepted-with-waiver') {
+      manifest.physicalValidation = FE01_SUBJECT_PHYSICAL_CANDIDATE;
+    }
+  }
   if (
     historicalAutomaticPassValidation &&
     automaticPassCompletion?.finalAutomaticPassValidationStatus === 'valid' &&
@@ -408,7 +494,40 @@ async function main() {
       throw new Error('generated manifest runId does not match evidence directory');
     }
   }
-  if (manifest.status === 'pass') {
+  let exactSubjectWaiver = subjectWaiverVerdict?.status === 'accepted-with-waiver';
+  if (manifest.status === 'accepted-with-waiver') {
+    const eligibility = validateFe01SubjectAcceptedWithWaiverCandidate({
+      root: REPO_ROOT,
+      evidenceRoot,
+      ticketId,
+      manifest,
+    });
+    const disposition = finalizeFe01SubjectWaiverPhysicalDisposition({ manifest, eligibility });
+    manifest = disposition.manifest;
+    exactSubjectWaiver = disposition.exactSubjectWaiver;
+    writeJson(path.join(evidenceRoot, 'manifest.json'), manifest);
+    if (exactSubjectWaiver) {
+      const acceptedIndex = await maybeWriteLatestCleanSubjectAcceptedWithWaiver({
+        root: REPO_ROOT,
+        evidenceRoot,
+        ticketId,
+        manifest,
+      });
+      if (!acceptedIndex.eligible || !acceptedIndex.validated) {
+        const rejected = finalizeFe01SubjectWaiverPhysicalDisposition({
+          manifest,
+          eligibility: acceptedIndex,
+        });
+        manifest = rejected.manifest;
+        exactSubjectWaiver = false;
+        writeJson(path.join(evidenceRoot, 'manifest.json'), manifest);
+      } else if (acceptedIndex.updated) {
+        console.log(`latest clean subject accepted-with-waiver: ${acceptedIndex.indexPath}`);
+      } else {
+        console.log(`latest clean subject accepted-with-waiver: ${acceptedIndex.reason}`);
+      }
+    }
+  } else if (manifest.status === 'pass') {
     const cleanPassIndex = await maybeWriteLatestCleanPass({
       root: REPO_ROOT,
       evidenceRoot,
@@ -422,8 +541,13 @@ async function main() {
 
   console.log(`\nverify:ticket ${ticketId}: ${manifest.status}`);
   console.log(`manifest: ${sanitizeText(path.join(evidenceRoot, 'manifest.json'))}`);
-  // 退出码：pass=0，inconclusive=2，fail=1
-  process.exit(manifest.status === 'pass' ? 0 : manifest.status === 'inconclusive' ? 2 : 1);
+  // closure accepted-with-waiver=0；manifest 与 PF step 仍分别保留 waiver/fail-1 事实。
+  process.exit(
+    ticketManifestExitCode(manifest.status, {
+      ticketId,
+      exactSubjectWaiver,
+    }),
+  );
 }
 
 await main();

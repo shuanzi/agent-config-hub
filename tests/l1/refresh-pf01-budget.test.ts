@@ -213,6 +213,8 @@ function writeRun(root: string, mutate?: (summary: Record<string, unknown>) => v
       ],
     }),
   );
+  writeFileSync(join(runDir, 'harness-identity.json'), JSON.stringify({ artifact }));
+  writeFileSync(join(runDir, 'proposed-budgets.json'), JSON.stringify({ status: 'not-created' }));
 }
 
 function argumentsFor(root: string) {
@@ -237,6 +239,7 @@ function argumentsFor(root: string) {
         arch: 'arm64',
       },
       toolchain: { cargo: 'cargo 1.90.0', rustc: 'rustc 1.90.0' },
+      buildEnvironment: { ...PF01_BUILD_ENVIRONMENT, overrides: [] },
     },
     baselineBuildInputs: buildInputs('git-object-tree'),
     baselineMeasurementInputs: measurementInputs('git-object-tree'),
@@ -279,6 +282,33 @@ describe('refresh PF-01 budget public seam', () => {
       expect(budget.baselineProvenance.buildInputs.source.kind).toBe('git-object-tree');
       expect(budget.baselineProvenance.resources.rawPeaksBytes).toEqual([100, 120, 110]);
       expect(budget.budgets).toHaveLength(5);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('freezer producer 同时生成独立的 7-SHA、raw timing/RSS 与 buildEnvironment baseline binding', () => {
+    const root = mkdtempSync(join(tmpdir(), 'pf01-freeze-binding-producer-'));
+    try {
+      writeRun(root);
+      const frozen = freezePf01BudgetFromBaselineRun({
+        ...argumentsFor(root),
+        frozenBaselineBudget: {
+          path: 'performance/budgets/pf-01.budgets.json',
+          sha256: 'f'.repeat(64),
+        },
+      });
+      expect(frozen.frozenBaseline.baseline.artifactSha256).toHaveProperty('summary.json');
+      expect(frozen.frozenBaseline.baseline.rawTiming['pf01.startup.first_list_visible']).toEqual([
+        10, 11, 12, 13, 14,
+      ]);
+      expect(frozen.frozenBaseline.baseline.resource).toMatchObject({
+        rawPeakBytes: [100, 120, 110],
+        normalExit: [true, true, true],
+      });
+      expect(frozen.frozenBaseline.baseline.measurementContract.buildEnvironment).toEqual(
+        PF01_BUILD_ENVIRONMENT,
+      );
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

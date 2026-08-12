@@ -28,3 +28,7 @@
 **计划证据分层：** FE-01 必须在自身 ticket 以共享 harness 运行 L0、L1 list/selector（含 `editable` 的 edit-specific availability/compatibility 反例，以及列表、路径、错误和无障碍文本的遮蔽断言）、首个 L2 browser UI/read-session（断言同一四类可见文本均遮蔽）、L3 “start → read → event → authoritative reread”（断言隔离实际 read/event/reread 路径不泄露同一四类文本）与 PF-01 `catalog-browse`。PF-01 只在实际样本后冻结数值预算。
 
 **计划通过与失败边界：** 未来证据应覆盖导航、canonical filters、段序、locator 原子目的地、只读 Skill cells 与无 `prepare`/`apply`；并在适用 L1/L2/L3 断言和通过判据中证明列表、路径、错误和无障碍文本均不含敏感明文。`ReadFailed`、empty/stale 和 event reread 是必须保留的 failure path。L2 mock 只证明 renderer journey；L3 只限隔离测试构建；FE-07R 的 snapshot/provenance、fixture、文档或 Mock 都不能替代 FE-01 自身 L0–L3/PF-01 closure。
+
+## FE-01 local performance debt（non-status record）
+
+本地性能债务：`deferred / post-optimization`。仅绑定 FE-01 subject historical PF-01 run `20260812T035717854Z-p74069-000`（commit `9c91e042c39023d7a30fcc04fbd1d0e36985fdbf`）的唯一 numeric latency violation：`pf01.startup.first_list_visible` p50 `16.2ms` 超 frozen limit `15.75ms`，delta `0.45ms`。automatic result 保持 `fail`/exit `1`；显式 manual disposition 为 `accepted-with-waiver`，未知根因，不设 owner 或日期。此记录不改变本 ticket 的 Frozen/planning 状态、tasks、frontier 或 `RELEASE-GATE`，也不构成 automatic PASS 或 release/reference evidence。

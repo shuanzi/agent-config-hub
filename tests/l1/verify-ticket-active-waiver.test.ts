@@ -12,6 +12,9 @@ import { computePf01MeasurementInputsDigest, expectedPf01L2ViteDevModuleGraph, P
 // prettier-ignore
 // @ts-expect-error runtime provenance module is a plain Node ESM module.
 import { PF01_BUDGET_CONSTANTS } from '../../scripts/orchestrator/pf01-budget.mjs';
+// prettier-ignore
+// @ts-expect-error runtime provenance module is a plain Node ESM module.
+import { validateFe01Pf01SubjectWaiver } from '../../scripts/orchestrator/fe01-pf01-subject-waiver.mjs';
 
 function clone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value));
@@ -142,6 +145,35 @@ const ticket = {
 };
 
 describe('verify:ticket automatic-pass execution seam', () => {
+  it('future exact automatic pass 与本次 subject waiver 并存时优先 automatic pass；无效 automatic 才可回退 waiver', () => {
+    const both = {
+      ...ticket,
+      performance: {
+        automaticPassPath: 'performance/automatic-passes/fe-01-pf-01.json',
+        subjectWaiverPath: 'performance/waivers/fe-01-pf-01-subject-startup-p50.json',
+      },
+    };
+    const subjectWaiverValidation = validateFe01Pf01SubjectWaiver();
+
+    expect(
+      planTicketExecutionSteps({
+        ticketId: 'FE-01',
+        ticket: both,
+        automaticPassValidation,
+        subjectWaiverValidation,
+      }).find((step: { id: string }) => step.id === 'perf'),
+    ).toMatchObject({ executionMode: AUTOMATIC_PASS_EXECUTION_MODE, samplingRun: false });
+
+    expect(
+      planTicketExecutionSteps({
+        ticketId: 'FE-01',
+        ticket: both,
+        automaticPassValidation: { ...automaticPassValidation, valid: false },
+        subjectWaiverValidation,
+      }).find((step: { id: string }) => step.id === 'perf'),
+    ).toMatchObject({ executionMode: 'historical-subject-waiver-validation', samplingRun: false });
+  });
+
   it('仅 exact validated automatic-pass record 可把 perf 变为 no-sampling automatic pass', async () => {
     const perf = planTicketExecutionSteps({
       ticketId: 'FE-01',

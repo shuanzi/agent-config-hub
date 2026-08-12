@@ -14,6 +14,8 @@ import {
   REPO_ROOT,
   assertCurrentPfDescriptorDigest,
   gitInfo,
+  sha256File,
+  sha256Text,
 } from './lib.mjs';
 import {
   assertPf01L3BuildEnvironment,
@@ -39,9 +41,16 @@ import {
   validateFrozenPf01Budget,
 } from './pf01-budget.mjs';
 import { finalizeHarnessPeakRss, validatePf01ResourceEvidence } from './pf01-resource.mjs';
+import {
+  createPf01FrozenBaselineBinding,
+  PF01_BASELINE_ARTIFACTS,
+  PF01_BASELINE_FREEZE_PATH,
+  validatePf01FrozenBaselineBinding,
+} from './pf01-baseline-freeze.mjs';
 
 const DESCRIPTOR_PATH = path.join(REPO_ROOT, 'performance/descriptors/pf-01.catalog-browse.json');
 const BUDGET_PATH = path.join(REPO_ROOT, 'performance/budgets/pf-01.budgets.json');
+const FREEZE_PATH = path.join(REPO_ROOT, PF01_BASELINE_FREEZE_PATH);
 const PROFILE = 'representative';
 const L3_METRIC = 'pf01.l3.cold_start.first_snapshot';
 const L2_METRICS = PF01_TIMING_METRICS.filter((metric) => metric !== L3_METRIC);
@@ -117,6 +126,19 @@ function readPhysicalJson(artifactsRoot, filePath) {
       `PF-01 baseline JSON invalid: ${path.basename(filePath)} (${error instanceof Error ? error.message : 'unknown'})`,
     );
   }
+}
+
+function artifactSha256FromRun(artifactsRoot, runDirectory) {
+  const names = fs.readdirSync(assertPhysicalPath(artifactsRoot, runDirectory, 'directory')).sort();
+  if (!sameJson(names, [...PF01_BASELINE_ARTIFACTS].sort())) {
+    throw new Error('PF-01 frozen baseline requires exactly seven immutable artifacts');
+  }
+  return Object.fromEntries(
+    PF01_BASELINE_ARTIFACTS.map((file) => {
+      const artifact = assertPhysicalPath(artifactsRoot, path.join(runDirectory, file), 'file');
+      return [file, sha256File(artifact)];
+    }),
+  );
 }
 
 function baselineRunDirectory({ repoRoot, artifactsRoot, baselineRun }) {
@@ -295,6 +317,7 @@ export function freezePf01BudgetFromBaselineRun({
   currentAttestation,
   baselineBuildInputs,
   baselineMeasurementInputs,
+  frozenBaselineBudget,
   environment = process.env,
 } = {}) {
   if (profile !== PROFILE) throw new Error('PF-01 budget freeze only accepts representative profile');
@@ -308,6 +331,9 @@ export function freezePf01BudgetFromBaselineRun({
     artifactsRoot,
     path.join(runDirectory, 'l2-dev-module-graph.json'),
   );
+  const artifactSha256 = frozenBaselineBudget === undefined
+    ? undefined
+    : artifactSha256FromRun(artifactsRoot, runDirectory);
 
   if (
     !isObject(summary) ||
@@ -420,7 +446,46 @@ export function freezePf01BudgetFromBaselineRun({
   if (!validation.valid) {
     throw new Error(`PF-01 generated budget failed validation: ${validation.violations.join('; ')}`);
   }
-  return budget;
+  if (frozenBaselineBudget === undefined) return budget;
+
+  const frozenBaselineIdentity = {
+    runId: path.basename(runDirectory),
+    run,
+    commit: runIdentity.startCommit,
+    descriptorDigest: descriptor.digest.value,
+    worktreeDirty: false,
+  };
+  const frozenBaseline = createPf01FrozenBaselineBinding({
+    budget: frozenBaselineBudget,
+    baseline: frozenBaselineIdentity,
+    artifactSha256,
+    l2Samples,
+    l3Samples,
+    resourceRuns,
+    measurementContract: {
+      descriptorPath: 'performance/descriptors/pf-01.catalog-browse.json',
+      descriptorDigest: descriptor.digest.value,
+      artifact: recorded.artifact,
+      buildInputs: baselineBuildInputs,
+      measurementInputs: baselineMeasurementInputs,
+      fixture: recorded.fixture,
+      runner: recorded.runner,
+      toolchain: recorded.toolchain,
+      buildEnvironment: recorded.buildEnvironment,
+    },
+  });
+  const frozenValidation = validatePf01FrozenBaselineBinding({
+    binding: frozenBaseline,
+    artifactSha256,
+    l2Samples,
+    l3Samples,
+    resourceRuns,
+    expectedBaseline: frozenBaselineIdentity,
+  });
+  if (!frozenValidation.valid) {
+    throw new Error(`PF-01 generated frozen baseline binding failed validation: ${frozenValidation.violations.join('; ')}`);
+  }
+  return { budget, frozenBaseline };
 }
 
 function parseArguments(args) {
@@ -433,19 +498,19 @@ function parseArguments(args) {
   return { baselineRun: runFlags[0].slice('--baseline-run='.length) };
 }
 
-function assertBudgetTargetIsNew() {
-  const directory = path.dirname(BUDGET_PATH);
+function assertTargetIsNew(target, label) {
+  const directory = path.dirname(target);
   for (let current = directory; ; current = path.dirname(current)) {
     const stats = fs.lstatSync(current);
     if (stats.isSymbolicLink() || !stats.isDirectory()) {
-      throw new Error(`PF-01 budget target parent symlink/non-directory rejected: ${current}`);
+      throw new Error(`PF-01 ${label} target parent symlink/non-directory rejected: ${current}`);
     }
     if (current === REPO_ROOT) break;
   }
-  if (fs.existsSync(BUDGET_PATH)) {
-    const stats = fs.lstatSync(BUDGET_PATH);
-    if (stats.isSymbolicLink()) throw new Error('PF-01 current budget symlink rejected');
-    throw new Error('PF-01 current budget already exists; refresh refuses overwrite');
+  if (fs.existsSync(target)) {
+    const stats = fs.lstatSync(target);
+    if (stats.isSymbolicLink()) throw new Error(`PF-01 current ${label} symlink rejected`);
+    throw new Error(`PF-01 current ${label} already exists; refresh refuses overwrite`);
   }
 }
 
@@ -482,9 +547,27 @@ async function main() {
       baselineBuildInputs,
       baselineMeasurementInputs,
     });
-    assertBudgetTargetIsNew();
+    assertTargetIsNew(BUDGET_PATH, 'budget');
+    assertTargetIsNew(FREEZE_PATH, 'frozen baseline binding');
     const formatted = await formatPf01BudgetJson(budget);
+    const frozen = freezePf01BudgetFromBaselineRun({
+      baselineRun,
+      descriptor,
+      currentGit,
+      currentAttestation,
+      baselineBuildInputs,
+      baselineMeasurementInputs,
+      frozenBaselineBudget: {
+        path: 'performance/budgets/pf-01.budgets.json',
+        sha256: sha256Text(formatted),
+      },
+    });
+    if (!sameJson(budget, frozen.budget)) throw new Error('PF-01 freezer budget drifted while binding baseline');
     fs.writeFileSync(BUDGET_PATH, formatted, { encoding: 'utf8', flag: 'wx' });
+    fs.writeFileSync(FREEZE_PATH, `${JSON.stringify(frozen.frozenBaseline, null, 2)}\n`, {
+      encoding: 'utf8',
+      flag: 'wx',
+    });
     console.log(`PF-01 current budget frozen from ${baselineRun}`);
   } catch (error) {
     console.error(`INCONCLUSIVE  ${error instanceof Error ? error.message : 'PF-01 budget freeze failed'}`);

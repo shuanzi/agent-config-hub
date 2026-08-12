@@ -105,7 +105,7 @@ function summarize(samples) {
   };
 }
 
-function proposeBudget(metricId, stats) {
+function proposeBudget(metricId, stats, lifecycle) {
   // absolute ceiling：p95 × 1.5 向上取整到 10ms；regression allowance：baseline p50 的 1.25 倍
   const absoluteCeilingMs = Math.ceil(((stats.p95 ?? 0) * 1.5) / 10) * 10;
   return {
@@ -114,8 +114,50 @@ function proposeBudget(metricId, stats) {
     baseline: { p50: stats.p50, p95: stats.p95, n: stats.n },
     proposedAbsoluteCeilingMs: absoluteCeilingMs,
     proposedRegressionAllowance: { relativeTo: 'baseline-p50', maxRatio: 1.25 },
-    status: 'proposed-not-frozen',
-    note: '本次完整 clean baseline 只收集样本；预算冻结须独立人工审核，首次运行仍为 inconclusive。',
+    status: lifecycle.entryStatus,
+    note: lifecycle.entryNote,
+  };
+}
+
+/** proposed-budgets 是本次样本建议，文字必须如实反映这次是否已进入 frozen-budget comparison。 */
+function proposedBudgetLifecycle({ budgetExistedBeforeRun, budgetValid, automatedResult }) {
+  if (!budgetExistedBeforeRun) {
+    return {
+      status: 'proposed-not-frozen',
+      entryStatus: 'proposed-not-frozen',
+      entryNote: '本次完整 clean baseline 只收集样本；预算冻结须独立人工审核，首次运行仍为 inconclusive。',
+      note: '以下为首次完整 clean baseline 的建议预算；本次仅收集样本，须独立人工审核后才可冻结，绝不据此关闭性能验收。',
+    };
+  }
+  if (!budgetValid) {
+    return {
+      status: 'proposed-after-invalid-frozen-budget',
+      entryStatus: 'proposed-after-invalid-frozen-budget',
+      entryNote: '已有 frozen budget 但其 provenance/descriptor 校验无效；本次建议不构成预算变更或性能通过。',
+      note: '已有 frozen budget 但当前比较前校验无效；以下仅保留本次样本分布建议，不是首次 baseline，也不得关闭性能验收。',
+    };
+  }
+  if (automatedResult.status === 'inconclusive') {
+    return {
+      status: 'proposed-after-frozen-budget-comparison-inconclusive',
+      entryStatus: 'proposed-after-frozen-budget-comparison-inconclusive',
+      entryNote: '已有 frozen budget，但本次自动比较不完整且不可比较；本次建议不改变既有预算或性能状态。',
+      note: '已有 frozen budget，但本次自动比较不完整且不可比较；以下仅记录可用样本分布建议，不是首次 baseline、不是 comparison-passed，也不得关闭性能验收。',
+    };
+  }
+  if (automatedResult.status === 'fail') {
+    return {
+      status: 'proposed-after-frozen-budget-comparison-failed',
+      entryStatus: 'proposed-after-frozen-budget-comparison-failed',
+      entryNote: '已有 frozen budget 的比较失败；本次建议不改变 automatic fail/exit 1、既有预算或阈值。',
+      note: '已有 frozen budget 的比较失败；以下仅记录本次样本分布建议，不是首次 baseline、不是 inconclusive，也不改变 automatic fail/exit 1 或既有预算。',
+    };
+  }
+  return {
+    status: 'proposed-after-frozen-budget-comparison-passed',
+    entryStatus: 'proposed-after-frozen-budget-comparison-passed',
+    entryNote: '已有 frozen budget 的比较通过；本次建议不自动变更已冻结预算。',
+    note: '已有 frozen budget 的比较通过；以下仅记录本次样本分布建议，不自动变更已冻结预算。',
   };
 }
 
@@ -401,6 +443,11 @@ async function main() {
     budgetValid: budgetValidation?.valid === true,
     comparisonViolations,
   });
+  const proposedLifecycle = proposedBudgetLifecycle({
+    budgetExistedBeforeRun,
+    budgetValid: budgetValidation?.valid === true,
+    automatedResult,
+  });
   const comparisonProvenance = pf01ComparisonProvenance(existingBudget, currentAttestation);
   const summary = {
     schemaVersion: 1,
@@ -446,9 +493,11 @@ async function main() {
     schemaVersion: 1,
     descriptorId: 'PF-01',
     profile,
-    status: 'proposed-not-frozen',
-    note: '以下为基于本次样本分布的建议预算（absolute ceiling = p95×1.5 上取整 10ms；regression allowance = baseline p50×1.25）。首次 clean baseline 只收集样本；须独立人工审核后才可冻结，绝不据此关闭性能验收。',
-    budgets: Object.entries(metrics).map(([metricId, stats]) => proposeBudget(metricId, stats)),
+    status: proposedLifecycle.status,
+    note: `以下为基于本次样本分布的建议预算（absolute ceiling = p95×1.5 上取整 10ms；regression allowance = baseline p50×1.25）。${proposedLifecycle.note}`,
+    budgets: Object.entries(metrics).map(([metricId, stats]) =>
+      proposeBudget(metricId, stats, proposedLifecycle),
+    ),
     resources:
       resourceEvidence === null
         ? { status: 'inconclusive', reason: resourceError }

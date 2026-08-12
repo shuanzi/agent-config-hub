@@ -1,0 +1,115 @@
+{
+  "schemaVersion": 1,
+  "kind": "fe-01-pf-01-subject-startup-p50-exact-performance-waiver",
+  "recordDigest": {
+    "algorithm": "sha256",
+    "canonicalization": "将本文件 recordDigest.value 置为空字符串后对文件原始字节求 sha256；由 FE-01 waiver validator 复算",
+    "value": "591b670ed93b0c865621470b8149137f523a4ab57fc4a1a2ace07b8dd9867eaf"
+  },
+  "ticket": "FE-01",
+  "performance": "PF-01",
+  "manualDisposition": "accepted-with-waiver",
+  "authorization": {
+    "scope": "仅此 FE-01 subject historical PF-01 自动 numeric latency fail；不改变 automatic fail/exit 1、预算、阈值、方法或历史 artifact，不泛化、不复用。",
+    "policy": "仅精确 numeric latency violation 可有显式人工 disposition；hard gate 不可 waive；不得称为 automatic PASS。"
+  },
+  "automaticResult": {
+    "status": "fail",
+    "exitCode": 1,
+    "runId": "20260812T035717854Z-p74069-000",
+    "run": ".artifacts/performance/PF-01/20260812T035717854Z-p74069-000",
+    "commit": "9c91e042c39023d7a30fcc04fbd1d0e36985fdbf",
+    "worktreeDirty": false,
+    "violation": {
+      "metric": "pf01.startup.first_list_visible",
+      "statistic": "p50",
+      "observedMs": 16.2,
+      "thresholdMs": 15.75,
+      "deltaMs": 0.45
+    }
+  },
+  "budget": {
+    "path": "performance/budgets/pf-01.budgets.json",
+    "sha256": "80461fdd8041f3247ec930dcfb4e77434fcc294465df9b299efae89fe15c7e87",
+    "freezePath": "performance/budgets/pf-01.freeze.json",
+    "freezeSha256": "4d9973e2ecba1a11ef7537676462a61b257cdda1bc67daaab4ad3441faaec243"
+  },
+  "baseline": {
+    "runId": "20260812T033832054Z-p69961-000",
+    "run": ".artifacts/performance/PF-01/20260812T033832054Z-p69961-000",
+    "commit": "114298a619af40d00941efec4c959e0b13d6be83",
+    "worktreeDirty": false
+  },
+  "measurementContract": {
+    "descriptorPath": "performance/descriptors/pf-01.catalog-browse.json",
+    "descriptorDigest": "1f21a9dad1128ca4482500e1556925a8d8af2468a64e83628e7274007aa28b9a",
+    "artifact": {
+      "identityPath": ".artifacts/test-harness/identity.json",
+      "kind": "test-harness",
+      "identifier": "com.agentconfigmanager.testharness",
+      "profile": "debug",
+      "binary": "src-tauri/target/debug/agent-config-manager",
+      "declaredBinarySha256": "29bb905638eb65f701f612d37ca0d17a41af1eb82377ddc401ae4115910a2390",
+      "actualBinarySha256": "29bb905638eb65f701f612d37ca0d17a41af1eb82377ddc401ae4115910a2390",
+      "provenance": "L3 专用隔离测试构建；非生产签名/DMG，不取得 L4 credit"
+    },
+    "buildInputs": {
+      "schemaVersion": 4,
+      "algorithm": "pf01-l3-harness-build-inputs-v4",
+      "digest": "580f2831fb7ac349a4b16cbe49fcfb37015db8265fb4f7096a9c3e55d0755238"
+    },
+    "measurementInputs": {
+      "schemaVersion": 4,
+      "algorithm": "pf01-measurement-inputs-v4",
+      "digest": "27991cd34d9f067a71a2985aaf9f6b6e23e5833adc05efa7767a5d8dcdb5b4bb",
+      "l2DevModuleGraphSha256": "76a326c12b8a71313aa7761f90832bddab4e88eb074ae78ac0fc0b0cc2973d52"
+    },
+    "fixture": {
+      "path": "fixtures/fx-01/native-root",
+      "sha256": "ccaaf3161f651e22968d2ff6b32f4e0d06d108a18ed63977930a4ff27eab9519"
+    },
+    "runner": {
+      "node": "v24.18.0",
+      "npm": "11.16.0",
+      "platform": "darwin",
+      "release": "25.6.0",
+      "macosProductVersion": "26.6.1",
+      "arch": "arm64"
+    },
+    "toolchain": {
+      "cargo": "cargo 1.97.1 (c980f4866 2026-06-30)",
+      "rustc": "rustc 1.97.1 (8bab26f4f 2026-07-14)"
+    },
+    "buildEnvironment": {
+      "schemaVersion": 1,
+      "policy": "no ambient Git/VITE_/TAURI_/CARGO_/Rust/SDK/Node build overrides or root .env files",
+      "overrides": []
+    }
+  },
+  "artifacts": {
+    "baseline": {
+      "harness-identity.json": "3891b51343ccafac74b0e276c5d7ce4b14a8fa5d5b4fe2375a30516d01649428",
+      "l2-dev-module-graph.json": "76a326c12b8a71313aa7761f90832bddab4e88eb074ae78ac0fc0b0cc2973d52",
+      "l3-resource-runs.json": "328a1ea5165254f5448dde0bdb74ace477e07c27158fd39b125545a828c6f811",
+      "l3-samples.json": "4216561dd02728c5c2b346e41d4d444d9cb6c2d199cfc29c05599369a94f13f8",
+      "proposed-budgets.json": "702d9f808e237c32ffab90fb264490d9174d541490cd4551d2800f84eafc16f8",
+      "samples.json": "f7d447ad63efa09d98118b26ab72e7905f9623f562152fb4dea89613cafcd808",
+      "summary.json": "1b4c9c931adf43b0982fff2a57d60fbd528d654a10ad46a72f034239c0e4ca4c"
+    },
+    "subject": {
+      "harness-identity.json": "daa6b56d8e17867f924c9477e463e0630c83741e53d069daba468a09c4758b52",
+      "l2-dev-module-graph.json": "76a326c12b8a71313aa7761f90832bddab4e88eb074ae78ac0fc0b0cc2973d52",
+      "l3-resource-runs.json": "621103df8e4bd11926a91a8909442c1edf0b6ea0310da93ca2cc765c847616d9",
+      "l3-samples.json": "51d6026a114eb8c7aea66fa0f4899e27f3441697ff8e394fb8ed2eeacd5422d7",
+      "proposed-budgets.json": "1f5dd1295320675808b969499473c41dda78c9b3f9b9ea572c011295a2f52842",
+      "samples.json": "396b16ab3341026472773f5e92ab8751a304a69dd78e1b6d598a3a1e692fddb7",
+      "summary.json": "703f5c523571ebf0d7f7264035d88bcf2521bbdeb5c3e03298e62929ef4cad5d"
+    }
+  },
+  "performanceDebt": {
+    "status": "deferred",
+    "phase": "post-optimization",
+    "rootCause": "unknown",
+    "scope": "仅 startup p50 0.45ms 超出 frozen regression threshold；不掩盖 automatic fail。"
+  }
+}

@@ -20,6 +20,12 @@
 - `RELEASE-GATE` 在固定 reference environment 复测全部预算，并单独测量生产 artifact；
 - 性能数据只本地输出结构化证据，不上传遥测或建立在线服务。
 
+### FE-01 PF-01 的 development acceptance profile
+
+FE-01 的 `PF-01` 是 development acceptance profile：L2 只在 Vite dev/mock renderer 上取样，L3 只在隔离 fixture 根的 debug test-harness 上取样。它不是 reference-Mac 测量、release-like artifact，也不是 `RELEASE-GATE` 的通过证据。`RELEASE-GATE` 仍保持 blocked，未来必须在独立的 reference/release environment 重新取得 production artifact 与预算复测证据。
+
+冻结的 measurement contract（descriptor、L2/L3 方法、fixture、runtime/toolchain、buildEnvironment 与统计）和每次 run 的 SUT/build identity 分开校验：前者漂移才是 measurement drift；后者以每个 run 的 binary、Git build inputs 和 provenance 自证。历史 run 始终按其 subject commit 的 descriptor digest 校验，不能把后续补全的 descriptor 倒灌为旧采样的方法。
+
 ## Fixture 与证据边界
 
 - performance fixture 只使用确定 seed 的 synthetic 内容、路径和占位敏感值；
@@ -29,6 +35,7 @@
 - 记录 commit、artifact、runner、OS、toolchain、fixture digest、原始样本、p50/p95 和资源峰值；
 - L2、L3 与 L4 测量分别保留 provenance，不能互相代替；
 - 没有实际运行的 manifest、命令或设计不能取得性能通过状态。
+- 数值 latency fail 只能由用户明确指定的、单次 exact manual disposition 接住；hard gate、污染、dirty、额外 violation 或 lineage drift 不可 waive，且 manual disposition 不得称为 automatic PASS。
 
 ## 不变量
 
