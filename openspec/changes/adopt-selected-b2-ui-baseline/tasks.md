@@ -39,12 +39,12 @@
 
 ### FE-01：只读工作台与 FE-07R snapshot 消费
 
-- [ ] 3.1 重新读取并验证 ARCH-GATE=`closed`、FE-01=`ready-for-agent` 和 direct blocker FE-07R=done 且有 actual evidence；任一不满足，记录 blocker 并停止 FE-01 slice。
-- [ ] 3.2 在 FE-01 内完成最小 contract／domain／Rust-first wire delta，复用 FE-07R 已验证 bootstrap、shared harness 与 actual read snapshot，定义三类导航、all／global／project 精确段序、稳定排序、扁平化、全局分页、搜索无写副作用和只读 Skill 四 Agent cells；不得重做 resolver 或 foundation，或接受 Mock／injected projection 替代 closure。
-- [ ] 3.3 在 FE-01 内使用共享 harness 生成或复验 TypeScript wire、vectors 与 drift 断言，并实现首个工作台 L2/browser UI/read-session、只读导航、列表投影、搜索定位和 Skill cell read surface。
-- [ ] 3.4 在 FE-01 内以共享 harness 运行自身 L0／L1 list／selector、首个 L2 browser UI/read-session journey、FE-01-specific L3 actual start／read／event／reread 与 PF-01；FE-07R snapshot 仅作上游输入，provenance 不可借用为 FE-01 closure credit。不得重做 resolver／foundation、编辑、prepare 或 apply。
-- [ ] 3.5 在 FE-01 内运行 `npm run verify:ticket -- FE-01`，保留命令、层级、运行标识和未覆盖边界。
-- [ ] 3.6 对 FE-01 进行独立只读复审；只有 3.1～3.5 的证据满足 acceptance，才标记 FE-01 done 并更新 frontier。
+- [x] 3.1 重新读取并验证 ARCH-GATE=`closed`、FE-01=`ready-for-agent` 和 direct blocker FE-07R=done 且有 actual evidence；任一不满足，记录 blocker 并停止 FE-01 slice。
+- [x] 3.2 在 FE-01 内完成最小 contract／domain／Rust-first wire delta，复用 FE-07R 已验证 bootstrap、shared harness 与 actual read snapshot，定义三类导航、all／global／project 精确段序、稳定排序、扁平化、全局分页、搜索无写副作用和只读 Skill 四 Agent cells；不得重做 resolver 或 foundation，或接受 Mock／injected projection 替代 closure。
+- [x] 3.3 在 FE-01 内使用共享 harness 生成或复验 TypeScript wire、vectors 与 drift 断言，并实现首个工作台 L2/browser UI/read-session、只读导航、列表投影、搜索定位和 Skill cell read surface。
+- [x] 3.4 在 FE-01 内以共享 harness 运行自身 L0／L1 list／selector、首个 L2 browser UI/read-session journey、FE-01-specific L3 actual start／read／event／reread 与 PF-01；FE-07R snapshot 仅作上游输入，provenance 不可借用为 FE-01 closure credit。不得重做 resolver／foundation、编辑、prepare 或 apply。
+- [x] 3.5 在 FE-01 内运行 `npm run verify:ticket -- FE-01`，保留命令、层级、运行标识和未覆盖边界。
+- [x] 3.6 对 FE-01 进行独立只读复审；只有 3.1～3.5 的证据满足 acceptance，才标记 FE-01 done 并更新 frontier。
 
 ### FE-02：类型特定只读详情与 Hook 负向边界
 

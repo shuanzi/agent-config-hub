@@ -17,15 +17,21 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use sha2::{Digest, Sha256};
+use unicode_casefold::{Locale, UnicodeCaseFold, Variant};
+use unicode_normalization::UnicodeNormalization;
 
 use crate::domain::{
-    ActionAvailability, AgentId, AssetCapabilities, AssetContextHint, AssetDetail,
-    AssetDetailSnapshot, AssetGroupBy, AssetListFilters, AssetListQuery, AssetListScope,
-    AssetListSnapshot, AssetRef, AssetScope, AssetStatusFilter, AssetSummary, AssetType,
-    CompatibilityStatus, EffectiveContext, FileKind, IndexStatus, InspectorData,
-    MaskedSourceContent, NativeFileContent, NativeFileRef, NativeFileSnapshot, NativeOwnership,
-    NativeUnitKind, ReasonCode, SensitiveDisplayState, SensitiveSegmentRef, SourceAnchor,
-    SourceTier,
+    derive_workbench_status_memberships, ActionAvailability, AgentId, AssetCapabilities,
+    AssetContextHint, AssetDetail, AssetDetailSnapshot, AssetGroupBy, AssetListFilters,
+    AssetListQuery, AssetListScope, AssetListSnapshot, AssetRef, AssetScope, AssetStatusFilter,
+    AssetSummary, AssetType, CompatibilityStatus, EffectiveContext, FileKind, GlobalLocatorQuery,
+    GlobalLocatorSnapshot, IndexStatus, InspectorData, LocatorGroup, LocatorMatchedField,
+    LocatorResult, MaskedSourceContent, MvpAssetType, NativeFileContent, NativeFileRef,
+    NativeFileSnapshot, NativeOwnership, NativeUnitKind, ReadFailure, ReasonCode, RecoveryAction,
+    SegmentSource, SensitiveDisplayState, SensitiveSegmentRef, SkillActivation,
+    SkillCellAvailability, SkillPresence, SkillTargetState, SourceAnchor, SourceTier, ViewContext,
+    WorkbenchActualReadSnapshot, WorkbenchQuery, WorkbenchRow, WorkbenchSegment,
+    WorkbenchStatusFacts,
 };
 
 /// 与 fixtures/sensitive-masking.ts 相同的固定遮蔽标记。
@@ -35,6 +41,194 @@ const SYNTHETIC_SECRET_PREFIX: &str = "SYNTHETIC-SECRET-";
 const ADAPTER_IDENTITY: &str = "claude-code@fixture";
 const SOURCE_TIER_ID: &str = "user-global-root";
 const SOURCE_TIER_LABEL: &str = "User global root (synthetic)";
+
+fn read_failed() -> ReadFailure {
+    ReadFailure {
+        reason_code: ReasonCode::ReadFailed,
+        message: "读取条件无效或当前不可读，请重读。".to_string(),
+        recovery_action: Some(RecoveryAction::RetryRead),
+    }
+}
+
+fn valid_opaque_ids(ids: &Option<Vec<String>>) -> bool {
+    ids.as_ref()
+        .is_none_or(|values| values.iter().all(|value| !value.trim().is_empty()))
+}
+
+fn skill_target_states() -> Vec<SkillTargetState> {
+    vec![
+        SkillTargetState {
+            agent: AgentId::ClaudeCode,
+            presence: SkillPresence::Present,
+            activation: SkillActivation::Enabled,
+            applicability: crate::domain::ApplicabilityResolution::Resolved,
+            enable_availability: SkillCellAvailability::Disabled {
+                reason_code: ReasonCode::ReadOnlyPolicy,
+            },
+            disable_availability: SkillCellAvailability::Allowed,
+            pending: None,
+            stable_reason: None,
+        },
+        SkillTargetState {
+            agent: AgentId::Codex,
+            presence: SkillPresence::Absent,
+            activation: SkillActivation::NotApplicable,
+            applicability: crate::domain::ApplicabilityResolution::Resolved,
+            enable_availability: SkillCellAvailability::Allowed,
+            disable_availability: SkillCellAvailability::Disabled {
+                reason_code: ReasonCode::UnsupportedCapability,
+            },
+            pending: None,
+            stable_reason: None,
+        },
+        SkillTargetState {
+            agent: AgentId::GeminiCli,
+            presence: SkillPresence::Absent,
+            activation: SkillActivation::NotApplicable,
+            applicability: crate::domain::ApplicabilityResolution::Resolved,
+            enable_availability: SkillCellAvailability::Allowed,
+            disable_availability: SkillCellAvailability::Disabled {
+                reason_code: ReasonCode::UnsupportedCapability,
+            },
+            pending: None,
+            stable_reason: None,
+        },
+        SkillTargetState {
+            agent: AgentId::Opencode,
+            presence: SkillPresence::Absent,
+            activation: SkillActivation::NotApplicable,
+            applicability: crate::domain::ApplicabilityResolution::Resolved,
+            enable_availability: SkillCellAvailability::Allowed,
+            disable_availability: SkillCellAvailability::Disabled {
+                reason_code: ReasonCode::UnsupportedCapability,
+            },
+            pending: None,
+            stable_reason: None,
+        },
+    ]
+}
+
+/// Locator only sees metadata which has already crossed the core masking boundary.
+/// The compare order is contract-visible and `str::contains` operates at UTF-8
+/// char boundaries, never arbitrary byte offsets.
+pub struct LocatorDisplayFields {
+    pub display_name: String,
+    pub asset_type_label: String,
+    pub agents: Vec<String>,
+    pub ownership: String,
+    pub project_hint: Option<String>,
+    pub redacted_summary: Option<String>,
+}
+
+fn normalize_locator_text(value: &str) -> String {
+    value
+        .trim()
+        .nfc()
+        .case_fold_with(Variant::Full, Locale::NonTurkic)
+        .collect()
+}
+
+pub fn locator_match_field(query: &str, fields: &LocatorDisplayFields) -> Option<&'static str> {
+    let needle = normalize_locator_text(query);
+    if needle.is_empty() {
+        return None;
+    }
+    let contains = |value: &str| normalize_locator_text(value).contains(&needle);
+    if contains(&fields.display_name) {
+        Some("displayName")
+    } else if contains(&fields.asset_type_label) {
+        Some("assetType")
+    } else if fields.agents.iter().any(|agent| contains(agent)) {
+        Some("agent")
+    } else if contains(&fields.ownership) {
+        Some("ownership")
+    } else if fields.project_hint.as_deref().is_some_and(contains) {
+        Some("projectHint")
+    } else if fields.redacted_summary.as_deref().is_some_and(contains) {
+        Some("redactedSummary")
+    } else {
+        None
+    }
+}
+
+/// FE-01 status seam consumes the same detail/capability authority exported by
+/// this catalog. It intentionally never maps `AssetSummary::availability` to
+/// editability. The remaining status flags are explicit known facts of this
+/// fixed FX-01 fixture, rather than defaults for absent upstream fields.
+fn status_facts_for_catalog_detail(detail: &AssetDetail) -> WorkbenchStatusFacts {
+    WorkbenchStatusFacts {
+        edit_asset_availability: Some(detail.capabilities.edit.clone()),
+        compatibility: Some(detail.compatibility),
+        normal: Some(true),
+        overridden: Some(false),
+        conflict: Some(false),
+        drift: Some(false),
+    }
+}
+
+fn agent_label(agent: &AgentId) -> &'static str {
+    match agent {
+        AgentId::ClaudeCode => "claude-code",
+        AgentId::Codex => "codex",
+        AgentId::GeminiCli => "gemini-cli",
+        AgentId::Opencode => "opencode",
+    }
+}
+
+fn asset_type_label(asset_type: AssetType) -> &'static str {
+    match asset_type {
+        AssetType::Skill => "skill",
+        AssetType::LongTermInstruction => "longTermInstruction",
+        AssetType::Subagent => "subagent",
+        AssetType::Hook => "hook",
+    }
+}
+
+fn locator_fields(
+    summary: &AssetSummary,
+    redacted_summary: Option<String>,
+) -> LocatorDisplayFields {
+    let (ownership, project_hint) = match &summary.asset.native_ownership {
+        NativeOwnership::Global => (
+            "global".to_string(),
+            match &summary.context_hint {
+                AssetContextHint::Path { path_hint } => Some(path_hint.clone()),
+                AssetContextHint::Project { project_name } => Some(project_name.clone()),
+            },
+        ),
+        NativeOwnership::Project { project_id } => {
+            ("project".to_string(), Some(project_id.clone()))
+        }
+    };
+    LocatorDisplayFields {
+        display_name: summary.display_name.clone(),
+        asset_type_label: asset_type_label(summary.asset.asset_type).to_string(),
+        agents: summary
+            .agents
+            .iter()
+            .map(agent_label)
+            .map(str::to_string)
+            .collect(),
+        ownership,
+        project_hint,
+        redacted_summary,
+    }
+}
+
+fn locator_matched_field(
+    query: &str,
+    fields: &LocatorDisplayFields,
+) -> Option<LocatorMatchedField> {
+    match locator_match_field(query, fields) {
+        Some("displayName") => Some(LocatorMatchedField::DisplayName),
+        Some("assetType") => Some(LocatorMatchedField::AssetType),
+        Some("agent") => Some(LocatorMatchedField::Agent),
+        Some("ownership") => Some(LocatorMatchedField::Ownership),
+        Some("projectHint") => Some(LocatorMatchedField::ProjectHint),
+        Some("redactedSummary") => Some(LocatorMatchedField::RedactedSummary),
+        _ => None,
+    }
+}
 
 /// 离开 core 的 maskedText 必须已经过本函数遮蔽（票据硬边界）。
 /// 语义与 fixtures/sensitive-masking.ts 一致：把
@@ -416,6 +610,176 @@ impl Catalog {
             index_updated_at: queried_at.clone(),
             queried_at,
         }
+    }
+
+    /// FE-01 B2 workbench snapshot：筛选后按固定段序返回；本 catalog 只拥有
+    /// FX-01 的 global native Skill，故 project view 不从名称或路径猜测投影。
+    pub fn workbench(
+        &self,
+        query: &WorkbenchQuery,
+    ) -> Result<WorkbenchActualReadSnapshot, ReadFailure> {
+        let filters = query.filters.clone().unwrap_or_default();
+        if !valid_opaque_ids(&filters.source_ids)
+            || !valid_opaque_ids(&filters.project_ids)
+            || (matches!(
+                query.view_context,
+                ViewContext::Global | ViewContext::Project { .. }
+            ) && filters
+                .project_ids
+                .as_ref()
+                .is_some_and(|ids| !ids.is_empty()))
+            || matches!(&query.view_context, ViewContext::Project { project_id } if project_id.trim().is_empty())
+        {
+            return Err(read_failed());
+        }
+        let legacy = AssetListQuery {
+            scope: AssetListScope::CurrentAssetType {
+                asset_type: match query.asset_type {
+                    MvpAssetType::Skill => AssetType::Skill,
+                    MvpAssetType::LongTermInstruction => AssetType::LongTermInstruction,
+                    MvpAssetType::Subagent => AssetType::Subagent,
+                },
+            },
+            search_text: None,
+            filters: Some(AssetListFilters {
+                agents: filters.agents.clone(),
+                projects: None,
+                scopes: None,
+                sources: filters.source_ids.clone(),
+                // summary.availability 不是 FE-01 workbench status 的权威输入。
+                statuses: None,
+                group_by: None,
+            }),
+        };
+        let list = self.asset_list(&legacy);
+        let rows = if query.asset_type == MvpAssetType::Skill {
+            list.assets
+                .into_iter()
+                .filter_map(|summary| {
+                    let detail = self.asset_detail(&summary.asset)?;
+                    let facts = status_facts_for_catalog_detail(&detail.detail);
+                    let memberships = derive_workbench_status_memberships(&facts);
+                    filters
+                        .statuses
+                        .as_ref()
+                        .is_none_or(|statuses| {
+                            statuses.is_empty()
+                                || statuses.iter().any(|status| memberships.contains(status))
+                        })
+                        .then_some((summary, memberships))
+                })
+                .enumerate()
+                .map(
+                    |(authoritative_input_order, (summary, status_memberships))| WorkbenchRow {
+                        sort_base_name: summary.display_name.clone(),
+                        authoritative_input_order: authoritative_input_order as u32,
+                        status_memberships,
+                        summary,
+                        skill_target_states: skill_target_states(),
+                        redacted_summary: Some("结构化只读 Skill 摘要".to_string()),
+                    },
+                )
+                .collect()
+        } else {
+            Vec::new()
+        };
+        let segments = match &query.view_context {
+            ViewContext::All | ViewContext::Global if !rows.is_empty() => vec![WorkbenchSegment {
+                id: "segment-fx01-global-applicable".to_string(),
+                source: SegmentSource::GlobalApplicable,
+                display_label: "Global".to_string(),
+                project_id: None,
+                rows,
+            }],
+            ViewContext::All | ViewContext::Global | ViewContext::Project { .. } => Vec::new(),
+        };
+        let aggregate_total = segments
+            .iter()
+            .map(|segment| segment.rows.len() as u32)
+            .sum();
+        Ok(WorkbenchActualReadSnapshot {
+            query: query.clone(),
+            authoritative_read_revision: list.queried_at.clone(),
+            segments,
+            effective_contexts: Vec::new(),
+            findings: Vec::new(),
+            aggregate_total,
+            index_status: list.index_status,
+            read_at: list.queried_at,
+        })
+    }
+
+    /// Global locator 固定返回三类 MVP groups；它只匹配已遮蔽的列表摘要，
+    /// 不读取源码，也不创建草稿、prepare 或 apply。
+    pub fn global_locator(
+        &self,
+        query: &GlobalLocatorQuery,
+    ) -> Result<GlobalLocatorSnapshot, ReadFailure> {
+        if query.asset_types.as_slice()
+            != [
+                MvpAssetType::Skill,
+                MvpAssetType::LongTermInstruction,
+                MvpAssetType::Subagent,
+            ]
+        {
+            return Err(read_failed());
+        }
+        let list = self.asset_list(&AssetListQuery {
+            scope: AssetListScope::CurrentAssetType {
+                asset_type: AssetType::Skill,
+            },
+            search_text: None,
+            filters: None,
+        });
+        let skill_results: Vec<LocatorResult> = list
+            .assets
+            .into_iter()
+            .enumerate()
+            .filter_map(|(authoritative_input_order, summary)| {
+                let detail = self.asset_detail(&summary.asset)?;
+                let status_memberships = derive_workbench_status_memberships(
+                    &status_facts_for_catalog_detail(&detail.detail),
+                );
+                let redacted_summary = Some("结构化只读 Skill 摘要".to_string());
+                let matched_field = locator_matched_field(
+                    &query.search_text,
+                    &locator_fields(&summary, redacted_summary.clone()),
+                )?;
+                let asset = summary.asset.clone();
+                Some(LocatorResult {
+                    row: WorkbenchRow {
+                        sort_base_name: summary.display_name.clone(),
+                        authoritative_input_order: authoritative_input_order as u32,
+                        status_memberships,
+                        summary,
+                        skill_target_states: skill_target_states(),
+                        redacted_summary,
+                    },
+                    destination_view_context: ViewContext::Global,
+                    destination: crate::domain::LocatorDestination::SkillDetail { asset },
+                    matched_field,
+                })
+            })
+            .collect();
+        let aggregate_total = skill_results.len() as u32;
+        Ok(GlobalLocatorSnapshot {
+            groups: vec![
+                LocatorGroup {
+                    asset_type: MvpAssetType::Skill,
+                    results: skill_results,
+                },
+                LocatorGroup {
+                    asset_type: MvpAssetType::LongTermInstruction,
+                    results: Vec::new(),
+                },
+                LocatorGroup {
+                    asset_type: MvpAssetType::Subagent,
+                    results: Vec::new(),
+                },
+            ],
+            aggregate_total,
+            read_at: list.queried_at,
+        })
     }
 
     pub fn asset_detail(&self, asset: &AssetRef) -> Option<AssetDetailSnapshot> {

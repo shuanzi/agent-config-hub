@@ -1,7 +1,7 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { createGateway } from './gateway';
-import { WorkspaceSession } from './session/WorkspaceSession';
+import { ReadOnlyWorkbenchSession } from './session/ReadOnlyWorkbenchSession';
 import { App } from './App';
 import './ui/workbench.css';
 
@@ -28,7 +28,7 @@ if (import.meta.env.DEV && query.get('prototype') === 'full-ui') {
 
 async function bootstrap(): Promise<void> {
   const gateway = await createGateway();
-  const session = new WorkspaceSession(gateway);
+  const session = new ReadOnlyWorkbenchSession(gateway);
   const container = document.getElementById('root');
   if (container === null) {
     throw new Error('缺少 #root 挂载点');

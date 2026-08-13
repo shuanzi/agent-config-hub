@@ -28,6 +28,9 @@ pub fn process_start_elapsed_millis() -> Option<u64> {
 }
 
 pub fn run() {
+    #[cfg(feature = "test-harness")]
+    test_harness_lifecycle::record_started();
+
     let gateway_core = core::GatewayCore::new(catalog::Catalog::from_env());
 
     #[allow(unused_mut)]
@@ -50,7 +53,186 @@ pub fn run() {
         ipc::test_fx01_cold_start_millis
     ]);
 
-    builder
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+    #[cfg(feature = "test-harness")]
+    let result = builder.build(tauri::generate_context!()).map(|app| {
+        test_harness_lifecycle::watch_for_exit_request(app.handle().clone());
+        app.run(|_, event| {
+            // macOS 的 event loop 退出后不会回到 `Builder::run` 后续语句；在
+            // 终态 event 内写入，才能让 L3 harness 的正常退出实际可认证。
+            if matches!(event, tauri::RunEvent::Exit) {
+                test_harness_lifecycle::record_normal_exit();
+            }
+        });
+    });
+
+    #[cfg(not(feature = "test-harness"))]
+    let result = builder.run(tauri::generate_context!());
+
+    result.expect("error while running tauri application");
+}
+
+/// PF-01 resource evidence 的 PID/normal-exit attestation 只存在于 harness
+/// feature。它没有 IPC、不会进入 production build，且仅在 runner 提供的临时
+/// lifecycle 文件路径存在时写入。
+#[cfg(feature = "test-harness")]
+mod test_harness_lifecycle {
+    use serde::Deserialize;
+    use std::path::Path;
+    use std::path::PathBuf;
+
+    const ENV_PATH: &str = "PF01_HARNESS_LIFECYCLE_PATH";
+    const EXIT_REQUEST_FILENAME: &str = "pf01-harness-exit-request.json";
+
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase", deny_unknown_fields)]
+    struct Lifecycle {
+        pid: u32,
+        binary: String,
+        role: String,
+        normal_exit: bool,
+    }
+
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase", deny_unknown_fields)]
+    struct ExitRequest {
+        schema_version: u8,
+        kind: String,
+        pid: u32,
+        binary: String,
+        role: String,
+    }
+
+    fn destination() -> Option<PathBuf> {
+        std::env::var_os(ENV_PATH)
+            .filter(|value| !value.is_empty())
+            .map(PathBuf::from)
+    }
+
+    fn write(normal_exit: bool) {
+        let Some(destination) = destination() else {
+            return;
+        };
+        let parent = match destination.parent() {
+            Some(parent) if parent.is_dir() => parent,
+            _ => return,
+        };
+        let temporary = parent.join(format!(".pf01-harness-{}.tmp", std::process::id()));
+        let payload = format!(
+            "{{\"pid\":{},\"binary\":\"agent-config-manager\",\"role\":\"test-harness\",\"normalExit\":{normal_exit}}}\n",
+            std::process::id()
+        );
+        if std::fs::write(&temporary, payload).is_ok() {
+            let _ = std::fs::rename(temporary, destination);
+        }
+    }
+
+    pub fn record_started() {
+        write(false);
+    }
+
+    pub fn record_normal_exit() {
+        write(true);
+    }
+
+    /// PF-01 runner 的 afterSession 在成功 deleteSession 后才会原子写入请求。仅
+    /// test-harness 轮询同一 sandbox 内、与当前 lifecycle 完整匹配的 marker；
+    /// production build 不编译该 watcher。
+    pub fn watch_for_exit_request(app: tauri::AppHandle) {
+        let Some(lifecycle_path) = destination() else {
+            return;
+        };
+        std::thread::spawn(move || loop {
+            if exit_request_matches_lifecycle(&lifecycle_path) {
+                app.exit(0);
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(25));
+        });
+    }
+
+    fn exit_request_path(lifecycle: &Path) -> Option<PathBuf> {
+        lifecycle
+            .parent()
+            .map(|parent| parent.join(EXIT_REQUEST_FILENAME))
+    }
+
+    fn exit_request_matches_lifecycle(lifecycle_path: &Path) -> bool {
+        let Ok(lifecycle_bytes) = std::fs::read(lifecycle_path) else {
+            return false;
+        };
+        let Ok(lifecycle) = serde_json::from_slice::<Lifecycle>(&lifecycle_bytes) else {
+            return false;
+        };
+        let Some(marker_path) = exit_request_path(lifecycle_path) else {
+            return false;
+        };
+        let Ok(marker_bytes) = std::fs::read(marker_path) else {
+            return false;
+        };
+        let Ok(request) = serde_json::from_slice::<ExitRequest>(&marker_bytes) else {
+            return false;
+        };
+
+        !lifecycle.normal_exit
+            && lifecycle.pid == std::process::id()
+            && lifecycle.binary == "agent-config-manager"
+            && lifecycle.role == "test-harness"
+            && request.schema_version == 1
+            && request.kind == "pf01-harness-exit-request"
+            && request.pid == lifecycle.pid
+            && request.binary == lifecycle.binary
+            && request.role == lifecycle.role
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        fn write_lifecycle(path: &std::path::Path, pid: u32, role: &str) {
+            std::fs::write(
+                path,
+                format!(
+                    "{{\"pid\":{pid},\"binary\":\"agent-config-manager\",\"role\":\"{role}\",\"normalExit\":false}}"
+                ),
+            )
+            .unwrap();
+        }
+
+        #[test]
+        fn exit_request_only_matches_the_current_harness_lifecycle_identity() {
+            let temporary = tempfile::tempdir().unwrap();
+            let lifecycle = temporary.path().join("harness-lifecycle.json");
+            let marker = exit_request_path(&lifecycle).unwrap();
+            let pid = std::process::id();
+            write_lifecycle(&lifecycle, pid, "test-harness");
+
+            std::fs::write(
+                &marker,
+                format!(
+                    "{{\"schemaVersion\":1,\"kind\":\"pf01-harness-exit-request\",\"pid\":{pid},\"binary\":\"agent-config-manager\",\"role\":\"test-harness\"}}"
+                ),
+            )
+            .unwrap();
+            assert!(exit_request_matches_lifecycle(&lifecycle));
+
+            std::fs::write(&marker, "{").unwrap();
+            assert!(!exit_request_matches_lifecycle(&lifecycle));
+
+            std::fs::write(
+                &marker,
+                "{\"schemaVersion\":1,\"kind\":\"pf01-harness-exit-request\",\"pid\":1,\"binary\":\"agent-config-manager\",\"role\":\"test-harness\"}",
+            )
+            .unwrap();
+            assert!(!exit_request_matches_lifecycle(&lifecycle));
+
+            std::fs::write(
+                &marker,
+                format!(
+                    "{{\"schemaVersion\":1,\"kind\":\"pf01-harness-exit-request\",\"pid\":{pid},\"binary\":\"agent-config-manager\",\"role\":\"other\"}}"
+                ),
+            )
+            .unwrap();
+            assert!(!exit_request_matches_lifecycle(&lifecycle));
+        }
+    }
 }

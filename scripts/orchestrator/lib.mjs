@@ -37,6 +37,70 @@ export function orchestratorEnv(extra = {}) {
   return env;
 }
 
+/** Git identity/object/status 读取不得继承任何可重定向 repository 解析的 ambient。 */
+export function assertNoGitAmbient(env = process.env) {
+  // `GIT_PAGER` 只影响人类输出呈现（CI/本地 runner 常设置为 cat），不参与 repo、
+  // index、object、config 或 ref 解析。其余未知 `GIT_*` 一律按可影响解析处理。
+  const keys = Object.keys(env).filter((key) => key.startsWith('GIT_') && key !== 'GIT_PAGER');
+  if (keys.length > 0) {
+    throw new Error(`Git ambient environment override rejected: ${keys.sort().join(', ')}`);
+  }
+  return { policy: 'no ambient Git repository/index/object/config/ref overrides', overrides: [] };
+}
+
+function declaredPackageRoots(repoRoot) {
+  const packagePath = path.join(repoRoot, 'package.json');
+  const stats = fs.lstatSync(packagePath);
+  if (!stats.isFile() || stats.isSymbolicLink()) {
+    throw new Error('PF-01 Vite package manifest must be a physical regular file');
+  }
+  const manifest = JSON.parse(fs.readFileSync(packagePath, 'utf8'));
+  const roots = new Set();
+  for (const field of ['dependencies', 'devDependencies', 'peerDependencies', 'optionalDependencies']) {
+    const dependencies = manifest?.[field];
+    if (dependencies === undefined) continue;
+    if (dependencies === null || typeof dependencies !== 'object' || Array.isArray(dependencies)) {
+      throw new Error(`PF-01 Vite package manifest ${field} must be an object`);
+    }
+    for (const name of Object.keys(dependencies)) roots.add(name);
+  }
+  return roots;
+}
+
+function packageRoot(moduleId) {
+  if (moduleId.startsWith('@')) {
+    const [scope, name] = moduleId.split('/');
+    return scope !== undefined && name !== undefined && name.length > 0 ? `${scope}/${name}` : null;
+  }
+  const [name] = moduleId.split('/');
+  return name?.length > 0 ? name : null;
+}
+
+/** Lock the one plugin-react development runtime route; all other `/@…` IDs remain physical candidates. */
+const PF01_VITE_EXACT_VIRTUAL_MODULE_IDS = new Set(['/@react-refresh']);
+
+/** Vite IDs are external only when virtual/builtin or explicitly declared by this package manifest. */
+export function classifyPf01ViteModuleId(moduleId, { repoRoot = REPO_ROOT } = {}) {
+  if (typeof moduleId !== 'string') return { kind: 'ignored' };
+  const canonical = moduleId.split('?')[0];
+  if (
+    PF01_VITE_EXACT_VIRTUAL_MODULE_IDS.has(canonical) ||
+    canonical.startsWith('\0') ||
+    canonical.startsWith('/@id/') ||
+    canonical.startsWith('virtual:') ||
+    canonical.startsWith('node:')
+  ) {
+    return { kind: 'external' };
+  }
+  if (canonical.startsWith('/') || canonical.startsWith('.')) return { kind: 'candidate', value: canonical };
+  if (/\.(?:[cm]?[jt]sx?|json|html?|css|scss|sass|less|svg|md)$/i.test(canonical)) {
+    return { kind: 'candidate', value: canonical };
+  }
+  const root = packageRoot(canonical);
+  if (root !== null && declaredPackageRoots(repoRoot).has(root)) return { kind: 'external' };
+  return { kind: 'candidate', value: canonical };
+}
+
 /** evidence 脱敏：家目录绝对路径替换为 <HOME> */
 export function sanitizeText(text) {
   const home = os.homedir();
@@ -95,14 +159,36 @@ export function pfDescriptorDigest(descriptorPath) {
   return sha256Text(canonical);
 }
 
+/** descriptor 的声明 digest 必须与当前原始字节复算值完全一致。 */
+export function assertCurrentPfDescriptorDigest(descriptorPath) {
+  const descriptor = JSON.parse(fs.readFileSync(descriptorPath, 'utf8'));
+  const declared = descriptor?.digest?.value;
+  const digest = pfDescriptorDigest(descriptorPath);
+  if (declared !== digest) {
+    throw new Error(`PF-01 descriptor digest 不一致: 实算 ${digest} != 声明 ${String(declared)}`);
+  }
+  return { descriptor, digest };
+}
+
 export function writeJson(filePath, value) {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
   fs.writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
 }
 
-export function makeRunId() {
-  // 2026-07-28T04:08:35.065Z → 20260728T040835Z（UTC，秒级）
-  return `${new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d+Z$/, '')}Z`;
+let lastRunTimestamp = '';
+let runSequence = 0;
+
+export function makeRunId(now = new Date()) {
+  // 毫秒 + PID + 同毫秒进程内序号，避免并发 verifier evidence 目录碰撞。
+  // 2026-07-28T04:08:35.065Z → 20260728T040835065Z-p12345-000
+  const timestamp = now.toISOString().replace(/[-:]/g, '').replace('.', '');
+  if (timestamp === lastRunTimestamp) {
+    runSequence += 1;
+  } else {
+    lastRunTimestamp = timestamp;
+    runSequence = 0;
+  }
+  return `${timestamp}-p${process.pid}-${String(runSequence).padStart(3, '0')}`;
 }
 
 /**
@@ -185,13 +271,28 @@ export async function capture(cmd, args, cwd = REPO_ROOT) {
 }
 
 /** git 只读查询（禁止任何 git 写操作；rev-parse/status 均为只读） */
-export async function gitInfo() {
-  const head = await capture('git', ['rev-parse', 'HEAD']);
-  const status = await capture('git', ['status', '--porcelain']);
+export async function gitInfo({ env = process.env, repoRoot = REPO_ROOT } = {}) {
+  assertNoGitAmbient(env);
+  const head = await capture('git', ['rev-parse', 'HEAD'], repoRoot);
+  const status = await capture('git', ['status', '--porcelain'], repoRoot);
   return {
     commit: head.exitCode === 0 ? head.stdout.trim() : 'unknown',
     worktreeDirty: status.exitCode === 0 ? status.stdout.trim().length > 0 : null,
   };
+}
+
+/** PF/verify 的开始与结束必须来自同一 commit 且拥有相同 clean state。 */
+export function sameGitIdentity(start, end) {
+  return (
+    start !== null &&
+    typeof start === 'object' &&
+    end !== null &&
+    typeof end === 'object' &&
+    typeof start.commit === 'string' &&
+    typeof end.commit === 'string' &&
+    start.commit === end.commit &&
+    start.worktreeDirty === end.worktreeDirty
+  );
 }
 
 export { require };

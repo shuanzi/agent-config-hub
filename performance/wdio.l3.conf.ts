@@ -13,18 +13,58 @@
  * provider 下 reloadSession 不重启应用进程，进程级样本只能靠多次 run）。
  */
 import type { Options } from '@wdio/types';
-import { cpSync, mkdtempSync, rmSync } from 'node:fs';
+import { cpSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 // 拉入 webdriverio 的全局 WebdriverIO namespace 类型
 import type {} from 'webdriverio';
+// @ts-expect-error runtime helper is a plain Node ESM module.
+import { HarnessPeakRssSampler } from '../scripts/orchestrator/pf01-resource.mjs';
+// prettier-ignore
+// @ts-expect-error runtime helper is a plain Node ESM module.
+import { readHarnessExitFailure, waitForHarnessLifecycleState, writeHarnessExitFailure, writeHarnessExitRequest } from '../scripts/orchestrator/pf01-lifecycle.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, '..');
 const appBinary = join(repoRoot, 'src-tauri/target/debug/agent-config-manager');
 
 let fixtureSandbox: string | null = null;
+let resourceSampler: InstanceType<typeof HarnessPeakRssSampler> | null = null;
+
+async function requestHarnessNormalExit(): Promise<void> {
+  const lifecyclePath = process.env.PF01_HARNESS_LIFECYCLE_PATH;
+  if (lifecyclePath === undefined || lifecyclePath.length === 0) return;
+
+  try {
+    const startedHarness = await waitForHarnessLifecycleState({
+      lifecyclePath,
+      expectedNormalExit: false,
+    });
+    writeHarnessExitRequest({ lifecyclePath, harness: startedHarness });
+    await waitForHarnessLifecycleState({
+      lifecyclePath,
+      expectedNormalExit: true,
+      expectedHarness: startedHarness,
+    });
+  } catch (error) {
+    writeHarnessExitFailure(lifecyclePath);
+    throw error;
+  }
+}
+
+function appendResourceRun(outputDir: string, run: unknown): void {
+  const resourcePath = join(outputDir, 'l3-resource-runs.json');
+  const existing = existsSync(resourcePath)
+    ? (JSON.parse(readFileSync(resourcePath, 'utf8')) as { runs?: unknown[] })
+    : null;
+  const payload = {
+    schemaVersion: 1,
+    metric: 'pf01.l3.peak_rss_bytes',
+    runs: [...(existing?.runs ?? []), run],
+  };
+  writeFileSync(resourcePath, `${JSON.stringify(payload, null, 2)}\n`, 'utf8');
+}
 
 // 与 tests/l3/wdio.conf.ts 相同的 Options.Testrunner 类型断言补齐。
 export const config = {
@@ -61,12 +101,47 @@ export const config = {
     const nativeRoot = join(fixtureSandbox, 'native-root');
     cpSync(join(repoRoot, 'fixtures/fx-01/native-root'), nativeRoot, { recursive: true });
     process.env.ACM_NATIVE_ROOT = nativeRoot;
+    process.env.PF01_HARNESS_LIFECYCLE_PATH = join(fixtureSandbox, 'harness-lifecycle.json');
+    resourceSampler = new HarnessPeakRssSampler({
+      lifecyclePath: process.env.PF01_HARNESS_LIFECYCLE_PATH,
+    });
+    resourceSampler.start();
   },
-  onComplete: () => {
+  // Runner 先成功 deleteSession，才执行 config afterSession。失败写到同一临时
+  // sandbox 的 marker；runner 对 hook 异常只记录日志，onComplete 会据此使 WDIO
+  // 非零，避免把未认证的 normal exit 误作有效采样。
+  afterSession: async () => {
+    await requestHarnessNormalExit();
+  },
+  onComplete: async () => {
+    let lifecycleFailure: Error | null = null;
+    if (process.env.PF01_OUTPUT_DIR !== undefined && resourceSampler !== null) {
+      try {
+        appendResourceRun(process.env.PF01_OUTPUT_DIR, await resourceSampler.finalize());
+      } catch (error) {
+        appendResourceRun(process.env.PF01_OUTPUT_DIR, resourceSampler.diagnosticRun(error));
+      }
+    }
+    const lifecyclePath = process.env.PF01_HARNESS_LIFECYCLE_PATH;
+    if (lifecyclePath !== undefined && lifecyclePath.length > 0) {
+      try {
+        if (readHarnessExitFailure(lifecyclePath) !== null) {
+          lifecycleFailure = new Error('PF-01 L3 harness normal exit not established');
+        }
+      } catch (error) {
+        lifecycleFailure =
+          error instanceof Error
+            ? error
+            : new Error('PF-01 harness lifecycle failure marker invalid');
+      }
+    }
+    resourceSampler = null;
     if (fixtureSandbox !== null) {
       rmSync(fixtureSandbox, { recursive: true, force: true });
       fixtureSandbox = null;
     }
     delete process.env.ACM_NATIVE_ROOT;
+    delete process.env.PF01_HARNESS_LIFECYCLE_PATH;
+    if (lifecycleFailure !== null) throw lifecycleFailure;
   },
 } as Options.Testrunner;

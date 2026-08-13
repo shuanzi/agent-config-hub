@@ -35,6 +35,8 @@ export async function ensureFx19HarnessBuilt() {
         '-c',
         FX19_HARNESS_CONF,
         '--',
+        '--bin',
+        'agent-config-manager',
         '--features',
         'test-harness',
       ],

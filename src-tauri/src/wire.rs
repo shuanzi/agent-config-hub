@@ -14,7 +14,7 @@ use ts_rs::TS;
 use crate::domain;
 
 /// 当前唯一支持的 wire 版本；不匹配在 ingress 封闭失败，不做协商或 fallback。
-pub const GATEWAY_WIRE_VERSION: u32 = 2;
+pub const GATEWAY_WIRE_VERSION: u32 = 3;
 
 // ---------------------------------------------------------------------------
 // 字符串枚举 DTO
@@ -40,12 +40,54 @@ wire_string_enum!(
 );
 wire_string_enum!(AssetScopeWire, "camelCase", Global, Project);
 wire_string_enum!(
+    MvpAssetTypeWire,
+    "camelCase",
+    Skill,
+    LongTermInstruction,
+    Subagent
+);
+wire_string_enum!(
+    SegmentSourceWire,
+    "camelCase",
+    GlobalApplicable,
+    ProjectNative
+);
+wire_string_enum!(
+    SkillPresenceWire,
+    "camelCase",
+    Absent,
+    Present,
+    Unknown,
+    Blocked,
+    Stale
+);
+wire_string_enum!(
+    SkillActivationWire,
+    "camelCase",
+    NotApplicable,
+    Enabled,
+    Disabled,
+    Unknown,
+    Blocked,
+    Stale
+);
+wire_string_enum!(
     ApplicabilityResolutionWire,
     "camelCase",
     Resolved,
     Unknown,
     Blocked,
     Stale
+);
+wire_string_enum!(
+    LocatorMatchedFieldWire,
+    "camelCase",
+    DisplayName,
+    AssetType,
+    Agent,
+    Ownership,
+    ProjectHint,
+    RedactedSummary
 );
 wire_string_enum!(
     ProjectApplicabilitySegmentKindWire,
@@ -385,6 +427,67 @@ pub struct ProjectApplicabilityQueryWire {
     pub view: ProjectApplicabilityViewWire,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+pub struct AllViewContextWire {}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(deny_unknown_fields)]
+pub struct GlobalViewContextWire {}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ProjectViewContextWire {
+    pub project_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+#[serde(deny_unknown_fields)]
+pub enum ViewContextWire {
+    All(AllViewContextWire),
+    Global(GlobalViewContextWire),
+    Project(ProjectViewContextWire),
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WorkbenchFiltersWire {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub agents: Option<Vec<AgentIdWire>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub source_ids: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub statuses: Option<Vec<AssetStatusFilterWire>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub project_ids: Option<Vec<String>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WorkbenchQueryWire {
+    pub asset_type: MvpAssetTypeWire,
+    pub view_context: ViewContextWire,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub filters: Option<WorkbenchFiltersWire>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct GlobalLocatorQueryWire {
+    pub search_text: String,
+    pub asset_types: Vec<MvpAssetTypeWire>,
+}
+
 /// request payload 封闭 union（ARC-02b：显式 tag，不用字符串 route）。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(
@@ -395,6 +498,8 @@ pub struct ProjectApplicabilityQueryWire {
 #[serde(deny_unknown_fields)]
 pub enum ReadRequestPayload {
     AssetList(AssetListQueryWire),
+    Workbench(WorkbenchQueryWire),
+    GlobalLocator(GlobalLocatorQueryWire),
     ProjectApplicability(ProjectApplicabilityQueryWire),
     AssetDetail(AssetDetailQueryWire),
     NativeFile(NativeFileQueryWire),
@@ -442,6 +547,166 @@ pub struct AssetListSnapshotWire {
     pub queried_at: String,
     /// ISO 8601
     pub index_updated_at: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SkillTargetStateWire {
+    pub agent: AgentIdWire,
+    pub presence: SkillPresenceWire,
+    pub activation: SkillActivationWire,
+    pub applicability: ApplicabilityResolutionWire,
+    pub enable_availability: SkillCellAvailabilityWire,
+    pub disable_availability: SkillCellAvailabilityWire,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub pending: Option<SkillTargetPendingWire>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub stable_reason: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+#[serde(deny_unknown_fields)]
+pub enum SkillCellAvailabilityWire {
+    Allowed,
+    Disabled(SkillCellUnavailableWire),
+    Blocked(SkillCellUnavailableWire),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SkillCellUnavailableWire {
+    pub reason_code: ReasonCodeWire,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SkillTargetPendingWire {
+    pub operation_id: String,
+    pub phase: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WorkbenchRowWire {
+    pub summary: AssetSummaryWire,
+    pub sort_base_name: String,
+    pub authoritative_input_order: u32,
+    pub status_memberships: Vec<AssetStatusFilterWire>,
+    pub skill_target_states: Vec<SkillTargetStateWire>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub redacted_summary: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WorkbenchSegmentWire {
+    pub id: String,
+    pub source: SegmentSourceWire,
+    pub display_label: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub project_id: Option<String>,
+    pub rows: Vec<WorkbenchRowWire>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct EffectiveContextFactWire {
+    pub asset: AssetRefWire,
+    pub asset_id: String,
+    pub project_id: String,
+    pub project_display_name: String,
+    pub adapter: AdapterProvenanceWire,
+    pub rule: RuleProvenanceWire,
+    pub authoritative_read_revision: String,
+    pub source_tier_id: String,
+    pub load_order: u32,
+    pub priority: i32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub override_relation: Option<OverrideRelationWire>,
+    pub resolution: ApplicabilityResolutionWire,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub reason_code: Option<ReasonCodeWire>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WorkbenchFindingWire {
+    pub asset_id: String,
+    pub reason_code: ReasonCodeWire,
+    pub context: EffectiveContextFactWire,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WorkbenchActualReadSnapshotWire {
+    pub query: WorkbenchQueryWire,
+    pub authoritative_read_revision: String,
+    pub segments: Vec<WorkbenchSegmentWire>,
+    pub effective_contexts: Vec<EffectiveContextFactWire>,
+    pub findings: Vec<WorkbenchFindingWire>,
+    pub aggregate_total: u32,
+    pub index_status: IndexStatusWire,
+    pub read_at: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct LocatorResultWire {
+    pub row: WorkbenchRowWire,
+    pub destination_view_context: ViewContextWire,
+    pub destination: LocatorDestinationWire,
+    pub matched_field: LocatorMatchedFieldWire,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    deny_unknown_fields
+)]
+#[ts(tag = "kind", rename_all = "camelCase")]
+pub enum LocatorDestinationWire {
+    SkillDetail {
+        #[serde(rename = "assetRef")]
+        #[ts(rename = "assetRef")]
+        asset_ref: AssetRefWire,
+    },
+    UnsupportedReadOnly {
+        #[serde(rename = "assetRef")]
+        #[ts(rename = "assetRef")]
+        asset_ref: AssetRefWire,
+        #[serde(rename = "reasonCode")]
+        #[ts(rename = "reasonCode")]
+        reason_code: ReasonCodeWire,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct LocatorGroupWire {
+    pub asset_type: MvpAssetTypeWire,
+    pub count: u32,
+    pub results: Vec<LocatorResultWire>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct GlobalLocatorSnapshotWire {
+    pub groups: Vec<LocatorGroupWire>,
+    pub aggregate_total: u32,
+    pub read_at: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -710,6 +975,8 @@ pub struct NativeFileSnapshotWire {
 #[serde(deny_unknown_fields)]
 pub enum SnapshotWire {
     AssetList(AssetListSnapshotWire),
+    Workbench(WorkbenchActualReadSnapshotWire),
+    GlobalLocator(GlobalLocatorSnapshotWire),
     ProjectApplicability(ProjectApplicabilitySnapshotWire),
     AssetDetail(AssetDetailSnapshotWire),
     NativeFile(NativeFileSnapshotWire),
@@ -847,12 +1114,54 @@ enum_convert_both!(
     (Project, Project)
 );
 enum_convert_both!(
+    MvpAssetTypeWire,
+    MvpAssetType,
+    (Skill, Skill),
+    (LongTermInstruction, LongTermInstruction),
+    (Subagent, Subagent)
+);
+enum_convert_both!(
+    SegmentSourceWire,
+    SegmentSource,
+    (GlobalApplicable, GlobalApplicable),
+    (ProjectNative, ProjectNative)
+);
+enum_convert_both!(
+    SkillPresenceWire,
+    SkillPresence,
+    (Absent, Absent),
+    (Present, Present),
+    (Unknown, Unknown),
+    (Blocked, Blocked),
+    (Stale, Stale)
+);
+enum_convert_both!(
+    SkillActivationWire,
+    SkillActivation,
+    (NotApplicable, NotApplicable),
+    (Enabled, Enabled),
+    (Disabled, Disabled),
+    (Unknown, Unknown),
+    (Blocked, Blocked),
+    (Stale, Stale)
+);
+enum_convert_both!(
     ApplicabilityResolutionWire,
     ApplicabilityResolution,
     (Resolved, Resolved),
     (Unknown, Unknown),
     (Blocked, Blocked),
     (Stale, Stale)
+);
+enum_convert_both!(
+    LocatorMatchedFieldWire,
+    LocatorMatchedField,
+    (DisplayName, DisplayName),
+    (AssetType, AssetType),
+    (Agent, Agent),
+    (Ownership, Ownership),
+    (ProjectHint, ProjectHint),
+    (RedactedSummary, RedactedSummary)
 );
 enum_convert_both!(
     ProjectApplicabilitySegmentKindWire,
@@ -1132,6 +1441,60 @@ impl From<ProjectApplicabilityViewWire> for domain::ProjectApplicabilityView {
     }
 }
 
+impl From<domain::ViewContext> for ViewContextWire {
+    fn from(value: domain::ViewContext) -> Self {
+        match value {
+            domain::ViewContext::All => ViewContextWire::All(AllViewContextWire {}),
+            domain::ViewContext::Global => ViewContextWire::Global(GlobalViewContextWire {}),
+            domain::ViewContext::Project { project_id } => {
+                ViewContextWire::Project(ProjectViewContextWire { project_id })
+            }
+        }
+    }
+}
+
+impl From<ViewContextWire> for domain::ViewContext {
+    fn from(value: ViewContextWire) -> Self {
+        match value {
+            ViewContextWire::All(_) => domain::ViewContext::All,
+            ViewContextWire::Global(_) => domain::ViewContext::Global,
+            ViewContextWire::Project(project) => domain::ViewContext::Project {
+                project_id: project.project_id,
+            },
+        }
+    }
+}
+
+impl From<WorkbenchFiltersWire> for domain::WorkbenchFilters {
+    fn from(value: WorkbenchFiltersWire) -> Self {
+        domain::WorkbenchFilters {
+            agents: value
+                .agents
+                .map(|items| items.into_iter().map(Into::into).collect()),
+            source_ids: value.source_ids,
+            statuses: value
+                .statuses
+                .map(|items| items.into_iter().map(Into::into).collect()),
+            project_ids: value.project_ids,
+        }
+    }
+}
+
+impl From<domain::WorkbenchFilters> for WorkbenchFiltersWire {
+    fn from(value: domain::WorkbenchFilters) -> Self {
+        WorkbenchFiltersWire {
+            agents: value
+                .agents
+                .map(|items| items.into_iter().map(Into::into).collect()),
+            source_ids: value.source_ids,
+            statuses: value
+                .statuses
+                .map(|items| items.into_iter().map(Into::into).collect()),
+            project_ids: value.project_ids,
+        }
+    }
+}
+
 impl From<AssetListFiltersWire> for domain::AssetListFilters {
     fn from(value: AssetListFiltersWire) -> Self {
         domain::AssetListFilters {
@@ -1159,6 +1522,19 @@ impl From<ReadRequestPayload> for domain::Query {
                     scope: query.scope.into(),
                     search_text: query.search_text,
                     filters: query.filters.map(Into::into),
+                })
+            }
+            ReadRequestPayload::Workbench(query) => {
+                domain::Query::Workbench(domain::WorkbenchQuery {
+                    asset_type: query.asset_type.into(),
+                    view_context: query.view_context.into(),
+                    filters: query.filters.map(Into::into),
+                })
+            }
+            ReadRequestPayload::GlobalLocator(query) => {
+                domain::Query::GlobalLocator(domain::GlobalLocatorQuery {
+                    search_text: query.search_text,
+                    asset_types: query.asset_types.into_iter().map(Into::into).collect(),
                 })
             }
             ReadRequestPayload::ProjectApplicability(query) => {
@@ -1213,6 +1589,190 @@ impl From<domain::AssetListSnapshot> for AssetListSnapshotWire {
             scope: value.scope.into(),
             queried_at: value.queried_at,
             index_updated_at: value.index_updated_at,
+        }
+    }
+}
+
+impl From<domain::WorkbenchQuery> for WorkbenchQueryWire {
+    fn from(value: domain::WorkbenchQuery) -> Self {
+        WorkbenchQueryWire {
+            asset_type: value.asset_type.into(),
+            view_context: value.view_context.into(),
+            filters: value.filters.map(Into::into),
+        }
+    }
+}
+
+impl From<domain::SkillTargetState> for SkillTargetStateWire {
+    fn from(value: domain::SkillTargetState) -> Self {
+        SkillTargetStateWire {
+            agent: value.agent.into(),
+            presence: value.presence.into(),
+            activation: value.activation.into(),
+            applicability: value.applicability.into(),
+            enable_availability: value.enable_availability.into(),
+            disable_availability: value.disable_availability.into(),
+            pending: value.pending.map(Into::into),
+            stable_reason: value.stable_reason,
+        }
+    }
+}
+
+impl From<domain::SkillCellAvailability> for SkillCellAvailabilityWire {
+    fn from(value: domain::SkillCellAvailability) -> Self {
+        match value {
+            domain::SkillCellAvailability::Allowed => Self::Allowed,
+            domain::SkillCellAvailability::Disabled { reason_code } => {
+                Self::Disabled(SkillCellUnavailableWire {
+                    reason_code: reason_code.into(),
+                })
+            }
+            domain::SkillCellAvailability::Blocked { reason_code } => {
+                Self::Blocked(SkillCellUnavailableWire {
+                    reason_code: reason_code.into(),
+                })
+            }
+        }
+    }
+}
+
+impl From<domain::SkillTargetPending> for SkillTargetPendingWire {
+    fn from(value: domain::SkillTargetPending) -> Self {
+        Self {
+            operation_id: value.operation_id,
+            phase: value.phase,
+        }
+    }
+}
+
+impl From<domain::WorkbenchRow> for WorkbenchRowWire {
+    fn from(value: domain::WorkbenchRow) -> Self {
+        WorkbenchRowWire {
+            summary: value.summary.into(),
+            sort_base_name: value.sort_base_name,
+            authoritative_input_order: value.authoritative_input_order,
+            status_memberships: value
+                .status_memberships
+                .into_iter()
+                .map(Into::into)
+                .collect(),
+            skill_target_states: value
+                .skill_target_states
+                .into_iter()
+                .map(Into::into)
+                .collect(),
+            redacted_summary: value.redacted_summary,
+        }
+    }
+}
+
+impl From<domain::WorkbenchSegment> for WorkbenchSegmentWire {
+    fn from(value: domain::WorkbenchSegment) -> Self {
+        WorkbenchSegmentWire {
+            id: value.id,
+            source: value.source.into(),
+            display_label: value.display_label,
+            project_id: value.project_id,
+            rows: value.rows.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
+impl From<domain::WorkbenchFinding> for WorkbenchFindingWire {
+    fn from(value: domain::WorkbenchFinding) -> Self {
+        WorkbenchFindingWire {
+            asset_id: value.asset_id,
+            reason_code: value.reason_code.into(),
+            context: value.context.into(),
+        }
+    }
+}
+
+impl From<domain::EffectiveProjectContext> for EffectiveContextFactWire {
+    fn from(value: domain::EffectiveProjectContext) -> Self {
+        let asset_id = value.asset.asset_id.clone();
+        EffectiveContextFactWire {
+            asset: value.asset.into(),
+            asset_id,
+            project_id: value.project_id,
+            project_display_name: value.project_display_name,
+            adapter: value.adapter.into(),
+            rule: value.rule.into(),
+            authoritative_read_revision: value.authoritative_read_revision,
+            source_tier_id: value.source_tier_id,
+            load_order: value.load_order,
+            priority: value.priority,
+            override_relation: value.override_relation.map(Into::into),
+            resolution: value.resolution.into(),
+            reason_code: value.reason_code.map(Into::into),
+        }
+    }
+}
+
+impl From<domain::WorkbenchActualReadSnapshot> for WorkbenchActualReadSnapshotWire {
+    fn from(value: domain::WorkbenchActualReadSnapshot) -> Self {
+        WorkbenchActualReadSnapshotWire {
+            query: value.query.into(),
+            authoritative_read_revision: value.authoritative_read_revision,
+            segments: value.segments.into_iter().map(Into::into).collect(),
+            effective_contexts: value
+                .effective_contexts
+                .into_iter()
+                .map(Into::into)
+                .collect(),
+            findings: value.findings.into_iter().map(Into::into).collect(),
+            aggregate_total: value.aggregate_total,
+            index_status: value.index_status.into(),
+            read_at: value.read_at,
+        }
+    }
+}
+
+impl From<domain::LocatorResult> for LocatorResultWire {
+    fn from(value: domain::LocatorResult) -> Self {
+        LocatorResultWire {
+            row: value.row.into(),
+            destination_view_context: value.destination_view_context.into(),
+            destination: value.destination.into(),
+            matched_field: value.matched_field.into(),
+        }
+    }
+}
+
+impl From<domain::LocatorDestination> for LocatorDestinationWire {
+    fn from(value: domain::LocatorDestination) -> Self {
+        match value {
+            domain::LocatorDestination::SkillDetail { asset } => {
+                LocatorDestinationWire::SkillDetail {
+                    asset_ref: asset.into(),
+                }
+            }
+            domain::LocatorDestination::UnsupportedReadOnly { asset, reason_code } => {
+                LocatorDestinationWire::UnsupportedReadOnly {
+                    asset_ref: asset.into(),
+                    reason_code: reason_code.into(),
+                }
+            }
+        }
+    }
+}
+
+impl From<domain::LocatorGroup> for LocatorGroupWire {
+    fn from(value: domain::LocatorGroup) -> Self {
+        LocatorGroupWire {
+            asset_type: value.asset_type.into(),
+            count: value.results.len() as u32,
+            results: value.results.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
+impl From<domain::GlobalLocatorSnapshot> for GlobalLocatorSnapshotWire {
+    fn from(value: domain::GlobalLocatorSnapshot) -> Self {
+        GlobalLocatorSnapshotWire {
+            groups: value.groups.into_iter().map(Into::into).collect(),
+            aggregate_total: value.aggregate_total,
+            read_at: value.read_at,
         }
     }
 }
@@ -1488,6 +2048,10 @@ impl From<domain::Snapshot> for SnapshotWire {
     fn from(value: domain::Snapshot) -> Self {
         match value {
             domain::Snapshot::AssetList(snapshot) => SnapshotWire::AssetList(snapshot.into()),
+            domain::Snapshot::Workbench(snapshot) => SnapshotWire::Workbench(snapshot.into()),
+            domain::Snapshot::GlobalLocator(snapshot) => {
+                SnapshotWire::GlobalLocator(snapshot.into())
+            }
             domain::Snapshot::ProjectApplicability(snapshot) => {
                 SnapshotWire::ProjectApplicability(snapshot.into())
             }

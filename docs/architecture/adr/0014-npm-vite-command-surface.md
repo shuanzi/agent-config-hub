@@ -24,11 +24,11 @@
 
 ## Interface 不变量
 
-- 未知 ticket/PF ID、缺少前置条件、子命令失败、超时或 evidence 写入失败都非零退出；
+- 未知 ticket/PF ID、缺少前置条件、子命令失败、超时或 evidence 写入失败都非零退出；唯一封闭例外为本次 FE-01 exact subject waiver：唯一 numeric latency 的 PF step 仍记录 automatic `fail`/exit `1`，只有其余六项 hard gate、final physical evidence、clean lineage 与 exact manual disposition 同时成立时，根 `verify:ticket` 才以 `accepted-with-waiver` exit `0` 返回；
 - 普通 verify/test 命令不改写 source、lockfile、budget 或 baseline；
 - 生成漂移在临时目录比较，不能靠自动修复制造通过；
 - 底层原生命令可用于诊断，但不能单独关闭票据；
-- `pass`、`fail` 与 `inconclusive` 明确区分，后两者都不能取得 gate credit；
+- `pass`、`fail` 与 `inconclusive` 明确区分，后两者都不能取得 gate credit；本次 FE-01 subject waiver 的 `accepted-with-waiver` 不等于 automatic PASS，不进入 clean-pass index，也不能取得 `RELEASE-GATE` credit；
 - evidence 不保存真实路径、正文、diff、秘密、签名凭证或可重放写入 payload；
 - test harness 与 production artifact identity 分开记录；
 - 所有命令在 FE-01 实际实现和运行前均保持 `planned / unverified`。

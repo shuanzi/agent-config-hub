@@ -77,6 +77,35 @@ describe('TauriFrontendGateway.observe', () => {
     expect(events).toHaveLength(1);
   });
 
+  it('未知 event assetType 或 indexStatus 均不得穿过 production observe seam', async () => {
+    let handler: EventHandler | null = null;
+    listenMock.mockImplementation(async (_event, callback) => {
+      handler = callback;
+      return () => {};
+    });
+    const events: WorkspaceEvent[] = [];
+    const handle = createTauriGateway().observe({ kind: 'workspace' }, (event) =>
+      events.push(event),
+    );
+    await handle.ready;
+
+    (handler as unknown as EventHandler)({
+      payload: {
+        wireVersion: GATEWAY_WIRE_VERSION,
+        event: { kind: 'assetsInvalidated', assetType: 'inventedAsset' },
+      },
+    });
+    (handler as unknown as EventHandler)({
+      payload: {
+        wireVersion: GATEWAY_WIRE_VERSION,
+        event: { kind: 'indexStatusChanged', indexStatus: 'inventedIndexStatus' },
+      },
+    });
+
+    expect(events).toEqual([]);
+    handle.unlisten();
+  });
+
   it('b. listen 首次拒绝→重试成功→ready resolve 并补发 assetsInvalidated', async () => {
     const unlistenFn = vi.fn();
     listenMock

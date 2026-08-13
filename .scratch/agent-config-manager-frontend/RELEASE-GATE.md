@@ -4,6 +4,8 @@
 
 **Direct blockers:** FE-01 至 FE-10（10 张行为 tickets）全部为 `done` 并附完成证据。FE-07R 已由 run `20260810T071547Z` 的 L0/L1/L3 actual-read evidence 关闭；冻结的 v0.2 契约、acceptance 或 planning 不是 `done` evidence；`ARCH-GATE` 维持 closed。
 
+FE-01 的 PF-01 development acceptance（L2 Vite dev/mock + L3 debug test-harness）即使有 exact manual `accepted-with-waiver` disposition，也不是 reference-Mac、release-like 或 production artifact 证据；它不更新 automatic-pass index，不能解除本门禁。发布仍须取得独立 fixed-reference/release environment 的预算复测与 production artifact 证据。
+
 ## 目的与边界
 
 本门禁只汇总已完成的实现证据，不新增前端行为票据，也不接管 FX-01 至 FX-19 的主归属。实现票据仍为 1 张 foundation/read ticket（FE-07R，FX-19）和 10 张行为 tickets（FE-01 至 FE-10）；FX-12 的单一集成 UI 旅程仍只属于 FE-10。它承接跨票据全回归、真实 adapter 契约回归、构建、打包及负向范围检查。

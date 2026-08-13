@@ -17,7 +17,7 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { runStep, writeJson, ARTIFACTS_ROOT, REPO_ROOT } from './lib.mjs';
+import { runStep, sha256File, writeJson, ARTIFACTS_ROOT, REPO_ROOT } from './lib.mjs';
 
 export const HARNESS_CONF = 'src-tauri/tauri.conf.test-harness.json';
 export const HARNESS_BINARY = 'src-tauri/target/debug/agent-config-manager';
@@ -54,6 +54,8 @@ export async function ensureHarnessBuilt() {
         '-c',
         HARNESS_CONF,
         '--',
+        '--bin',
+        'agent-config-manager',
         '--features',
         'test-harness',
       ],
@@ -80,6 +82,7 @@ export async function ensureHarnessBuilt() {
     identifier: conf.identifier,
     profile: 'debug',
     binary: HARNESS_BINARY,
+    binarySha256: sha256File(path.join(REPO_ROOT, HARNESS_BINARY)),
     provenance: 'L3 专用隔离测试构建；非生产签名/DMG，不取得 L4 credit',
   };
   writeJson(path.join(ARTIFACTS_ROOT, 'test-harness/identity.json'), identity);

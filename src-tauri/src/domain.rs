@@ -199,6 +199,54 @@ pub enum AssetStatusFilter {
     Drift,
 }
 
+/// FE-01 workbench status 的唯一权威输入。它刻意不复用 `AssetSummary`
+/// 的 generic availability：editable 必须同时来自 editAsset-specific
+/// availability 与 compatibility；缺失事实一律不猜测 membership。
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct WorkbenchStatusFacts {
+    pub edit_asset_availability: Option<ActionAvailability>,
+    pub compatibility: Option<CompatibilityStatus>,
+    pub normal: Option<bool>,
+    pub overridden: Option<bool>,
+    pub conflict: Option<bool>,
+    pub drift: Option<bool>,
+}
+
+pub fn derive_workbench_status_memberships(facts: &WorkbenchStatusFacts) -> Vec<AssetStatusFilter> {
+    let mut memberships = Vec::new();
+    if matches!(
+        (&facts.edit_asset_availability, facts.compatibility),
+        (
+            Some(ActionAvailability::Allowed),
+            Some(CompatibilityStatus::VerifiedWritable)
+        )
+    ) {
+        memberships.push(AssetStatusFilter::Editable);
+    }
+    match facts.compatibility {
+        Some(CompatibilityStatus::RecognizedReadOnly) => {
+            memberships.push(AssetStatusFilter::ReadOnly)
+        }
+        Some(CompatibilityStatus::IncompatibleBlocked) => {
+            memberships.push(AssetStatusFilter::Incompatible)
+        }
+        Some(CompatibilityStatus::VerifiedWritable) | None => {}
+    }
+    if facts.normal == Some(true) {
+        memberships.push(AssetStatusFilter::Normal);
+    }
+    if facts.overridden == Some(true) {
+        memberships.push(AssetStatusFilter::Overridden);
+    }
+    if facts.conflict == Some(true) {
+        memberships.push(AssetStatusFilter::Conflict);
+    }
+    if facts.drift == Some(true) {
+        memberships.push(AssetStatusFilter::Drift);
+    }
+    memberships
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AssetGroupBy {
     None,
@@ -226,6 +274,45 @@ pub struct AssetListQuery {
     pub filters: Option<AssetListFilters>,
 }
 
+// ---------------------------------------------------------------------------
+// FE-01 B2 read-only workbench query/snapshot
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MvpAssetType {
+    Skill,
+    LongTermInstruction,
+    Subagent,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ViewContext {
+    All,
+    Global,
+    Project { project_id: String },
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct WorkbenchFilters {
+    pub agents: Option<Vec<AgentId>>,
+    pub source_ids: Option<Vec<String>>,
+    pub statuses: Option<Vec<AssetStatusFilter>>,
+    pub project_ids: Option<Vec<String>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkbenchQuery {
+    pub asset_type: MvpAssetType,
+    pub view_context: ViewContext,
+    pub filters: Option<WorkbenchFilters>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GlobalLocatorQuery {
+    pub search_text: String,
+    pub asset_types: Vec<MvpAssetType>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AssetDetailQuery {
     pub asset: AssetRef,
@@ -240,6 +327,8 @@ pub struct NativeFileQuery {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Query {
     AssetList(AssetListQuery),
+    Workbench(WorkbenchQuery),
+    GlobalLocator(GlobalLocatorQuery),
     AssetDetail(AssetDetailQuery),
     NativeFile(NativeFileQuery),
     ProjectApplicability(ProjectApplicabilityQuery),
@@ -275,6 +364,187 @@ pub struct AssetListSnapshot {
     pub queried_at: String,
     /// ISO 8601
     pub index_updated_at: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SegmentSource {
+    GlobalApplicable,
+    ProjectNative,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SkillPresence {
+    Absent,
+    Present,
+    Unknown,
+    Blocked,
+    Stale,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SkillActivation {
+    NotApplicable,
+    Enabled,
+    Disabled,
+    Unknown,
+    Blocked,
+    Stale,
+}
+
+/// FE-01 只读 Skill cell 的操作可用性事实。它独立于通用 AssetCapabilities，
+/// 以免把未来 ticket 的 write command 映射进本 read-only slice。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SkillCellAvailability {
+    Allowed,
+    Disabled { reason_code: ReasonCode },
+    Blocked { reason_code: ReasonCode },
+}
+
+/// 可选的权威事务观察值。FE-01 只展示它，绝不创建或推进该事务。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SkillTargetPending {
+    pub operation_id: String,
+    pub phase: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SkillTargetState {
+    pub agent: AgentId,
+    pub presence: SkillPresence,
+    pub activation: SkillActivation,
+    pub applicability: ApplicabilityResolution,
+    pub enable_availability: SkillCellAvailability,
+    pub disable_availability: SkillCellAvailability,
+    pub pending: Option<SkillTargetPending>,
+    pub stable_reason: Option<String>,
+}
+
+impl SkillTargetState {
+    /// FE-01 cell facts are read-only, but their authority still has a closed semantic form.
+    pub fn is_semantically_valid(&self) -> bool {
+        let absent = matches!(self.presence, SkillPresence::Absent);
+        let present = matches!(self.presence, SkillPresence::Present);
+        let not_applicable = matches!(self.activation, SkillActivation::NotApplicable);
+        let active = matches!(
+            self.activation,
+            SkillActivation::Enabled | SkillActivation::Disabled
+        );
+        if absent != not_applicable || present != active {
+            return false;
+        }
+
+        let unresolved = matches!(
+            self.presence,
+            SkillPresence::Unknown | SkillPresence::Blocked | SkillPresence::Stale
+        ) || matches!(
+            self.activation,
+            SkillActivation::Unknown | SkillActivation::Blocked | SkillActivation::Stale
+        ) || matches!(
+            self.applicability,
+            ApplicabilityResolution::Unknown
+                | ApplicabilityResolution::Blocked
+                | ApplicabilityResolution::Stale
+        );
+        if unresolved {
+            return !matches!(self.enable_availability, SkillCellAvailability::Allowed)
+                && !matches!(self.disable_availability, SkillCellAvailability::Allowed);
+        }
+
+        match (self.presence, self.activation) {
+            (SkillPresence::Absent, SkillActivation::NotApplicable) => {
+                !matches!(self.disable_availability, SkillCellAvailability::Allowed)
+            }
+            (SkillPresence::Present, SkillActivation::Enabled) => {
+                !matches!(self.enable_availability, SkillCellAvailability::Allowed)
+            }
+            (SkillPresence::Present, SkillActivation::Disabled) => {
+                !matches!(self.disable_availability, SkillCellAvailability::Allowed)
+            }
+            _ => true,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkbenchRow {
+    pub summary: AssetSummary,
+    pub sort_base_name: String,
+    pub authoritative_input_order: u32,
+    pub status_memberships: Vec<AssetStatusFilter>,
+    pub skill_target_states: Vec<SkillTargetState>,
+    pub redacted_summary: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkbenchSegment {
+    pub id: String,
+    pub source: SegmentSource,
+    pub display_label: String,
+    pub project_id: Option<String>,
+    pub rows: Vec<WorkbenchRow>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkbenchFinding {
+    pub asset_id: String,
+    pub reason_code: ReasonCode,
+    pub context: EffectiveProjectContext,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkbenchActualReadSnapshot {
+    pub query: WorkbenchQuery,
+    pub authoritative_read_revision: String,
+    pub segments: Vec<WorkbenchSegment>,
+    pub effective_contexts: Vec<EffectiveProjectContext>,
+    pub findings: Vec<WorkbenchFinding>,
+    pub aggregate_total: u32,
+    pub index_status: IndexStatus,
+    pub read_at: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LocatorResult {
+    pub row: WorkbenchRow,
+    pub destination_view_context: ViewContext,
+    pub destination: LocatorDestination,
+    pub matched_field: LocatorMatchedField,
+}
+
+/// FE-01 locator 只有 Skill cells detail 是可消费 destination；其余只读类型
+/// 不伪装成 Skill detail，而以稳定失败 surface 返回给 UI。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LocatorDestination {
+    SkillDetail {
+        asset: AssetRef,
+    },
+    UnsupportedReadOnly {
+        asset: AssetRef,
+        reason_code: ReasonCode,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LocatorMatchedField {
+    DisplayName,
+    AssetType,
+    Agent,
+    Ownership,
+    ProjectHint,
+    RedactedSummary,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LocatorGroup {
+    pub asset_type: MvpAssetType,
+    pub results: Vec<LocatorResult>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GlobalLocatorSnapshot {
+    pub groups: Vec<LocatorGroup>,
+    pub aggregate_total: u32,
+    pub read_at: String,
 }
 
 // ---------------------------------------------------------------------------
@@ -541,6 +811,8 @@ pub struct NativeFileSnapshot {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Snapshot {
     AssetList(AssetListSnapshot),
+    Workbench(WorkbenchActualReadSnapshot),
+    GlobalLocator(GlobalLocatorSnapshot),
     ProjectApplicability(ProjectApplicabilitySnapshot),
     AssetDetail(AssetDetailSnapshot),
     NativeFile(NativeFileSnapshot),

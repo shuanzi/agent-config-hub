@@ -216,7 +216,15 @@ describe('ScriptedMockGateway', () => {
   it('applyScenario 映射 L2 场景参数', async () => {
     const failList = new ScriptedMockGateway();
     failList.applyScenario('fail-list');
-    expect((await failList.read(LIST_QUERY)).kind).toBe('readFailed');
+    expect(
+      (
+        await failList.read({
+          kind: 'workbench',
+          assetType: 'skill',
+          viewContext: { kind: 'all' },
+        })
+      ).kind,
+    ).toBe('readFailed');
 
     const stale = new ScriptedMockGateway();
     stale.applyScenario('stale-index');
@@ -243,5 +251,35 @@ describe('ScriptedMockGateway', () => {
     const calls = mock.getCallLog();
     expect(calls.length).toBeGreaterThan(0);
     expect(calls.every((call) => call.method === 'read')).toBe(true);
+  });
+
+  it('FE-01 locator mock 使用已登记的 fixture canonical facts 覆盖 Rust-first Unicode vectors', async () => {
+    const mock = new ScriptedMockGateway();
+    mock.setFixtureTextOverrides({ displayName: 'Café Straße' });
+
+    for (const searchText of ['  cafe\u0301  ', '  STRASSE  ', 'é S']) {
+      const result = await mock.read({
+        kind: 'globalLocator',
+        searchText,
+        assetTypes: ['skill', 'longTermInstruction', 'subagent'],
+      });
+      expect(result.kind).toBe('readSucceeded');
+      if (result.kind === 'readSucceeded') {
+        expect(result.snapshot.groups[0].results).toHaveLength(1);
+        expect(result.snapshot.groups[0].results[0].matchedField).toBe('displayName');
+      }
+    }
+  });
+
+  it('PF workbench 计数使用当前单一全局分页窗口，而不是 aggregate total', () => {
+    const mock = new ScriptedMockGateway();
+    mock.enablePerfCatalog('representative');
+    expect(
+      mock.perfWorkbenchVisibleCount({
+        kind: 'workbench',
+        assetType: 'skill',
+        viewContext: { kind: 'all' },
+      }),
+    ).toBe(20);
   });
 });

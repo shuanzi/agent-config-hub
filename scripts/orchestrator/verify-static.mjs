@@ -146,6 +146,40 @@ async function placeholderGuard() {
   );
 }
 
+/** L3 only compatibility alias must never enter the production frontend bundle. */
+async function l3CompatibilityAliasGuard() {
+  const id = 'L3 compatibility alias 不进入 production frontend bundle';
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'acm-production-frontend-'));
+  try {
+    const build = await runStep({
+      cmd: 'corepack',
+      args: ['npm', 'exec', '--', 'vite', 'build', '--outDir', tmp],
+      cwd: REPO_ROOT,
+      timeoutMs: 600_000,
+    });
+    if (build.exitCode !== 0) {
+      record(id, false, `production vite build exit ${build.exitCode}`);
+      return;
+    }
+    const stack = [tmp];
+    const offenders = [];
+    while (stack.length > 0) {
+      const dir = stack.pop();
+      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        const absolute = path.join(dir, entry.name);
+        if (entry.isDirectory()) {
+          stack.push(absolute);
+        } else if (entry.isFile() && fs.readFileSync(absolute, 'utf8').includes('__wdio_original_core__')) {
+          offenders.push(path.relative(tmp, absolute));
+        }
+      }
+    }
+    record(id, offenders.length === 0, offenders.length === 0 ? '' : `命中: ${offenders.join(', ')}`);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+}
+
 async function main() {
   await wireDriftGate();
   await step('tsc -b', 'corepack', ['npm', 'exec', '--', 'tsc', '-b']);
@@ -166,6 +200,7 @@ async function main() {
   );
   await bannedDepsGate();
   await placeholderGuard();
+  await l3CompatibilityAliasGuard();
 
   const failed = results.filter((entry) => !entry.ok);
   console.log(

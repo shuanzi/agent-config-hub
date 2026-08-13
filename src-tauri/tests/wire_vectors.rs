@@ -10,6 +10,10 @@ use std::path::PathBuf;
 use agent_config_manager_lib::adapter_registry::AdapterRegistry;
 use agent_config_manager_lib::catalog::Catalog;
 use agent_config_manager_lib::core::GatewayCore;
+use agent_config_manager_lib::domain::{
+    AgentId, ApplicabilityResolution, ReasonCode, SkillActivation, SkillCellAvailability,
+    SkillPresence, SkillTargetState,
+};
 use agent_config_manager_lib::ipc::{handle_read, MAX_REQUEST_BYTES};
 use agent_config_manager_lib::wire::{
     ActionAvailabilityWire, ReadRequestEnvelope, ReadResponsePayload, ReasonCodeWire,
@@ -32,6 +36,122 @@ fn fx19_core() -> GatewayCore {
     )
 }
 
+fn skill_state(
+    presence: SkillPresence,
+    activation: SkillActivation,
+    applicability: ApplicabilityResolution,
+    enable_availability: SkillCellAvailability,
+    disable_availability: SkillCellAvailability,
+) -> SkillTargetState {
+    SkillTargetState {
+        agent: AgentId::ClaudeCode,
+        presence,
+        activation,
+        applicability,
+        enable_availability,
+        disable_availability,
+        pending: None,
+        stable_reason: None,
+    }
+}
+
+fn unavailable() -> SkillCellAvailability {
+    SkillCellAvailability::Disabled {
+        reason_code: ReasonCode::ReadOnlyPolicy,
+    }
+}
+
+#[test]
+fn skill_cell_wire_domain_semantics_reject_contradictory_presence_activation_and_availability() {
+    let valid = [
+        skill_state(
+            SkillPresence::Absent,
+            SkillActivation::NotApplicable,
+            ApplicabilityResolution::Resolved,
+            SkillCellAvailability::Allowed,
+            unavailable(),
+        ),
+        skill_state(
+            SkillPresence::Present,
+            SkillActivation::Enabled,
+            ApplicabilityResolution::Resolved,
+            unavailable(),
+            SkillCellAvailability::Allowed,
+        ),
+        skill_state(
+            SkillPresence::Present,
+            SkillActivation::Disabled,
+            ApplicabilityResolution::Resolved,
+            SkillCellAvailability::Allowed,
+            unavailable(),
+        ),
+        skill_state(
+            SkillPresence::Unknown,
+            SkillActivation::Unknown,
+            ApplicabilityResolution::Unknown,
+            unavailable(),
+            unavailable(),
+        ),
+    ];
+    assert!(valid.iter().all(SkillTargetState::is_semantically_valid));
+
+    let invalid = [
+        // absent iff notApplicable; present iff enabled/disabled.
+        skill_state(
+            SkillPresence::Absent,
+            SkillActivation::Enabled,
+            ApplicabilityResolution::Resolved,
+            unavailable(),
+            unavailable(),
+        ),
+        skill_state(
+            SkillPresence::Present,
+            SkillActivation::NotApplicable,
+            ApplicabilityResolution::Resolved,
+            unavailable(),
+            unavailable(),
+        ),
+        // absent/disabled/enabled action availability contradictions.
+        skill_state(
+            SkillPresence::Absent,
+            SkillActivation::NotApplicable,
+            ApplicabilityResolution::Resolved,
+            unavailable(),
+            SkillCellAvailability::Allowed,
+        ),
+        skill_state(
+            SkillPresence::Present,
+            SkillActivation::Disabled,
+            ApplicabilityResolution::Resolved,
+            unavailable(),
+            SkillCellAvailability::Allowed,
+        ),
+        skill_state(
+            SkillPresence::Present,
+            SkillActivation::Enabled,
+            ApplicabilityResolution::Resolved,
+            SkillCellAvailability::Allowed,
+            unavailable(),
+        ),
+        // Any uncertainty makes both availability facts unavailable.
+        skill_state(
+            SkillPresence::Unknown,
+            SkillActivation::Unknown,
+            ApplicabilityResolution::Unknown,
+            SkillCellAvailability::Allowed,
+            unavailable(),
+        ),
+        skill_state(
+            SkillPresence::Present,
+            SkillActivation::Disabled,
+            ApplicabilityResolution::Stale,
+            SkillCellAvailability::Allowed,
+            unavailable(),
+        ),
+    ];
+    assert!(invalid.iter().all(|state| !state.is_semantically_valid()));
+}
+
 // ---------------------------------------------------------------------------
 // 正向 request vector
 // ---------------------------------------------------------------------------
@@ -40,12 +160,12 @@ fn fx19_core() -> GatewayCore {
 fn valid_request_vectors_decode() {
     let vectors = [
         json!({
-            "wireVersion": 2,
+            "wireVersion": 3,
             "requestId": "req-list-1",
             "payload": { "kind": "assetList", "scope": { "kind": "allAssets" } }
         }),
         json!({
-            "wireVersion": 2,
+            "wireVersion": 3,
             "requestId": "req-list-2",
             "payload": {
                 "kind": "assetList",
@@ -60,7 +180,7 @@ fn valid_request_vectors_decode() {
             }
         }),
         json!({
-            "wireVersion": 2,
+            "wireVersion": 3,
             "requestId": "req-detail-1",
             "payload": {
                 "kind": "assetDetail",
@@ -74,7 +194,7 @@ fn valid_request_vectors_decode() {
             }
         }),
         json!({
-            "wireVersion": 2,
+            "wireVersion": 3,
             "requestId": "req-file-1",
             "payload": {
                 "kind": "nativeFile",
@@ -89,11 +209,30 @@ fn valid_request_vectors_decode() {
             }
         }),
         json!({
-            "wireVersion": 2,
+            "wireVersion": 3,
             "requestId": "req-fx19-project",
             "payload": {
                 "kind": "projectApplicability",
                 "view": { "kind": "project", "projectId": "project-same-b" }
+            }
+        }),
+        json!({
+            "wireVersion": 3,
+            "requestId": "req-workbench",
+            "payload": {
+                "kind": "workbench",
+                "assetType": "skill",
+                "viewContext": { "kind": "all" },
+                "filters": { "agents": ["claude-code"], "statuses": ["editable"] }
+            }
+        }),
+        json!({
+            "wireVersion": 3,
+            "requestId": "req-locator",
+            "payload": {
+                "kind": "globalLocator",
+                "searchText": "demo",
+                "assetTypes": ["skill", "longTermInstruction", "subagent"]
             }
         }),
     ];
@@ -102,6 +241,150 @@ fn valid_request_vectors_decode() {
             serde_json::from_value(vector).expect("valid vector must decode");
         assert_eq!(envelope.wire_version, GATEWAY_WIRE_VERSION);
     }
+}
+
+#[test]
+fn workbench_and_locator_are_read_only_wire_variants() {
+    let workbench = json!({
+        "wireVersion": GATEWAY_WIRE_VERSION,
+        "requestId": "req-workbench-read",
+        "payload": {
+            "kind": "workbench",
+            "assetType": "skill",
+            "viewContext": { "kind": "all" }
+        }
+    });
+    let response = serde_json::to_value(handle_read(&core(), &workbench)).unwrap();
+    assert_eq!(response["payload"]["kind"], json!("readSucceeded"));
+    let snapshot = &response["payload"]["snapshot"];
+    assert_eq!(snapshot["kind"], json!("workbench"));
+    assert_eq!(snapshot["segments"][0]["source"], json!("globalApplicable"));
+    assert_eq!(
+        snapshot["segments"][0]["rows"][0]["statusMemberships"],
+        json!(["editable", "normal"])
+    );
+    assert_eq!(
+        snapshot["segments"][0]["rows"][0]["skillTargetStates"]
+            .as_array()
+            .unwrap()
+            .len(),
+        4
+    );
+
+    let locator = json!({
+        "wireVersion": GATEWAY_WIRE_VERSION,
+        "requestId": "req-locator-read",
+        "payload": {
+            "kind": "globalLocator",
+            "searchText": "demo",
+            "assetTypes": ["skill", "longTermInstruction", "subagent"]
+        }
+    });
+    let response = serde_json::to_value(handle_read(&core(), &locator)).unwrap();
+    assert_eq!(
+        response["payload"]["snapshot"]["kind"],
+        json!("globalLocator")
+    );
+    assert_eq!(
+        response["payload"]["snapshot"]["groups"]
+            .as_array()
+            .unwrap()
+            .len(),
+        3
+    );
+    let result = &response["payload"]["snapshot"]["groups"][0]["results"][0];
+    assert_eq!(result["matchedField"], json!("displayName"));
+    assert_eq!(result["destination"]["kind"], json!("skillDetail"));
+    assert_eq!(
+        result["destination"]["assetRef"],
+        result["row"]["summary"]["asset"]
+    );
+
+    let fx19_workbench = json!({
+        "wireVersion": GATEWAY_WIRE_VERSION,
+        "requestId": "req-workbench-fx19",
+        "payload": {
+            "kind": "workbench",
+            "assetType": "skill",
+            "viewContext": { "kind": "all" }
+        }
+    });
+    let response = serde_json::to_value(handle_read(&fx19_core(), &fx19_workbench)).unwrap();
+    let snapshot = &response["payload"]["snapshot"];
+    assert_eq!(snapshot["kind"], json!("workbench"));
+    assert!(snapshot["effectiveContexts"].as_array().unwrap().len() >= 2);
+    assert!(!snapshot["findings"].as_array().unwrap().is_empty());
+    assert_eq!(snapshot["segments"][0]["source"], json!("globalApplicable"));
+    // FE-07R 的 summary seam 未带 edit-specific/compatibility facts；绝不从其
+    // generic availability 猜测 status membership。
+    assert_eq!(
+        snapshot["segments"][0]["rows"][0]["statusMemberships"],
+        json!([])
+    );
+
+    let fx19_locator = json!({
+        "wireVersion": GATEWAY_WIRE_VERSION,
+        "requestId": "req-locator-fx19",
+        "payload": {
+            "kind": "globalLocator",
+            "searchText": "FX-19 global",
+            "assetTypes": ["skill", "longTermInstruction", "subagent"]
+        }
+    });
+    let locator_response = serde_json::to_value(handle_read(&fx19_core(), &fx19_locator)).unwrap();
+    let locator_result = &locator_response["payload"]["snapshot"]["groups"][0]["results"][0];
+    assert_eq!(
+        locator_result["row"]["summary"]["asset"],
+        snapshot["segments"][0]["rows"][0]["summary"]["asset"],
+        "configured registry locator must use the same resolver actual-read universe"
+    );
+    assert_eq!(locator_result["destination"]["kind"], json!("skillDetail"));
+    assert_eq!(
+        locator_result["destination"]["assetRef"],
+        locator_result["row"]["summary"]["asset"]
+    );
+    assert_eq!(
+        locator_result["row"]["redactedSummary"],
+        json!("结构化只读 Skill 摘要"),
+        "FE-07R actual locator must export the safe, redacted display summary"
+    );
+}
+
+#[test]
+fn workbench_rejects_invalid_project_filter_and_echoes_canonical_filters() {
+    let invalid = json!({
+        "wireVersion": GATEWAY_WIRE_VERSION,
+        "requestId": "req-workbench-invalid-filter",
+        "payload": {
+            "kind": "workbench",
+            "assetType": "skill",
+            "viewContext": { "kind": "project", "projectId": "project-same-a" },
+            "filters": { "projectIds": ["project-same-a"] }
+        }
+    });
+    let response = serde_json::to_value(handle_read(&fx19_core(), &invalid)).unwrap();
+    assert_eq!(response["payload"]["kind"], json!("readFailed"));
+    assert_eq!(response["payload"]["reasonCode"], json!("READ_FAILED"));
+
+    let canonical = json!({
+        "wireVersion": GATEWAY_WIRE_VERSION,
+        "requestId": "req-workbench-canonical-filter",
+        "payload": {
+            "kind": "workbench",
+            "assetType": "skill",
+            "viewContext": { "kind": "all" },
+            "filters": {
+                "agents": ["opencode", "claude-code", "opencode"],
+                "sourceIds": ["z", "a", "a"],
+                "statuses": ["drift", "editable", "drift"]
+            }
+        }
+    });
+    let response = serde_json::to_value(handle_read(&fx19_core(), &canonical)).unwrap();
+    let filters = &response["payload"]["snapshot"]["query"]["filters"];
+    assert_eq!(filters["agents"], json!(["claude-code", "opencode"]));
+    assert_eq!(filters["sourceIds"], json!(["a", "z"]));
+    assert_eq!(filters["statuses"], json!(["editable", "drift"]));
 }
 
 // ---------------------------------------------------------------------------
@@ -145,7 +428,7 @@ fn negative_vectors_are_rejected_at_decode() {
         }),
         // project view 的 opaque identity shape 不可扩展
         json!({
-            "wireVersion": 2, "requestId": "r",
+            "wireVersion": 3, "requestId": "r",
             "payload": {
                 "kind": "projectApplicability",
                 "view": { "kind": "project", "projectId": "project-same-b", "bogus": true }
@@ -193,9 +476,9 @@ fn assert_normalized_gateway_unavailable(response: &Value, request_id: &str) {
 fn wire_faults_normalize_to_gateway_unavailable() {
     let core = core();
     let cases: Vec<Value> = vec![
-        // 错误 wireVersion
+        // breaking bump 的精确前一版 V2：ingress 不协商、不 fallback。
         json!({
-            "wireVersion": 1, "requestId": "r1",
+            "wireVersion": 2, "requestId": "r1",
             "payload": { "kind": "assetList", "scope": { "kind": "allAssets" } }
         }),
         // 未知 tag
@@ -222,7 +505,7 @@ fn wire_faults_normalize_to_gateway_unavailable() {
 
     // 超限 payload
     let huge = json!({
-        "wireVersion": 2,
+        "wireVersion": 3,
         "requestId": "r1",
         "payload": {
             "kind": "assetList",
@@ -238,7 +521,7 @@ fn wire_faults_normalize_to_gateway_unavailable() {
 fn oversized_search_text_over_limit_is_rejected_but_normal_request_passes() {
     let core = core();
     let ok = json!({
-        "wireVersion": 2,
+        "wireVersion": 3,
         "requestId": "r-ok",
         "payload": { "kind": "assetList", "scope": { "kind": "allAssets" } }
     });
@@ -457,7 +740,7 @@ fn fx19_all_projection_wire_keeps_registry_provenance_and_stable_findings() {
 fn response_envelope_serializes_to_golden_json() {
     let core = core();
     let request = json!({
-        "wireVersion": 2,
+        "wireVersion": 3,
         "requestId": "req-golden-1",
         "payload": {
             "kind": "assetDetail",
@@ -541,7 +824,7 @@ fn response_envelope_serializes_to_golden_json() {
 fn masked_native_file_response_matches_fixture_golden() {
     let core = core();
     let request = json!({
-        "wireVersion": 2,
+        "wireVersion": 3,
         "requestId": "req-golden-2",
         "payload": {
             "kind": "nativeFile",
@@ -592,7 +875,7 @@ fn event_envelope_serializes_to_golden_json() {
     let text = serde_json::to_string(&envelope).unwrap();
     assert_eq!(
         text,
-        r#"{"wireVersion":2,"event":{"kind":"assetsInvalidated","assetType":"skill"}}"#
+        r#"{"wireVersion":3,"event":{"kind":"assetsInvalidated","assetType":"skill"}}"#
     );
 
     // 不带 assetType 时字段省略（skip_serializing_if），不序列化 null。
@@ -605,7 +888,7 @@ fn event_envelope_serializes_to_golden_json() {
     let text = serde_json::to_string(&envelope).unwrap();
     assert_eq!(
         text,
-        r#"{"wireVersion":2,"event":{"kind":"assetsInvalidated"}}"#
+        r#"{"wireVersion":3,"event":{"kind":"assetsInvalidated"}}"#
     );
 
     // 事件往返解码，未知 tag 被拒绝。

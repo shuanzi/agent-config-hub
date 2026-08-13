@@ -39,7 +39,9 @@
     {
       "id": "pf01.startup.first_list_visible",
       "surface": "冷启动与初始读取",
-      "definition": "测试入口模块求值（User Timing 起点）→ 首屏资产列表首次 ready 可见",
+      "definition": "测试入口模块求值（User Timing 起点）→ 首屏代表性 `.list-pane [role=\"option\"]` DOM 行真正可见",
+      "layer": "L2 mock renderer（headless Chrome + Vite dev server；非 release-like artifact）",
+      "selector": ".list-pane [role=\"option\"]",
       "minSamples": 5,
       "sampling": "每次 fresh load（重新 browser.url，页面上下文重置）"
     },
@@ -58,18 +60,42 @@
       "sampling": "两个 Agent 交替；起点为 probe arm 时刻，含一次本地 WebDriver 往返（恒定开销）"
     },
     {
-      "id": "pf01.select.source_visible",
+      "id": "pf01.select.skill_cells_visible",
       "surface": "选择资产",
-      "definition": "点击列表行（真实 WebDriver click）→ 详情区磁盘源码（pre.source-view）内容更新可见",
+      "definition": "点击 Skill 行（真实 WebDriver click）→ 结构化只读详情与四个固定 Agent cells 可见",
       "minSamples": 20,
       "sampling": "前两行交替点击；起点为 probe arm 时刻，含一次本地 WebDriver 往返（恒定开销）"
+    },
+    {
+      "id": "pf01.l3.cold_start.first_snapshot",
+      "surface": "L3 冷启动与首个可信 snapshot",
+      "definition": "隔离 test-harness 进程 spawn → 首个可信 WorkbenchActualReadSnapshot 完成；与 L2 renderer startup 分开统计",
+      "layer": "L3 test-harness debug（隔离临时 fixture 根；非 release-like artifact）",
+      "minSamples": 3,
+      "sampling": "每次 fresh harness cold start；仅记录正常退出的独立运行"
     }
   ],
-  "budgetStatus": "baseline-collected / budget-not-frozen",
-  "budgetNote": "FE-01 只采集首条 baseline；数值预算未冻结，建议预算写入 evidence 的 proposed-budgets.json，需用户单独授权后方可进入版本控制的 performance/budgets manifest",
+  "resourceMetrics": [
+    {
+      "id": "pf01.l3.peak_rss_bytes",
+      "surface": "L3 test-harness 资源 provenance",
+      "definition": "每次 cold start 仅采 agent-config-manager harness PID 及后代的 process-tree RSS bytes；从成功启动至正常退出每 50ms 采样，记录每次峰值；排除 WDIO/Vite，L2 与 L4 不采此项",
+      "unit": "bytes",
+      "sampleCount": 3,
+      "aggregation": "保留 3 次 raw peak，并记录 max",
+      "sampling": "agent-config-manager harness PID + 后代；50ms process-tree RSS bytes；排除 WDIO/Vite；成功启动至正常退出"
+    }
+  ],
+  "budgetStatus": "formula-authorized / clean-manifest-gated",
+  "budgetNote": "完整 clean representative baseline 首次运行只收集样本，保持 budget-not-frozen/inconclusive，绝不生成版本化预算；须独立人工审核后才可冻结与比较。仅 descriptor digest、完整 provenance 与 schema 均匹配的 manifest 才是 frozen。旧 20260810T124356Z 仅 preliminary/inconclusive，禁止追补 provenance 或作为冻结来源。",
+  "measurementInputs": {
+    "schemaVersion": 5,
+    "algorithm": "pf01-measurement-contract-v5",
+    "responsibility": "独立固定 PF/L3 WDIO、cold-start/RSS、统计与预算比较、collector 与显式 freeze 输入；L2 actual Vite dev ModuleGraph 为每 run SUT identity，不能折入 measurement contract digest；不替代 L3 harness buildInputs 或 binary SHA。"
+  },
   "digest": {
     "algorithm": "sha256",
     "canonicalization": "将本文件 digest.value 置为空字符串后对文件原始字节求 sha256；由 scripts/orchestrator/lib.mjs 的 pfDescriptorDigest 复算",
-    "value": "9920956c73cd524f43232f6f9fe27024c7b104d4ce7ff9c91c734e9ac9cfdf2d"
+    "value": "eb604d3c0d0d20e4b688da9b989d6f8f2076f918a63755cb0cb6a58c6f8ae1c7"
   }
 }
