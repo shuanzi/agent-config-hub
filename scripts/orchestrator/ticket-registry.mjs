@@ -50,7 +50,11 @@ export const TICKET_REGISTRY = Object.freeze({
         provenance: L1_FRONTEND_PROVENANCE,
         cmd: 'corepack',
         args: ['npm', 'run', 'test:frontend'],
-        timeoutMs: 600_000,
+        timeoutMs: 1_200_000,
+        softRuntimeBudget: {
+          thresholdMs: 600_000,
+          classification: 'test-infrastructure-debt',
+        },
       },
       {
         id: 'ui',

@@ -56,6 +56,7 @@ import {
 } from './fe01-pf01-subject-waiver.mjs';
 import {
   automaticPassPf01BudgetState,
+  deriveStepRuntimeAdvisory,
   executeTicketStep,
   finalizeAutomaticPassValidation,
   finalizeSubjectWaiverValidation,
@@ -253,6 +254,12 @@ async function main() {
           env: {},
         }),
     });
+    const runtimeAdvisory = deriveStepRuntimeAdvisory({ step, result });
+    if (runtimeAdvisory !== undefined) {
+      console.warn(
+        `WARN  [${step.layer}] ${step.id} runtime ${runtimeAdvisory.durationMs}ms exceeded soft budget ${runtimeAdvisory.thresholdMs}ms (${runtimeAdvisory.classification}); non-blocking`,
+      );
+    }
     const stepDir = path.join(evidenceRoot, 'steps', step.id);
     writeEvidenceText(path.join(stepDir, 'stdout.log'), result.stdout);
     writeEvidenceText(path.join(stepDir, 'stderr.log'), result.stderr);

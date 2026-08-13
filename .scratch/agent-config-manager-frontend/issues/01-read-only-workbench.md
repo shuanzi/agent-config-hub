@@ -8,7 +8,7 @@
 
 **Primary contract fixture:** `FX-01 single-skill-ready`
 
-**Source of truth:** `docs/frontend/Agent_Config_Manager_前端契约_v0.2.md` §§3–5、7、9；closure 只以稳定索引 `.artifacts/verification/FE-01/latest-clean-subject-accepted-with-waiver.json` 为证据指针（本次 clean run `20260812T115759948Z-p90022-000`，commit `89b6ec2d8de62dd865e5ffb6af18d8eb08124c9e`）。
+**Source of truth:** `docs/frontend/Agent_Config_Manager_前端契约_v0.2.md` §§3–5、7、9；closure 只以稳定索引 `.artifacts/verification/FE-01/latest-clean-subject-accepted-with-waiver.json` 为证据指针，具体 backing run/commit 必须由该物理索引解析。
 
 - [x] 可见一级导航仅为 Skills、长期指令、Subagents；首次进入固定为 Skills + `all`。Hook 不构成工作台或 locator 的可达目的地。
 - [x] `workbench` 只消费 closed `AssetListQuery` 和同次权威 `WorkbenchActualReadSnapshot`。`WorkbenchFilters` 仅含四固定 Agent、opaque source ID、封闭 status 与仅 `all` 可用的 opaque project ID；集合内 OR、字段间 AND，去重并 canonical echo，空约束省略。`editable` 只命中 `editAsset`-specific `ActionAvailability=allowed` 且 `CompatibilityStatus=verifiedWritable`；export/delete/convert 等其他 operation 即使 allowed、但 edit disabled 也不得命中。未知字段、空 ID、非法 enum 或非法 `projectIds` 必须稳定 `ReadFailed`，不能静默降级。
@@ -21,7 +21,7 @@
 
 ## 验证命令契约
 
-**状态：** 已闭合。`npm run verify:ticket -- FE-01` 的 clean run `20260812T115759948Z-p90022-000` 以 `accepted-with-waiver`、root exit `0` 结束；稳定指针为 `.artifacts/verification/FE-01/latest-clean-subject-accepted-with-waiver.json`，而不是本次 run 目录。
+**状态：** 已闭合。`npm run verify:ticket -- FE-01` 的 clean closure manifest 以 `accepted-with-waiver`、root exit `0` 结束；稳定指针为 `.artifacts/verification/FE-01/latest-clean-subject-accepted-with-waiver.json`，具体 backing run/commit 必须由该物理索引解析，而不是从本次 run 目录推断。
 
 **前置条件：** FE-07R 已 `done` 且留存其 actual-read evidence；其 shared harness、隔离 `FX-01` fixture 和测试构建可用，不得读取真实用户配置。
 
@@ -32,3 +32,9 @@
 ## FE-01 local performance debt（non-status record）
 
 本地性能债务：`deferred / post-optimization`。仅绑定 FE-01 subject historical PF-01 run `20260812T035717854Z-p74069-000`（commit `9c91e042c39023d7a30fcc04fbd1d0e36985fdbf`）的唯一 numeric latency violation：`pf01.startup.first_list_visible` p50 `16.2ms` 超 frozen limit `15.75ms`，delta `0.45ms`。automatic result 保持 `fail`/exit `1`；显式 manual disposition 为 `accepted-with-waiver`，未知根因，不设 owner 或日期。此记录不构成 automatic PASS 或 release/reference evidence，不更新 `RELEASE-GATE`。
+
+## FE-01 frontend test runtime debt（non-status record）
+
+仅当 stable index `.artifacts/verification/FE-01/latest-clean-subject-accepted-with-waiver.json` 解析的 backing manifest 的 `steps` 数组中唯一 `id=frontend` 的 step 同时满足 `status=pass`、`exitCode=0`、`timedOut=false`，且 `durationMs > 600000`（按该 manifest `commit` 对应 registry 的 `steps` 数组中唯一 `id=frontend` step 的 `softRuntimeBudget.thresholdMs`）时，才记录 `deferred / post-optimization` 的 `test-infrastructure-debt`。
+
+该记录为 `non-blocking`，不改变 PF-01 automatic `fail`/exit `1`、FE-01 closure 或 `RELEASE-GATE`。

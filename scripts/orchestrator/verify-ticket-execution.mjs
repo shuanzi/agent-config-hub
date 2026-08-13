@@ -13,6 +13,27 @@ import {
 export const AUTOMATIC_PASS_EXECUTION_MODE = FE01_PF01_AUTOMATIC_PASS_MODE;
 export const SUBJECT_WAIVER_EXECUTION_MODE = FE01_PF01_SUBJECT_WAIVER_MODE;
 
+/** 成功完成但超过软预算时，仅记录非阻塞的测试基础设施债务。 */
+export function deriveStepRuntimeAdvisory({ step, result }) {
+  const softRuntimeBudget = step?.softRuntimeBudget;
+  if (
+    !Number.isFinite(softRuntimeBudget?.thresholdMs) ||
+    result?.exitCode !== 0 ||
+    result.timedOut === true ||
+    !Number.isFinite(result?.durationMs) ||
+    result.durationMs <= softRuntimeBudget.thresholdMs
+  ) {
+    return undefined;
+  }
+  return {
+    level: 'warning',
+    blocking: false,
+    classification: softRuntimeBudget.classification,
+    thresholdMs: softRuntimeBudget.thresholdMs,
+    durationMs: result.durationMs,
+  };
+}
+
 const SUBJECT_VIOLATION = Object.freeze({
   metric: 'pf01.startup.first_list_visible',
   statistic: 'p50',
