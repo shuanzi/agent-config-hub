@@ -48,86 +48,86 @@
 
 ### FE-02：类型特定只读详情与 Hook 负向边界
 
-- [ ] 3.7 重新读取并验证 ARCH-GATE=`closed`、FE-02=`ready-for-agent` 和 direct blocker FE-01=done 且有 evidence；任一不满足，记录 blocker 并停止 FE-02 slice。
+- [ ] 3.7 重新读取并验证：仅当 ARCH-GATE=`closed`、FE-02 正式 Ticket Status=`ready-for-agent` 和 direct blocker FE-01=done 且有 evidence，才可开始 FE-02 slice；task-only 功能检查点不得替代上述正式状态、gate 或 direct blocker evidence。任一不满足，记录 blocker 并停止 FE-02 slice。
 - [ ] 3.8 在 FE-02 内完成最小 contract／domain／Rust-first wire delta，定义 Skill／Subagent／长期指令的只读 read surfaces、Hook UI 不可达及 FX-03 decode／未知字段／风险／遮蔽／no-execution 边界；不增加编辑。
 - [ ] 3.9 在 FE-02 内生成或复验 TypeScript wire、vectors 与 drift，并实现类型特定只读详情和相应安全 finding 表面。
-- [ ] 3.10 在 FE-02 内执行 L0／L1 read／contract-security、L2 只读详情与 Hook 不可达、L3 actual multi-file read，以及 PF-02／PF-03 read evidence；明确无 L3 write，且不得以 Mock 代替所需 closure 证据。
-- [ ] 3.11 在 FE-02 内运行 `npm run verify:ticket -- FE-02`，保留命令、层级、运行标识和未覆盖边界。
-- [ ] 3.12 对 FE-02 进行独立只读复审；只有 3.7～3.11 的证据满足 acceptance，才标记 FE-02 done 并更新 FE-03 与 FE-10 frontier。
+- [ ] 3.10 在 FE-02 内只执行 L0／L1 read／contract-security、L2 只读详情与 Hook 不可达、L3 actual multi-file read；明确无 L3 write，且不得以 Mock 代替所需 closure 证据。上述功能检查完成仅可记录为 non-closure 的 task-only `functional checks complete`，不得标记 done、更新 frontier 或替代正式 gate／direct blocker evidence。
+- [ ] 3.11 仅在 FE-02 自身授权建立的 registry entry 已存在且 3.10 已记录 `functional checks complete` 后，先运行 PF-02／PF-03 read evidence，再运行 `npm run verify:ticket -- FE-02`；保留命令、层级、运行标识和未覆盖边界。PF fail／inconclusive 或正式 closure 失败均阻止 FE-02 done。
+- [ ] 3.12 对 FE-02 进行独立只读复审；任何功能、PF 或正式 closure 失败／inconclusive 均停止本 slice 尚未开始的后续实现、PF、closure，仍须进入本复审并独立记录 finding；复审本身不是 closure，不得标记 done 或更新 FE-03 与 FE-10 frontier；只有全部证据满足 acceptance，才可标记 FE-02 done 并更新该 frontier。
 
 ### FE-10：只读响应式和可访问性表面
 
-- [ ] 3.13 重新读取并验证 ARCH-GATE=`closed`、FE-10=`ready-for-agent` 和 direct blocker FE-02=done 且有 evidence；任一不满足，记录 blocker 并停止 FE-10 slice。
+- [ ] 3.13 重新读取并验证：仅当 ARCH-GATE=`closed`、FE-10 正式 Ticket Status=`ready-for-agent` 和 direct blocker FE-02=done 且有 evidence，才可开始 FE-10 slice；task-only 功能检查点不得替代上述正式状态、gate 或 direct blocker evidence。任一不满足，记录 blocker 并停止 FE-10 slice。
 - [ ] 3.14 在 FE-10 内完成只读宽／中／窄、精确列表控件／焦点／搜索呈现和四 Agent 状态可访问性的最小 contract／domain／Rust-first wire delta；不得引入 FE-03～FE-09 的写入行为。
 - [ ] 3.15 在 FE-10 内生成或复验 TypeScript wire、vectors 与 drift，并实现响应式只读 UI、焦点旅程和语义状态。
-- [ ] 3.16 在 FE-10 内只执行 L0／L1 可访问性／状态测试和 L2 响应式 journey；明确无 L3、无 PF。
-- [ ] 3.17 在 FE-10 内运行 `npm run verify:ticket -- FE-10`，保留命令、层级、运行标识和未覆盖边界。
-- [ ] 3.18 对 FE-10 进行独立只读复审；只有 3.13～3.17 的证据满足 acceptance，才标记 FE-10 done 并更新 frontier。
+- [ ] 3.16 在 FE-10 内只执行 L0／L1 可访问性／状态测试和 L2 响应式 journey；明确无 L3、无 PF。上述功能检查完成仅可记录为 non-closure 的 task-only `functional checks complete`，不得标记 done、更新 frontier 或替代正式 gate／direct blocker evidence。
+- [ ] 3.17 仅在 FE-10 自身授权建立的 registry entry 已存在且 3.16 已记录 `functional checks complete` 后，运行 `npm run verify:ticket -- FE-10`；保留命令、层级、运行标识和未覆盖边界。正式 closure 失败阻止 FE-10 done。
+- [ ] 3.18 对 FE-10 进行独立只读复审；任何功能或正式 closure 失败／inconclusive 均停止本 slice 尚未开始的后续实现、closure，仍须进入本复审并独立记录 finding；复审本身不是 closure，不得标记 done 或更新 frontier；只有全部证据满足 acceptance，才可标记 FE-10 done 并更新 frontier。
 
 ### FE-03：三类编辑草稿与 dirty guard
 
-- [ ] 3.19 重新读取并验证 ARCH-GATE=`closed`、FE-03=`ready-for-agent` 和 direct blocker FE-02=done 且有 evidence；任一不满足，记录 blocker 并停止 FE-03 slice。
+- [ ] 3.19 重新读取并验证：仅当 ARCH-GATE=`closed`、FE-03 正式 Ticket Status=`ready-for-agent` 和 direct blocker FE-02=done 且有 evidence，才可开始 FE-03 slice；task-only 功能检查点不得替代上述正式状态、gate 或 direct blocker evidence。任一不满足，记录 blocker 并停止 FE-03 slice。
 - [ ] 3.20 在 FE-03 内完成三类 `editAsset` 草稿、长期指令首次实际变更建草稿、dirty guard、未知内容保真／只读的最小 contract／domain／Rust-first wire delta；不纳入 apply 或 L3。
 - [ ] 3.21 在 FE-03 内生成或复验 TypeScript wire、vectors 与 drift，并实现共享草稿状态与类型特定编辑表面。
-- [ ] 3.22 在 FE-03 内执行 L0／L1 草稿／保真／dirty guard、L2 编辑 journey 与 PF-02／PF-03 edit evidence；明确无 L3，且不得取得 actual Tauri IPC／磁盘写入 credit。
-- [ ] 3.23 在 FE-03 内运行 `npm run verify:ticket -- FE-03`，保留命令、层级、运行标识和未覆盖边界。
-- [ ] 3.24 对 FE-03 进行独立只读复审；只有 3.19～3.23 的证据满足 acceptance，才标记 FE-03 done 并更新 frontier。
+- [ ] 3.22 在 FE-03 内只执行 L0／L1 草稿／保真／dirty guard 与 L2 编辑 journey；明确无 L3，且不得取得 actual Tauri IPC／磁盘写入 credit。上述功能检查完成仅可记录为 non-closure 的 task-only `functional checks complete`，不得标记 done、更新 frontier 或替代正式 gate／direct blocker evidence。
+- [ ] 3.23 仅在 FE-03 自身授权建立的 registry entry 已存在且 3.22 已记录 `functional checks complete` 后，先运行 PF-02／PF-03 edit evidence，再运行 `npm run verify:ticket -- FE-03`；保留命令、层级、运行标识和未覆盖边界。PF fail／inconclusive 或正式 closure 失败均阻止 FE-03 done。
+- [ ] 3.24 对 FE-03 进行独立只读复审；任何功能、PF 或正式 closure 失败／inconclusive 均停止本 slice 尚未开始的后续实现、PF、closure，仍须进入本复审并独立记录 finding；复审本身不是 closure，不得标记 done 或更新 frontier；只有全部证据满足 acceptance，才可标记 FE-03 done 并更新 frontier。
 
 ### FE-04：共享安全写入与项目投影原生写回
 
-- [ ] 3.25 重新读取并验证 ARCH-GATE=`closed`、FE-04=`ready-for-agent` 和 direct blocker FE-03=done 且有 evidence；任一不满足，记录 blocker 并停止 FE-04 slice。
+- [ ] 3.25 重新读取并验证：仅当 ARCH-GATE=`closed`、FE-04 正式 Ticket Status=`ready-for-agent` 和 direct blocker FE-03=done 且有 evidence，才可开始 FE-04 slice；task-only 功能检查点不得替代上述正式状态、gate 或 direct blocker evidence。任一不满足，记录 blocker 并停止 FE-04 slice。
 - [ ] 3.26 在 FE-04 内完成 prepare／review／confirm／apply、target 参数变更失效并重新 prepare／review、项目视图全局 `AssetRef` 原生写回、受影响 contexts、无项目副本和 native disable `editAsset`／disabled 的最小 contract／domain／Rust-first wire delta；不得把 delete 归入 FE-04 或回落为 delete。
 - [ ] 3.27 在 FE-04 内生成 TypeScript wire、vectors 与 drift，并实现共享事务、revalidation、全局原生写回和 native disable 解析。
-- [ ] 3.28 在 FE-04 内执行 L0／L1 事务／重验、L2 review-confirm journey、L3 isolated temp prepare／apply／conflict／recovery 与 PF-04 evidence；actual runtime credit 仅来自该隔离输入穿过真实 WebView／Core／IPC 边界，不证明真实用户项目、配置或生产 artifact。
-- [ ] 3.29 在 FE-04 内运行 `npm run verify:ticket -- FE-04`，保留命令、层级、运行标识和未覆盖边界。
-- [ ] 3.30 对 FE-04 进行独立只读复审；只有 3.25～3.29 的证据满足 acceptance，才标记 FE-04 done 并更新 FE-05～FE-09 frontier。
+- [ ] 3.28 在 FE-04 内只执行 L0／L1 事务／重验、L2 review-confirm journey、L3 isolated temp prepare／apply／conflict／recovery；actual runtime credit 仅来自该隔离输入穿过真实 WebView／Core／IPC 边界，不证明真实用户项目、配置或生产 artifact。上述功能检查完成仅可记录为 non-closure 的 task-only `functional checks complete`，不得标记 done、更新 frontier 或替代正式 gate／direct blocker evidence。
+- [ ] 3.29 仅在 FE-04 自身授权建立的 registry entry 已存在且 3.28 已记录 `functional checks complete` 后，先运行 PF-04 evidence，再运行 `npm run verify:ticket -- FE-04`；保留命令、层级、运行标识和未覆盖边界。PF fail／inconclusive 或正式 closure 失败均阻止 FE-04 done。
+- [ ] 3.30 对 FE-04 进行独立只读复审；任何功能、PF 或正式 closure 失败／inconclusive 均停止本 slice 尚未开始的后续实现、PF、closure，仍须进入本复审并独立记录 finding；复审本身不是 closure，不得标记 done 或更新 FE-05～FE-09 frontier；只有全部证据满足 acceptance，才可标记 FE-04 done 并更新该 frontier。
 
 ## 4. FE-05、FE-06、FE-07、FE-08 与 FE-09 的垂直 slices
 
 ### FE-05：独立创建／导入与同格式安装
 
-- [ ] 4.1 重新读取并验证 ARCH-GATE=`closed`、FE-05=`ready-for-agent` 和 direct blocker FE-04=done 且有 evidence；任一不满足，记录 blocker 并停止 FE-05 slice。
+- [ ] 4.1 重新读取并验证：仅当 ARCH-GATE=`closed`、FE-05 正式 Ticket Status=`ready-for-agent` 和 direct blocker FE-04=done 且有 evidence，才可开始 FE-05 slice；task-only 功能检查点不得替代上述正式状态、gate 或 direct blocker evidence。任一不满足，记录 blocker 并停止 FE-05 slice。
 - [ ] 4.2 在 FE-05 内完成长期指令独立 create／import、Skill toggle 同格式 install、完整 target scope／native location／summary、独立结果与 reread 的最小 contract／domain／Rust-first wire delta；不包含 convert。
 - [ ] 4.3 在 FE-05 内生成 TypeScript wire、vectors 与 drift，并实现 create／import、同格式 install 和结果 reread。
-- [ ] 4.4 在 FE-05 内执行 L0／L1 operation mapping、L2 target-summary journey 与 L3 isolated temp create／import／install collision；无新增 PF。actual runtime credit 仅来自该隔离输入穿过真实 WebView／Core／IPC 边界，不证明真实用户项目、配置或生产 artifact。
-- [ ] 4.5 在 FE-05 内运行 `npm run verify:ticket -- FE-05`，保留命令、层级、运行标识和未覆盖边界。
-- [ ] 4.6 对 FE-05 进行独立只读复审；只有 4.1～4.5 的证据满足 acceptance，才标记 FE-05 done 并更新 frontier。
+- [ ] 4.4 在 FE-05 内只执行 L0／L1 operation mapping、L2 target-summary journey 与 L3 isolated temp create／import／install collision；无新增 PF。actual runtime credit 仅来自该隔离输入穿过真实 WebView／Core／IPC 边界，不证明真实用户项目、配置或生产 artifact。上述功能检查完成仅可记录为 non-closure 的 task-only `functional checks complete`，不得标记 done、更新 frontier 或替代正式 gate／direct blocker evidence。
+- [ ] 4.5 仅在 FE-05 自身授权建立的 registry entry 已存在且 4.4 已记录 `functional checks complete` 后，运行 `npm run verify:ticket -- FE-05`；保留命令、层级、运行标识和未覆盖边界。正式 closure 失败阻止 FE-05 done。
+- [ ] 4.6 对 FE-05 进行独立只读复审；任何功能或正式 closure 失败／inconclusive 均停止本 slice 尚未开始的后续实现、closure，仍须进入本复审并独立记录 finding；复审本身不是 closure，不得标记 done 或更新 frontier；只有全部证据满足 acceptance，才可标记 FE-05 done 并更新 frontier。
 
 ### FE-06：确定性转换
 
-- [ ] 4.7 重新读取并验证 ARCH-GATE=`closed`、FE-06=`ready-for-agent` 和 direct blocker FE-04=done 且有 evidence；任一不满足，记录 blocker 并停止 FE-06 slice。
+- [ ] 4.7 重新读取并验证：仅当 ARCH-GATE=`closed`、FE-06 正式 Ticket Status=`ready-for-agent` 和 direct blocker FE-04=done 且有 evidence，才可开始 FE-06 slice；task-only 功能检查点不得替代上述正式状态、gate 或 direct blocker evidence。任一不满足，记录 blocker 并停止 FE-06 slice。
 - [ ] 4.8 在 FE-06 内完成 Skill toggle convert、Subagent 次级 convert、24 条路径、Prompt／未知内容 round-trip 或 blocked、raw-copy 拒绝、no-sync 与 reread 的最小 contract／domain／Rust-first wire delta。
 - [ ] 4.9 在 FE-06 内生成 TypeScript wire、vectors 与 drift，并实现单资产转换、保真检查、blocked 结果和独立目标资产。
-- [ ] 4.10 在 FE-06 内执行 L0／L1 conversion matrix／raw-copy、L2 转换 journey、L3 isolated temp single-target conversion 与 PF-06 evidence；actual runtime credit 仅来自该隔离输入穿过真实 WebView／Core／IPC 边界，不证明真实用户项目、配置或生产 artifact。
-- [ ] 4.11 在 FE-06 内运行 `npm run verify:ticket -- FE-06`，保留命令、层级、运行标识和未覆盖边界。
-- [ ] 4.12 对 FE-06 进行独立只读复审；只有 4.7～4.11 的证据满足 acceptance，才标记 FE-06 done 并更新 frontier。
+- [ ] 4.10 在 FE-06 内只执行 L0／L1 conversion matrix／raw-copy、L2 转换 journey、L3 isolated temp single-target conversion；actual runtime credit 仅来自该隔离输入穿过真实 WebView／Core／IPC 边界，不证明真实用户项目、配置或生产 artifact。上述功能检查完成仅可记录为 non-closure 的 task-only `functional checks complete`，不得标记 done、更新 frontier 或替代正式 gate／direct blocker evidence。
+- [ ] 4.11 仅在 FE-06 自身授权建立的 registry entry 已存在且 4.10 已记录 `functional checks complete` 后，先运行 PF-06 evidence，再运行 `npm run verify:ticket -- FE-06`；保留命令、层级、运行标识和未覆盖边界。PF fail／inconclusive 或正式 closure 失败均阻止 FE-06 done。
+- [ ] 4.12 对 FE-06 进行独立只读复审；任何功能、PF 或正式 closure 失败／inconclusive 均停止本 slice 尚未开始的后续实现、PF、closure，仍须进入本复审并独立记录 finding；复审本身不是 closure，不得标记 done 或更新 frontier；只有全部证据满足 acceptance，才可标记 FE-06 done 并更新 frontier。
 
 ### FE-07：项目纳入、停止管理与 index 健康
 
-- [ ] 4.13 重新读取并验证 ARCH-GATE=`closed`、FE-07=`ready-for-agent` 和 direct blocker FE-04=done 且有 evidence；任一不满足，记录 blocker 并停止 FE-07 slice。
+- [ ] 4.13 重新读取并验证：仅当 ARCH-GATE=`closed`、FE-07 正式 Ticket Status=`ready-for-agent` 和 direct blocker FE-04=done 且有 evidence，才可开始 FE-07 slice；task-only 功能检查点不得替代上述正式状态、gate 或 direct blocker evidence。任一不满足，记录 blocker 并停止 FE-07 slice。
 - [ ] 4.14 在 FE-07 内完成项目纳入、停止管理、index freshness／event／rebuild 的最小 contract／domain／Rust-first wire delta；复用 FE-07R projection types，不夺取 FX-19 主归属或 read resolver ownership。
 - [ ] 4.15 在 FE-07 内生成 TypeScript wire、vectors 与 drift，并实现管理 lifecycle 和 index 健康投影。
-- [ ] 4.16 在 FE-07 内执行 L0／L1 lifecycle／index、L2 管理 journey、L3 isolated temp project／event／rebuild 与 PF-05 evidence；actual runtime credit 仅来自该隔离输入穿过真实 WebView／Core／IPC 边界，不证明真实用户项目、配置或生产 artifact。
-- [ ] 4.17 在 FE-07 内运行 `npm run verify:ticket -- FE-07`，保留命令、层级、运行标识和未覆盖边界。
-- [ ] 4.18 对 FE-07 进行独立只读复审；只有 4.13～4.17 的证据满足 acceptance，才标记 FE-07 done 并更新 frontier。
+- [ ] 4.16 在 FE-07 内只执行 L0／L1 lifecycle／index、L2 管理 journey、L3 isolated temp project／event／rebuild；actual runtime credit 仅来自该隔离输入穿过真实 WebView／Core／IPC 边界，不证明真实用户项目、配置或生产 artifact。上述功能检查完成仅可记录为 non-closure 的 task-only `functional checks complete`，不得标记 done、更新 frontier 或替代正式 gate／direct blocker evidence。
+- [ ] 4.17 仅在 FE-07 自身授权建立的 registry entry 已存在且 4.16 已记录 `functional checks complete` 后，先运行 PF-05 evidence，再运行 `npm run verify:ticket -- FE-07`；保留命令、层级、运行标识和未覆盖边界。PF fail／inconclusive 或正式 closure 失败均阻止 FE-07 done。
+- [ ] 4.18 对 FE-07 进行独立只读复审；任何功能、PF 或正式 closure 失败／inconclusive 均停止本 slice 尚未开始的后续实现、PF、closure，仍须进入本复审并独立记录 finding；复审本身不是 closure，不得标记 done 或更新 frontier；只有全部证据满足 acceptance，才可标记 FE-07 done 并更新 frontier。
 
 ### FE-08：Adapter registry 与 bundle 生命周期
 
-- [ ] 4.19 重新读取并验证 ARCH-GATE=`closed`、FE-08=`ready-for-agent` 和 direct blocker FE-04=done 且有 evidence；任一不满足，记录 blocker 并停止 FE-08 slice。
+- [ ] 4.19 重新读取并验证：仅当 ARCH-GATE=`closed`、FE-08 正式 Ticket Status=`ready-for-agent` 和 direct blocker FE-04=done 且有 evidence，才可开始 FE-08 slice；task-only 功能检查点不得替代上述正式状态、gate 或 direct blocker evidence。任一不满足，记录 blocker 并停止 FE-08 slice。
 - [ ] 4.20 在 FE-08 内完成 Adapter registry／bundle、active version／rule／capability update／rollback 的最小 contract／domain／Rust-first wire delta；不实现 Skill cell UI。
 - [ ] 4.21 在 FE-08 内生成 TypeScript wire、vectors 与 drift，并实现 Adapter bundle 生命周期和能力投影。
-- [ ] 4.22 在 FE-08 内执行 L0／L1 registry／capability、L2 管理 journey、L3 synthetic candidate／switch／rollback 与 PF-07 evidence；actual runtime credit 仅来自该 synthetic 输入穿过真实 WebView／Core／IPC 边界，不证明真实用户项目、配置或生产 artifact，且不得称为真实 Adapter bundle actual provenance。
-- [ ] 4.23 在 FE-08 内运行 `npm run verify:ticket -- FE-08`，保留命令、层级、运行标识和未覆盖边界。
-- [ ] 4.24 对 FE-08 进行独立只读复审；只有 4.19～4.23 的证据满足 acceptance，才标记 FE-08 done 并更新 frontier。
+- [ ] 4.22 在 FE-08 内只执行 L0／L1 registry／capability、L2 管理 journey、L3 synthetic candidate／switch／rollback；actual runtime credit 仅来自该 synthetic 输入穿过真实 WebView／Core／IPC 边界，不证明真实用户项目、配置或生产 artifact，且不得称为真实 Adapter bundle actual provenance。上述功能检查完成仅可记录为 non-closure 的 task-only `functional checks complete`，不得标记 done、更新 frontier 或替代正式 gate／direct blocker evidence。
+- [ ] 4.23 仅在 FE-08 自身授权建立的 registry entry 已存在且 4.22 已记录 `functional checks complete` 后，先运行 PF-07 evidence，再运行 `npm run verify:ticket -- FE-08`；保留命令、层级、运行标识和未覆盖边界。PF fail／inconclusive 或正式 closure 失败均阻止 FE-08 done。
+- [ ] 4.24 对 FE-08 进行独立只读复审；任何功能、PF 或正式 closure 失败／inconclusive 均停止本 slice 尚未开始的后续实现、PF、closure，仍须进入本复审并独立记录 finding；复审本身不是 closure，不得标记 done 或更新 frontier；只有全部证据满足 acceptance，才可标记 FE-08 done 并更新 frontier。
 
 ### FE-09：独立导出、删除与恢复
 
-- [ ] 4.25 重新读取并验证 ARCH-GATE=`closed`、FE-09=`ready-for-agent` 和 direct blocker FE-04=done 且有 evidence；任一不满足，记录 blocker 并停止 FE-09 slice。
+- [ ] 4.25 重新读取并验证：仅当 ARCH-GATE=`closed`、FE-09 正式 Ticket Status=`ready-for-agent` 和 direct blocker FE-04=done 且有 evidence，才可开始 FE-09 slice；task-only 功能检查点不得替代上述正式状态、gate 或 direct blocker evidence。任一不满足，记录 blocker 并停止 FE-09 slice。
 - [ ] 4.26 在 FE-09 内完成独立 export／delete／recover、toggle 永不回落 delete 和受影响 contexts 验证的最小 contract／domain／Rust-first wire delta；delete 不归入 FE-04。
 - [ ] 4.27 在 FE-09 内生成 TypeScript wire、vectors 与 drift，并实现 export、显式 delete、恢复和受影响 contexts 表达。
-- [ ] 4.28 在 FE-09 内执行 L0／L1 export／delete／recover、L2 显式删除 journey、L3 isolated temp export／delete／recover collision 与 PF-06 recovery evidence；actual runtime credit 仅来自该隔离输入穿过真实 WebView／Core／IPC 边界，不证明真实用户项目、配置或生产 artifact。
-- [ ] 4.29 在 FE-09 内运行 `npm run verify:ticket -- FE-09`，保留命令、层级、运行标识和未覆盖边界。
-- [ ] 4.30 对 FE-09 进行独立只读复审；只有 4.25～4.29 的证据满足 acceptance，才标记 FE-09 done 并更新 frontier。
+- [ ] 4.28 在 FE-09 内只执行 L0／L1 export／delete／recover、L2 显式删除 journey、L3 isolated temp export／delete／recover collision；actual runtime credit 仅来自该隔离输入穿过真实 WebView／Core／IPC 边界，不证明真实用户项目、配置或生产 artifact。上述功能检查完成仅可记录为 non-closure 的 task-only `functional checks complete`，不得标记 done、更新 frontier 或替代正式 gate／direct blocker evidence。
+- [ ] 4.29 仅在 FE-09 自身授权建立的 registry entry 已存在且 4.28 已记录 `functional checks complete` 后，先运行 PF-06 recovery evidence，再运行 `npm run verify:ticket -- FE-09`；保留命令、层级、运行标识和未覆盖边界。PF fail／inconclusive 或正式 closure 失败均阻止 FE-09 done。
+- [ ] 4.30 对 FE-09 进行独立只读复审；任何功能、PF 或正式 closure 失败／inconclusive 均停止本 slice 尚未开始的后续实现、PF、closure，仍须进入本复审并独立记录 finding；复审本身不是 closure，不得标记 done 或更新 frontier；只有全部证据满足 acceptance，才可标记 FE-09 done 并更新 frontier。
 
 ## 5. RELEASE reconciliation
 
