@@ -1,0 +1,21 @@
+{
+  "fixtureId": "FX-03",
+  "name": "executable-hook-unknown",
+  "description": "只用于 Hook wire decode/security 负例的隔离数据；不得读取、展示或执行 Hook 内容。",
+  "asset": {
+    "assetId": "asset-fx03-hook-on-save",
+    "assetType": "hook",
+    "nativeUnitRef": "nunit-fx03-hook-on-save",
+    "adapterIdentity": "fixture-hook@synthetic",
+    "nativeOwnership": { "kind": "global" },
+    "unknownFields": {
+      "futureHookOption": "SYNTHETIC-SECRET-fx03-hook-option"
+    }
+  },
+  "expectedReasonCode": "EXECUTABLE_CONTENT_RISK",
+  "safety": {
+    "syntheticOnly": true,
+    "executeContent": false,
+    "sensitiveValuesMaskedAtReadBoundary": true
+  }
+}

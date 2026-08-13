@@ -8,7 +8,10 @@
 //! - `GATEWAY_WIRE_VERSION` 由 `export-wire` bin 一并导出到 TypeScript，
 //!   TS 侧不手写第二份版本号。
 
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use ts_rs::TS;
 
 use crate::domain;
@@ -262,6 +265,79 @@ pub struct AssetRefWire {
     pub native_unit_ref: String,
     pub adapter_identity: String,
     pub native_ownership: NativeOwnershipWire,
+}
+
+/// FX-03 Hook adapter compatibility input. 这不是 Gateway query 或 response：
+/// Hook 没有 workbench、locator 或详情 destination。`unknown_fields` 在解码
+/// 后只保留在私有 compatibility record 中，绝不序列化或展示其原始值。
+#[derive(Clone, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct HookCompatibilityInputWire {
+    pub asset_id: String,
+    pub asset_type: AssetTypeWire,
+    pub native_unit_ref: String,
+    pub adapter_identity: String,
+    pub native_ownership: NativeOwnershipWire,
+    #[serde(default)]
+    pub unknown_fields: BTreeMap<String, Value>,
+}
+
+/// Hook decoder 只返回不含用户内容的失败分类；不要把 serde error 原样返回到
+/// surface，避免敏感字段随诊断外泄。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HookCompatibilityDecodeError {
+    InvalidPayload,
+    NotHook,
+}
+
+/// 兼容解码后的私有原始未知字段只可通过精确相等性验证，不能被读取、显示或
+/// 序列化。这样 adapter 扩展可 lossless 保留，同时不会形成 Hook 内容 surface。
+#[derive(Clone)]
+pub struct DecodedHookCompatibility {
+    pub record: domain::HookCompatibilityRecord,
+    unknown_fields: BTreeMap<String, Value>,
+}
+
+impl DecodedHookCompatibility {
+    pub fn preserves_unknown_field(&self, name: &str, expected: &Value) -> bool {
+        self.unknown_fields.get(name) == Some(expected)
+    }
+
+    pub fn preserved_unknown_field_count(&self) -> usize {
+        self.unknown_fields.len()
+    }
+}
+
+/// Decode a fixture/adapter Hook descriptor without ever opening or executing the Hook file.
+/// The input is intentionally separate from `AssetRefWire`, whose regular gateway ingress
+/// remains `deny_unknown_fields` fail-closed.
+pub fn decode_hook_compatibility(
+    value: Value,
+) -> Result<DecodedHookCompatibility, HookCompatibilityDecodeError> {
+    let input = serde_json::from_value::<HookCompatibilityInputWire>(value)
+        .map_err(|_| HookCompatibilityDecodeError::InvalidPayload)?;
+    if input.asset_type != AssetTypeWire::Hook {
+        return Err(HookCompatibilityDecodeError::NotHook);
+    }
+    let unknown_field_names = input
+        .unknown_fields
+        .keys()
+        .map(|name| crate::catalog::mask_synthetic_secrets(name))
+        .collect();
+    Ok(DecodedHookCompatibility {
+        record: domain::HookCompatibilityRecord {
+            asset: domain::AssetRef {
+                asset_id: input.asset_id,
+                asset_type: domain::AssetType::Hook,
+                native_unit_ref: input.native_unit_ref,
+                adapter_identity: input.adapter_identity,
+                native_ownership: input.native_ownership.into(),
+            },
+            reason_code: domain::ReasonCode::ExecutableContentRisk,
+            unknown_field_names,
+        },
+        unknown_fields: input.unknown_fields,
+    })
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -683,6 +759,11 @@ pub enum LocatorDestinationWire {
         #[ts(rename = "assetRef")]
         asset_ref: AssetRefWire,
     },
+    TypeSpecificDetail {
+        #[serde(rename = "assetRef")]
+        #[ts(rename = "assetRef")]
+        asset_ref: AssetRefWire,
+    },
     UnsupportedReadOnly {
         #[serde(rename = "assetRef")]
         #[ts(rename = "assetRef")]
@@ -845,6 +926,49 @@ pub struct FileTreeNodeWire {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SkillReadSurfaceWire {
+    pub agent_target_states: Vec<SkillTargetStateWire>,
+    pub source_read_availability: ActionAvailabilityWire,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub unknown_content_reason: Option<ReasonCodeWire>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct LongTermInstructionReadSurfaceWire {
+    pub markdown_file: NativeFileRefWire,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SubagentReadSurfaceWire {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub model: Option<String>,
+    pub tools: Vec<String>,
+    pub permissions: Vec<String>,
+    pub body_file: NativeFileRefWire,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub read_only_reason: Option<ReasonCodeWire>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+#[serde(deny_unknown_fields)]
+pub enum AssetReadSurfaceWire {
+    Skill(SkillReadSurfaceWire),
+    LongTermInstruction(LongTermInstructionReadSurfaceWire),
+    Subagent(SubagentReadSurfaceWire),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct AssetDetailWire {
     pub asset: AssetRefWire,
     pub display_name: String,
@@ -857,6 +981,7 @@ pub struct AssetDetailWire {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub file_tree_root: Option<FileTreeNodeWire>,
+    pub read_surface: AssetReadSurfaceWire,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -1747,6 +1872,11 @@ impl From<domain::LocatorDestination> for LocatorDestinationWire {
                     asset_ref: asset.into(),
                 }
             }
+            domain::LocatorDestination::TypeSpecificDetail { asset } => {
+                LocatorDestinationWire::TypeSpecificDetail {
+                    asset_ref: asset.into(),
+                }
+            }
             domain::LocatorDestination::UnsupportedReadOnly { asset, reason_code } => {
                 LocatorDestinationWire::UnsupportedReadOnly {
                     asset_ref: asset.into(),
@@ -1923,6 +2053,40 @@ impl From<domain::FileTreeNode> for FileTreeNodeWire {
     }
 }
 
+impl From<domain::AssetReadSurface> for AssetReadSurfaceWire {
+    fn from(value: domain::AssetReadSurface) -> Self {
+        match value {
+            domain::AssetReadSurface::Skill {
+                agent_target_states,
+                source_read_availability,
+                unknown_content_reason,
+            } => AssetReadSurfaceWire::Skill(SkillReadSurfaceWire {
+                agent_target_states: agent_target_states.into_iter().map(Into::into).collect(),
+                source_read_availability: source_read_availability.into(),
+                unknown_content_reason: unknown_content_reason.map(Into::into),
+            }),
+            domain::AssetReadSurface::LongTermInstruction { markdown_file } => {
+                AssetReadSurfaceWire::LongTermInstruction(LongTermInstructionReadSurfaceWire {
+                    markdown_file: markdown_file.into(),
+                })
+            }
+            domain::AssetReadSurface::Subagent {
+                model,
+                tools,
+                permissions,
+                body_file,
+                read_only_reason,
+            } => AssetReadSurfaceWire::Subagent(SubagentReadSurfaceWire {
+                model,
+                tools,
+                permissions,
+                body_file: body_file.into(),
+                read_only_reason: read_only_reason.map(Into::into),
+            }),
+        }
+    }
+}
+
 impl From<domain::AssetDetail> for AssetDetailWire {
     fn from(value: domain::AssetDetail) -> Self {
         AssetDetailWire {
@@ -1939,6 +2103,7 @@ impl From<domain::AssetDetail> for AssetDetailWire {
                 .collect(),
             primary_file: value.primary_file.into(),
             file_tree_root: value.file_tree_root.map(Into::into),
+            read_surface: value.read_surface.into(),
         }
     }
 }

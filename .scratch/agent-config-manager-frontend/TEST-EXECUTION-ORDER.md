@@ -473,6 +473,67 @@ npm run test:frontend -- tests/l1/fe01-run-local-harness-capture.test.ts tests/l
 
 目前 registry 只存在 FE-01 与 FE-07R。`npm run verify:ticket -- FE-02` 至 `-- FE-10` 在其各自 ticket 按既有授权建立 registry entry 前，均只能写作 **planned command**，不声称可运行、已运行或已经拥有 PF target。特别是本矩阵没有创建 FE-02+ 的 registry、PF ID、descriptor、budget、waiver 或 verifier step。
 
+## FE-02 当前 change：测试增量登记（5）
+
+本节只登记 FE-02 task 3.8～3.10 新增的五个 assertion paths；它不回填或重解释上文 previous-change 的 `56/56` assertion、`6/6` document changed-path 审计。五个路径的唯一 primary classification 均为 `ticket-functional/FE-02`：
+
+- `src-tauri/tests/fe02_read_surfaces.rs` — L1 Rust public `GatewayCore::read`、FX-02 多文件只读与 FX-03 Hook compatibility/security negative；无 WebView、IPC 或 write credit。
+- `tests/l1/fe02-read-only-detail-session.test.ts` — L1 scripted read-session、显式 Skill source、LTI／Subagent 默认 read、revision/race 与零 write calls。
+- `tests/l1/fe02-tauri-read-wire.test.ts` — L1 FX-02／FX-03 wire 正向投影与 malformed／unmasked fail-closed。
+- `tests/l2/fe02-read-surfaces.journey.test.ts` — L2 mock-only detail／disclosure／Hook unreachable journey；不得取得 IPC 或 disk credit。
+- `tests/l3/fx-02.tracer.test.ts` — L3 isolated FX-02 WebView → IPC → Rust/core → temporary disk actual-read；无 Hook、write、draft、prepare 或 apply credit。
+
+`tests/l3/fx-02.wdio.conf.ts` 与 `scripts/orchestrator/test-fx02-tauri.mjs` 是当前 FE-02 的 L3 支撑／identity-binding 入口，不是 assertion paths，也不计入上述五项。当前静态盘点为历史 external assertions `56` + FE-02 delta `5` = `61`（`tests/` 51、`performance/` 2、`src-tauri/tests/` 8）；embedded Rust target 仍为 1，因此合计 62 targets。上文 `49 TypeScript + 7 Rust integration + 1 embedded = 57` 保持为 previous-change archived snapshot。
+
+本次使用以下独立 delta audit；它保留历史 56 路径原样，从当前静态 inventory 求新增集合，再与本节五个登记路径比较。2026-08-14 执行预期为 `historical=56 current=61 delta=5 registered=5`，且两个 `diff` 均为零：
+
+```zsh
+set -e
+matrix='.scratch/agent-config-manager-frontend/TEST-EXECUTION-ORDER.md'
+
+historical=("${(@f)$(awk '
+  BEGIN { tick = sprintf("%c", 96) }
+  /^## 当前测试库存与 primary classification$/ { inventory = 1; next }
+  inventory && /^## 人工选择规则/ { exit }
+  inventory && substr($0, 1, 3) == "- " tick && substr($0, length($0), 1) == tick {
+    path = substr($0, 4, length($0) - 4)
+    if (path ~ /^(tests\/|performance\/|src-tauri\/tests\/)/) print path
+  }
+' "$matrix" | LC_ALL=C sort)}")
+
+current=("${(@f)$({
+  find tests -type f \( -name '*.test.ts' -o -name '*.test.tsx' -o -name '*.journey.test.ts' \) -print
+  find performance -type f -name '*.test.ts' -print
+  find src-tauri/tests -type f -name '*.rs' -print
+} | LC_ALL=C sort)}")
+
+missing="$(comm -23 <(printf '%s\n' "${historical[@]}") <(printf '%s\n' "${current[@]}"))"
+[[ -z "$missing" ]]
+delta=("${(@f)$(comm -13 <(printf '%s\n' "${historical[@]}") <(printf '%s\n' "${current[@]}"))}")
+
+registered=("${(@f)$(awk '
+  BEGIN { tick = sprintf("%c", 96) }
+  /^## FE-02 当前 change：测试增量登记（5）$/ { fe02 = 1; next }
+  fe02 && /^## / { exit }
+  fe02 && substr($0, 1, 3) == "- " tick {
+    body = substr($0, 4); tick_pos = index(body, tick)
+    if (tick_pos > 1) {
+      path = substr(body, 1, tick_pos - 1)
+      if (path ~ /^(tests\/|performance\/|src-tauri\/tests\/)/) print path
+    }
+  }
+' "$matrix" | LC_ALL=C sort)}")
+
+[[ "${#historical[@]}" == 56 ]]
+[[ "${#current[@]}" == 61 ]]
+[[ "${#delta[@]}" == 5 ]]
+[[ "${#registered[@]}" == 5 ]]
+diff -u <(printf '%s\n' "${registered[@]}") <(printf '%s\n' "${delta[@]}")
+printf 'historical=%d current=%d delta=%d registered=%d\n' "${#historical[@]}" "${#current[@]}" "${#delta[@]}" "${#registered[@]}"
+```
+
+上述登记只支持 task 3.10 的 `functional checks complete` checkpoint。PF-02、PF-03、FE-02 registry、`npm run verify:ticket -- FE-02`、closure verdict 与 downstream frontier 仍未建立或执行；不得由本节结果推导。
+
 ## 统一 performance optimization backlog 模板
 
 此表是后续独立 optimization change 的人工计划模板，当前不登记新 performance debt。填写一行不会生成或修改 manifest、automatic result、waiver、stable index、budget、descriptor 或 ticket status。

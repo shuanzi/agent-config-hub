@@ -20,9 +20,22 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import type { FrontendGateway, ObserveHandle } from '../contract/gateway';
 import type {
+  ActionAvailability,
+  AssetDetailSnapshot,
+  AssetReadSurface,
+  AssetRef,
   AssetType,
+  CompatibilityStatus,
+  EffectiveContext,
+  FileTreeNode,
+  InspectorData,
+  NativeFileContent,
+  NativeFileRef,
+  NativeFileSnapshot,
+  OverrideRelation,
   Query,
   ReadResult,
+  SensitiveSegmentRef,
   SnapshotFor,
   Subscription,
   WorkspaceEvent,
@@ -138,6 +151,596 @@ function isOneOf<T extends readonly string[]>(value: unknown, values: T): value 
 
 function isNonEmptyString(value: unknown): value is string {
   return typeof value === 'string' && value.trim() !== '';
+}
+
+function actionAvailabilityFromWire(value: unknown): ActionAvailability | null {
+  if (!isRecord(value)) return null;
+  if (value.kind === 'allowed' && Object.keys(value).length === 1) return { kind: 'allowed' };
+  if (
+    value.kind === 'disabled' &&
+    isOneOf(value.reasonCode, REASON_CODES) &&
+    (Object.keys(value).length === 2 ||
+      (Object.keys(value).length === 3 &&
+        isRecord(value.recoveryAction) &&
+        value.recoveryAction.kind === 'retryRead'))
+  ) {
+    return {
+      kind: 'disabled',
+      reasonCode: value.reasonCode,
+      ...(value.recoveryAction === undefined ? {} : { recoveryAction: { kind: 'retryRead' } }),
+    };
+  }
+  return null;
+}
+
+function nativeOwnershipFromWire(value: unknown): AssetRef['nativeOwnership'] | null {
+  if (!isRecord(value)) return null;
+  if (value.kind === 'global' && Object.keys(value).length === 1) return { kind: 'global' };
+  if (
+    value.kind === 'project' &&
+    maskedDisplayString(value.projectId) &&
+    Object.keys(value).length === 2
+  ) {
+    return { kind: 'project', projectId: value.projectId };
+  }
+  return null;
+}
+
+function assetRefFromResponseWire(value: unknown): AssetRef | null {
+  if (
+    !isRecord(value) ||
+    !maskedDisplayString(value.assetId) ||
+    !isOneOf(value.assetType, WIRE_ASSET_TYPES) ||
+    !maskedDisplayString(value.nativeUnitRef) ||
+    !maskedDisplayString(value.adapterIdentity) ||
+    Object.keys(value).length !== 5
+  ) {
+    return null;
+  }
+  const nativeOwnership = nativeOwnershipFromWire(value.nativeOwnership);
+  return nativeOwnership === null
+    ? null
+    : {
+        assetId: value.assetId,
+        assetType: value.assetType,
+        nativeUnitRef: value.nativeUnitRef,
+        adapterIdentity: value.adapterIdentity,
+        nativeOwnership,
+      };
+}
+
+function sameAssetRef(left: AssetRef, right: AssetRef): boolean {
+  return (
+    left.assetId === right.assetId &&
+    left.assetType === right.assetType &&
+    left.nativeUnitRef === right.nativeUnitRef &&
+    left.adapterIdentity === right.adapterIdentity &&
+    left.nativeOwnership.kind === right.nativeOwnership.kind &&
+    (left.nativeOwnership.kind !== 'project' ||
+      right.nativeOwnership.kind !== 'project' ||
+      left.nativeOwnership.projectId === right.nativeOwnership.projectId)
+  );
+}
+
+function nativeFileRefFromWire(value: unknown): NativeFileRef | null {
+  if (
+    !isRecord(value) ||
+    !maskedDisplayString(value.fileId) ||
+    !maskedDisplayString(value.name) ||
+    !maskedDisplayString(value.relativePath) ||
+    !isOneOf(value.fileKind, ['text', 'nonText', 'unknown'] as const) ||
+    typeof value.isPrimary !== 'boolean' ||
+    typeof value.hasDraftChanges !== 'boolean' ||
+    Object.keys(value).length !== 8 ||
+    !Object.keys(value).every((key) =>
+      [
+        'fileId',
+        'name',
+        'relativePath',
+        'fileKind',
+        'isPrimary',
+        'canPreview',
+        'canEdit',
+        'hasDraftChanges',
+      ].includes(key),
+    )
+  ) {
+    return null;
+  }
+  const canPreview = actionAvailabilityFromWire(value.canPreview);
+  const canEdit = actionAvailabilityFromWire(value.canEdit);
+  return canPreview === null || canEdit === null
+    ? null
+    : {
+        fileId: value.fileId,
+        name: value.name,
+        relativePath: value.relativePath,
+        fileKind: value.fileKind,
+        isPrimary: value.isPrimary,
+        canPreview,
+        canEdit,
+        hasDraftChanges: value.hasDraftChanges,
+      };
+}
+
+function fileTreeFromWire(value: unknown): FileTreeNode | null {
+  if (!isRecord(value) || !maskedDisplayString(value.name)) return null;
+  if (!Object.keys(value).every((key) => ['name', 'file', 'children'].includes(key))) return null;
+  const file = value.file === undefined ? undefined : nativeFileRefFromWire(value.file);
+  const children =
+    value.children === undefined
+      ? undefined
+      : Array.isArray(value.children)
+        ? value.children.map(fileTreeFromWire)
+        : null;
+  return file === null || children === null || children?.some((child) => child === null)
+    ? null
+    : {
+        name: value.name,
+        ...(file === undefined ? {} : { file }),
+        ...(children === undefined ? {} : { children: children as FileTreeNode[] }),
+      };
+}
+
+function sensitiveSourceIsMasked(value: string): boolean {
+  return !/SYNTHETIC-SECRET-[A-Za-z0-9][A-Za-z0-9-]*/.test(value);
+}
+
+function maskedDisplayString(value: unknown): value is string {
+  return isNonEmptyString(value) && sensitiveSourceIsMasked(value);
+}
+
+function allDecoded<T>(values: readonly (T | null)[]): values is T[] {
+  return values.every((value): value is T => value !== null);
+}
+
+function nativeFileSnapshotFromWire(
+  value: unknown,
+  requestAsset: AssetRef,
+  requestFileId: string,
+): NativeFileSnapshot | null {
+  if (
+    !isRecord(value) ||
+    value.kind !== 'nativeFile' ||
+    !maskedDisplayString(value.revision) ||
+    !maskedDisplayString(value.assetRevision) ||
+    !isRecord(value.content) ||
+    !Object.keys(value).every((key) =>
+      ['kind', 'file', 'revision', 'assetRevision', 'content', 'structuredView'].includes(key),
+    ) ||
+    Object.keys(value).length !== 6
+  ) {
+    return null;
+  }
+  const file = nativeFileRefFromWire(value.file);
+  const structuredView = actionAvailabilityFromWire(value.structuredView);
+  if (file === null || file.fileId !== requestFileId || structuredView === null) return null;
+  const wireContent = value.content;
+  let content: NativeFileContent;
+  if (
+    wireContent.kind === 'source' &&
+    maskedDisplayString(wireContent.maskedText) &&
+    Array.isArray(wireContent.sensitiveSegments) &&
+    Object.keys(wireContent).length === 3 &&
+    Object.keys(wireContent).every((key) =>
+      ['kind', 'maskedText', 'sensitiveSegments'].includes(key),
+    ) &&
+    file.fileKind === 'text'
+  ) {
+    const sensitiveSegments: SensitiveSegmentRef[] = [];
+    for (const segment of wireContent.sensitiveSegments) {
+      if (
+        !isRecord(segment) ||
+        !maskedDisplayString(segment.segmentId) ||
+        !maskedDisplayString(segment.fileId) ||
+        segment.fileId !== file.fileId ||
+        !maskedDisplayString(segment.revision) ||
+        segment.revision !== value.revision ||
+        !isOneOf(segment.displayState, [
+          'masked',
+          'temporarilyRevealed',
+          'changedMasked',
+        ] as const) ||
+        Object.keys(segment).length !== 4
+      ) {
+        return null;
+      }
+      sensitiveSegments.push({
+        segmentId: segment.segmentId,
+        fileId: segment.fileId,
+        revision: segment.revision,
+        displayState: segment.displayState,
+      });
+    }
+    content = {
+      kind: 'source',
+      maskedText: wireContent.maskedText,
+      sensitiveSegments,
+    };
+  } else if (
+    wireContent.kind === 'nonTextMetadata' &&
+    maskedDisplayString(wireContent.fileKindLabel) &&
+    Number.isSafeInteger(wireContent.sizeBytes) &&
+    (wireContent.sizeBytes as number) >= 0 &&
+    maskedDisplayString(wireContent.pathDisplay) &&
+    isOneOf(wireContent.reasonCode, REASON_CODES) &&
+    maskedDisplayString(wireContent.reason) &&
+    Object.keys(wireContent).length === 6 &&
+    Object.keys(wireContent).every((key) =>
+      ['kind', 'fileKindLabel', 'sizeBytes', 'pathDisplay', 'reasonCode', 'reason'].includes(key),
+    ) &&
+    file.fileKind !== 'text'
+  ) {
+    content = {
+      kind: 'nonTextMetadata',
+      fileKindLabel: wireContent.fileKindLabel,
+      sizeBytes: wireContent.sizeBytes as number,
+      pathDisplay: wireContent.pathDisplay,
+      reasonCode: wireContent.reasonCode,
+      reason: wireContent.reason,
+    };
+  } else {
+    return null;
+  }
+  if (requestAsset.assetType === 'hook') return null;
+  return {
+    kind: 'nativeFile',
+    file,
+    revision: value.revision,
+    assetRevision: value.assetRevision,
+    content,
+    structuredView,
+  };
+}
+
+function skillTargetStateFromWire(value: unknown): SkillTargetState | null {
+  if (
+    !isRecord(value) ||
+    !isOneOf(value.agent, AGENT_IDS) ||
+    !isOneOf(value.presence, PRESENCE) ||
+    !isOneOf(value.activation, ACTIVATION) ||
+    !isOneOf(value.applicability, APPLICABILITY) ||
+    !Object.keys(value).every((key) =>
+      [
+        'agent',
+        'presence',
+        'activation',
+        'applicability',
+        'enableAvailability',
+        'disableAvailability',
+        'pending',
+        'stableReason',
+      ].includes(key),
+    )
+  ) {
+    return null;
+  }
+  const enableAvailability = skillCellAvailabilityFromWire(value.enableAvailability);
+  const disableAvailability = skillCellAvailabilityFromWire(value.disableAvailability);
+  const pending =
+    value.pending === undefined
+      ? undefined
+      : isRecord(value.pending) &&
+          maskedDisplayString(value.pending.operationId) &&
+          maskedDisplayString(value.pending.phase) &&
+          Object.keys(value.pending).length === 2
+        ? { operationId: value.pending.operationId, phase: value.pending.phase }
+        : null;
+  if (
+    enableAvailability === null ||
+    disableAvailability === null ||
+    pending === null ||
+    (value.stableReason !== undefined && !maskedDisplayString(value.stableReason))
+  ) {
+    return null;
+  }
+  return {
+    agent: value.agent,
+    presence: value.presence,
+    activation: value.activation,
+    applicability: value.applicability,
+    enableAvailability,
+    disableAvailability,
+    ...(pending === undefined ? {} : { pending }),
+    ...(value.stableReason === undefined ? {} : { stableReason: value.stableReason }),
+  };
+}
+
+function assetReadSurfaceFromWire(value: unknown, assetType: AssetType): AssetReadSurface | null {
+  if (!isRecord(value) || typeof value.kind !== 'string') return null;
+  if (assetType === 'skill' && value.kind === 'skill') {
+    if (
+      !Array.isArray(value.agentTargetStates) ||
+      value.agentTargetStates.length !== AGENT_IDS.length ||
+      !Object.keys(value).every((key) =>
+        ['kind', 'agentTargetStates', 'sourceReadAvailability', 'unknownContentReason'].includes(
+          key,
+        ),
+      )
+    ) {
+      return null;
+    }
+    const agentTargetStates = value.agentTargetStates.map(skillTargetStateFromWire);
+    const sourceReadAvailability = actionAvailabilityFromWire(value.sourceReadAvailability);
+    if (
+      !allDecoded(agentTargetStates) ||
+      agentTargetStates.some((state, index) => state?.agent !== AGENT_IDS[index]) ||
+      sourceReadAvailability === null ||
+      (value.unknownContentReason !== undefined &&
+        !isOneOf(value.unknownContentReason, REASON_CODES))
+    ) {
+      return null;
+    }
+    return {
+      kind: 'skill',
+      agentTargetStates,
+      sourceReadAvailability,
+      ...(value.unknownContentReason === undefined
+        ? {}
+        : { unknownContentReason: value.unknownContentReason }),
+    };
+  }
+  if (assetType === 'longTermInstruction' && value.kind === 'longTermInstruction') {
+    const markdownFile = nativeFileRefFromWire(value.markdownFile);
+    return Object.keys(value).length === 2 && markdownFile !== null
+      ? { kind: 'longTermInstruction', markdownFile }
+      : null;
+  }
+  if (
+    assetType !== 'subagent' ||
+    value.kind !== 'subagent' ||
+    !Object.keys(value).every((key) =>
+      ['kind', 'model', 'tools', 'permissions', 'bodyFile', 'readOnlyReason'].includes(key),
+    ) ||
+    (value.model !== undefined && !maskedDisplayString(value.model)) ||
+    !Array.isArray(value.tools) ||
+    !value.tools.every(maskedDisplayString) ||
+    !Array.isArray(value.permissions) ||
+    !value.permissions.every(maskedDisplayString) ||
+    (value.readOnlyReason !== undefined && !isOneOf(value.readOnlyReason, REASON_CODES))
+  ) {
+    return null;
+  }
+  const bodyFile = nativeFileRefFromWire(value.bodyFile);
+  return bodyFile === null
+    ? null
+    : {
+        kind: 'subagent',
+        ...(value.model === undefined ? {} : { model: value.model }),
+        tools: [...value.tools],
+        permissions: [...value.permissions],
+        bodyFile,
+        ...(value.readOnlyReason === undefined ? {} : { readOnlyReason: value.readOnlyReason }),
+      };
+}
+
+function detailEffectiveContextFromWire(value: unknown): EffectiveContext | null {
+  if (
+    !isRecord(value) ||
+    !isOneOf(value.agent, AGENT_IDS) ||
+    !isOneOf(value.scope, ['global', 'project'] as const) ||
+    !maskedDisplayString(value.sourceTierLabel) ||
+    !Number.isInteger(value.precedence) ||
+    !Object.keys(value).every((key) =>
+      ['agent', 'scope', 'sourceTierLabel', 'precedence'].includes(key),
+    )
+  ) {
+    return null;
+  }
+  return {
+    agent: value.agent,
+    scope: value.scope,
+    sourceTierLabel: value.sourceTierLabel,
+    precedence: value.precedence as number,
+  };
+}
+
+function sourceAnchorFromWire(value: unknown): InspectorData['sourceAnchor'] | null {
+  if (!isRecord(value)) return null;
+  if (value.kind === 'userHome' && Object.keys(value).length === 1) return { kind: 'userHome' };
+  if (
+    value.kind === 'project' &&
+    maskedDisplayString(value.projectName) &&
+    Object.keys(value).length === 2
+  ) {
+    return { kind: 'project', projectName: value.projectName };
+  }
+  if (
+    value.kind === 'globalRoot' &&
+    maskedDisplayString(value.label) &&
+    Object.keys(value).length === 2
+  ) {
+    return { kind: 'globalRoot', label: value.label };
+  }
+  return null;
+}
+
+function overrideRelationFromWire(value: unknown): OverrideRelation | null {
+  if (
+    !isRecord(value) ||
+    !isOneOf(value.kind, ['overrides', 'overriddenBy', 'shadowed'] as const) ||
+    !maskedDisplayString(value.otherAssetId) ||
+    !maskedDisplayString(value.note) ||
+    !Object.keys(value).every((key) => ['kind', 'otherAssetId', 'note'].includes(key))
+  ) {
+    return null;
+  }
+  return { kind: value.kind, otherAssetId: value.otherAssetId, note: value.note };
+}
+
+function sameDetailEffectiveContexts(
+  left: readonly EffectiveContext[],
+  right: readonly EffectiveContext[],
+): boolean {
+  return (
+    left.length === right.length &&
+    left.every(
+      (context, index) =>
+        context.agent === right[index]?.agent &&
+        context.scope === right[index]?.scope &&
+        context.sourceTierLabel === right[index]?.sourceTierLabel &&
+        context.precedence === right[index]?.precedence,
+    )
+  );
+}
+
+function assetDetailSnapshotFromWire(
+  value: unknown,
+  requestAsset: AssetRef,
+): AssetDetailSnapshot | null {
+  if (
+    !isRecord(value) ||
+    value.kind !== 'assetDetail' ||
+    !isRecord(value.detail) ||
+    !isRecord(value.inspector)
+  ) {
+    return null;
+  }
+  const detail = value.detail;
+  const asset = assetRefFromResponseWire(detail.asset);
+  const primaryFile = nativeFileRefFromWire(detail.primaryFile);
+  const readSurface =
+    asset === null ? null : assetReadSurfaceFromWire(detail.readSurface, asset.assetType);
+  const fileTreeRoot =
+    detail.fileTreeRoot === undefined ? undefined : fileTreeFromWire(detail.fileTreeRoot);
+  if (
+    asset === null ||
+    !sameAssetRef(asset, requestAsset) ||
+    !maskedDisplayString(detail.displayName) ||
+    !isOneOf(detail.nativeUnitKind, [
+      'singleFile',
+      'multiFileDirectory',
+      'configBlock',
+      'pluginModule',
+    ] as const) ||
+    !maskedDisplayString(detail.revision) ||
+    !isOneOf(detail.compatibility, [
+      'verifiedWritable',
+      'recognizedReadOnly',
+      'incompatibleBlocked',
+    ] as const) ||
+    !isRecord(detail.capabilities) ||
+    primaryFile === null ||
+    !Array.isArray(detail.effectiveContexts) ||
+    readSurface === null ||
+    fileTreeRoot === null ||
+    !Object.keys(detail).every((key) =>
+      [
+        'asset',
+        'displayName',
+        'nativeUnitKind',
+        'revision',
+        'compatibility',
+        'capabilities',
+        'effectiveContexts',
+        'primaryFile',
+        'fileTreeRoot',
+        'readSurface',
+      ].includes(key),
+    ) ||
+    !maskedDisplayString(value.revision) ||
+    value.revision !== detail.revision
+  ) {
+    return null;
+  }
+  const edit = actionAvailabilityFromWire(detail.capabilities.edit);
+  const convert = actionAvailabilityFromWire(detail.capabilities.convert);
+  const exportAvailability = actionAvailabilityFromWire(detail.capabilities.export);
+  const deleteAvailability = actionAvailabilityFromWire(detail.capabilities.delete);
+  if (
+    edit === null ||
+    convert === null ||
+    exportAvailability === null ||
+    deleteAvailability === null
+  ) {
+    return null;
+  }
+  const treeFiles = (node: FileTreeNode): NativeFileRef[] => [
+    ...(node.file === undefined ? [] : [node.file]),
+    ...(node.children?.flatMap(treeFiles) ?? []),
+  ];
+  if (
+    (detail.nativeUnitKind === 'multiFileDirectory' && fileTreeRoot === undefined) ||
+    (fileTreeRoot !== undefined &&
+      (treeFiles(fileTreeRoot).filter((file) => file.isPrimary).length !== 1 ||
+        !treeFiles(fileTreeRoot).some(
+          (file) => file.fileId === primaryFile.fileId && file.isPrimary,
+        ))) ||
+    (readSurface.kind === 'longTermInstruction' &&
+      readSurface.markdownFile.fileId !== primaryFile.fileId) ||
+    (readSurface.kind === 'subagent' && readSurface.bodyFile.fileId !== primaryFile.fileId)
+  ) {
+    return null;
+  }
+  const inspector = value.inspector;
+  const detailEffectiveContexts = detail.effectiveContexts.map(detailEffectiveContextFromWire);
+  const inspectorEffectiveContexts = Array.isArray(inspector.effectiveContexts)
+    ? inspector.effectiveContexts.map(detailEffectiveContextFromWire)
+    : null;
+  const sourceAnchor = sourceAnchorFromWire(inspector.sourceAnchor);
+  const overrides = Array.isArray(inspector.overrides)
+    ? inspector.overrides.map(overrideRelationFromWire)
+    : null;
+  if (
+    !Array.isArray(inspector.agents) ||
+    !inspector.agents.every((agent) => isOneOf(agent, AGENT_IDS)) ||
+    !isOneOf(inspector.scope, ['global', 'project'] as const) ||
+    detailEffectiveContexts.some((context) => context === null) ||
+    inspectorEffectiveContexts === null ||
+    inspectorEffectiveContexts.some((context) => context === null) ||
+    sourceAnchor === null ||
+    !maskedDisplayString(inspector.pathDisplay) ||
+    !isOneOf(inspector.compatibility, [
+      'verifiedWritable',
+      'recognizedReadOnly',
+      'incompatibleBlocked',
+    ] as const) ||
+    overrides === null ||
+    overrides.some((override) => override === null) ||
+    inspector.compatibility !== detail.compatibility ||
+    !sameDetailEffectiveContexts(
+      detailEffectiveContexts as EffectiveContext[],
+      inspectorEffectiveContexts as EffectiveContext[],
+    ) ||
+    !Object.keys(inspector).every((key) =>
+      [
+        'agents',
+        'scope',
+        'effectiveContexts',
+        'sourceAnchor',
+        'pathDisplay',
+        'compatibility',
+        'overrides',
+      ].includes(key),
+    )
+  ) {
+    return null;
+  }
+  return {
+    kind: 'assetDetail',
+    detail: {
+      asset,
+      displayName: detail.displayName,
+      nativeUnitKind: detail.nativeUnitKind,
+      revision: detail.revision,
+      compatibility: detail.compatibility as CompatibilityStatus,
+      capabilities: { edit, convert, export: exportAvailability, delete: deleteAvailability },
+      effectiveContexts: detailEffectiveContexts as EffectiveContext[],
+      primaryFile,
+      ...(fileTreeRoot === undefined ? {} : { fileTreeRoot }),
+      readSurface,
+    },
+    inspector: {
+      agents: [...inspector.agents] as InspectorData['agents'],
+      scope: inspector.scope,
+      effectiveContexts: inspectorEffectiveContexts as EffectiveContext[],
+      sourceAnchor,
+      pathDisplay: inspector.pathDisplay,
+      compatibility: inspector.compatibility as CompatibilityStatus,
+      overrides: overrides as OverrideRelation[],
+    },
+    revision: value.revision,
+  };
 }
 
 function viewContextFromWire(value: unknown): ViewContext | null {
@@ -646,17 +1249,24 @@ function locatorSnapshotFromWire(value: unknown): GlobalLocatorSnapshot | null {
       if (!isRecord(result)) return null;
       const row = rowFromWire(result.row, assetType);
       const destinationViewContext = viewContextFromWire(result.destinationViewContext);
+      const rawDestination = isRecord(result.destination) ? result.destination : null;
+      const destinationKind =
+        rawDestination !== null &&
+        (rawDestination.kind === 'skillDetail' || rawDestination.kind === 'typeSpecificDetail')
+          ? rawDestination.kind
+          : null;
       const destination =
-        isRecord(result.destination) && result.destination.kind === 'skillDetail'
-          ? assetType === 'skill'
-            ? assetRefFromWire(result.destination.assetRef, assetType)
+        destinationKind !== null
+          ? (assetType === 'skill' && destinationKind === 'skillDetail') ||
+            (assetType !== 'skill' && destinationKind === 'typeSpecificDetail')
+            ? assetRefFromWire(rawDestination!.assetRef, assetType)
             : null
-          : isRecord(result.destination) && result.destination.kind === 'unsupportedReadOnly'
+          : rawDestination?.kind === 'unsupportedReadOnly'
             ? (() => {
-                const assetRef = assetRefFromWire(result.destination.assetRef, assetType);
-                return assetRef === null || !isOneOf(result.destination.reasonCode, REASON_CODES)
+                const assetRef = assetRefFromWire(rawDestination.assetRef, assetType);
+                return assetRef === null || !isOneOf(rawDestination.reasonCode, REASON_CODES)
                   ? null
-                  : { assetRef, reasonCode: result.destination.reasonCode };
+                  : { assetRef, reasonCode: rawDestination.reasonCode };
               })()
             : null;
       const matchedField = isOneOf(result.matchedField, LOCATOR_MATCH_FIELDS)
@@ -690,7 +1300,10 @@ function locatorSnapshotFromWire(value: unknown): GlobalLocatorSnapshot | null {
             destinationViewContext,
             destination:
               'assetId' in destination
-                ? { kind: 'skillDetail' as const, assetRef: destination }
+                ? {
+                    kind: destinationKind!,
+                    assetRef: destination,
+                  }
                 : { kind: 'unsupportedReadOnly' as const, ...destination },
             matchedField,
           };
@@ -757,6 +1370,18 @@ function normalizeResponse<Q extends Query>(
     }
     if (request.kind === 'globalLocator') {
       const normalized = locatorSnapshotFromWire(snapshot);
+      return normalized === null
+        ? null
+        : ({ kind: 'readSucceeded', snapshot: normalized } as ReadResult<SnapshotFor<Q>>);
+    }
+    if (request.kind === 'assetDetail') {
+      const normalized = assetDetailSnapshotFromWire(snapshot, request.asset);
+      return normalized === null
+        ? null
+        : ({ kind: 'readSucceeded', snapshot: normalized } as ReadResult<SnapshotFor<Q>>);
+    }
+    if (request.kind === 'nativeFile') {
+      const normalized = nativeFileSnapshotFromWire(snapshot, request.asset, request.fileId);
       return normalized === null
         ? null
         : ({ kind: 'readSucceeded', snapshot: normalized } as ReadResult<SnapshotFor<Q>>);

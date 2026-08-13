@@ -1,6 +1,11 @@
 /** FE-01 的首个 workbench read-session。 */
 import type { FrontendGateway } from '../contract/gateway';
-import type { ReasonCode } from '../contract/types';
+import type {
+  AssetDetailSnapshot,
+  NativeFileRef,
+  NativeFileSnapshot,
+  ReasonCode,
+} from '../contract/types';
 import {
   canonicalizeWorkbenchFilters,
   DEFAULT_LIST_PRESENTATION,
@@ -33,6 +38,11 @@ export interface ReadOnlyWorkbenchState {
   /** 最近一次同 revision 的权威 all/project read 所见 opaque project identity。 */
   availableProjectIds: readonly string[];
   selected: ReadOnlyRow | null;
+  detail:
+    | { kind: 'idle' }
+    | { kind: 'loading'; assetRef: ReadOnlyAssetRef }
+    | { kind: 'ready'; detail: AssetDetailSnapshot; file?: NativeFileSnapshot }
+    | { kind: 'failed'; reasonCode: ReasonCode; message: string };
   /** 非 FE-01 Skill detail 的合法 locator destination：只显示 fail-closed 错误。 */
   detailError: { assetRef: ReadOnlyAssetRef; reasonCode: ReasonCode; message: string } | null;
   locator:
@@ -57,6 +67,7 @@ export type ReadOnlyWorkbenchAction =
   | { kind: 'setPageSize'; pageSize: ListPresentationState['pageSize'] }
   | { kind: 'setPage'; page: number }
   | { kind: 'selectRow'; row: ReadOnlyRow }
+  | { kind: 'selectDetailFile'; file: NativeFileRef }
   | { kind: 'openLocator' }
   | { kind: 'closeLocator' }
   | { kind: 'setLocatorSearch'; searchText: string }
@@ -90,6 +101,7 @@ export class ReadOnlyWorkbenchSession {
   private readonly unlisten: () => void;
   private workbenchGeneration = 0;
   private locatorGeneration = 0;
+  private detailGeneration = 0;
   /** event 后 UI 不保留旧 facts；仅保留 native identity 供新 snapshot 成功时重绑。 */
   private pendingRereadSelection: ReadOnlyRow | null = null;
   /** 合法 locator 跳转在随后的 authoritative reread 失败时仍需定位到详情错误。 */
@@ -104,6 +116,7 @@ export class ReadOnlyWorkbenchSession {
     presentation: DEFAULT_LIST_PRESENTATION,
     availableProjectIds: [],
     selected: null,
+    detail: { kind: 'idle' },
     detailError: null,
     locator: { kind: 'closed' },
   };
@@ -128,6 +141,7 @@ export class ReadOnlyWorkbenchSession {
     this.disposed = true;
     this.workbenchGeneration += 1;
     this.locatorGeneration += 1;
+    this.detailGeneration += 1;
     this.unlisten();
     this.listeners.clear();
   }
@@ -136,36 +150,42 @@ export class ReadOnlyWorkbenchSession {
     if (this.disposed) return;
     switch (action.kind) {
       case 'selectAssetType':
+        this.detailGeneration += 1;
         this.pendingRereadSelection = null;
         this.pendingLocatorDetail = null;
         this.preserveUnsupportedLocatorDetail = false;
         this.update({
           assetType: action.assetType,
           selected: null,
+          detail: { kind: 'idle' },
           detailError: null,
           presentation: this.resetPage(),
         });
         this.refresh(true);
         return;
       case 'selectViewContext':
+        this.detailGeneration += 1;
         this.pendingRereadSelection = null;
         this.pendingLocatorDetail = null;
         this.preserveUnsupportedLocatorDetail = false;
         this.update({
           viewContext: action.viewContext,
           selected: null,
+          detail: { kind: 'idle' },
           detailError: null,
           presentation: this.resetPage(),
         });
         this.refresh(true);
         return;
       case 'setFilters':
+        this.detailGeneration += 1;
         this.pendingRereadSelection = null;
         this.pendingLocatorDetail = null;
         this.preserveUnsupportedLocatorDetail = false;
         this.update({
           filters: action.filters,
           selected: null,
+          detail: { kind: 'idle' },
           detailError: null,
           presentation: this.resetPage(),
         });
@@ -185,11 +205,43 @@ export class ReadOnlyWorkbenchSession {
         this.update({ presentation: { ...this.state.presentation, page: action.page } });
         return;
       case 'selectRow':
+        this.detailGeneration += 1;
         this.pendingRereadSelection = null;
         this.pendingLocatorDetail = null;
         this.preserveUnsupportedLocatorDetail = false;
-        this.update({ selected: action.row, detailError: null });
+        this.update({
+          selected: action.row,
+          detail: { kind: 'loading', assetRef: action.row.assetRef },
+          detailError: null,
+        });
+        this.readDetail(action.row.assetRef);
         return;
+      case 'selectDetailFile': {
+        if (this.state.detail.kind !== 'ready') return;
+        const generation = ++this.detailGeneration;
+        const { detail } = this.state.detail;
+        const assetRef = detail.detail.asset;
+        if (assetRef.assetType === 'hook') {
+          this.update({
+            detail: {
+              kind: 'failed',
+              reasonCode: 'EXECUTABLE_CONTENT_RISK',
+              message: '可执行 Hook 内容不提供只读展示。',
+            },
+          });
+          return;
+        }
+        const readOnlyAssetRef: ReadOnlyAssetRef = {
+          assetId: assetRef.assetId,
+          assetType: assetRef.assetType,
+          nativeUnitRef: assetRef.nativeUnitRef,
+          adapterIdentity: assetRef.adapterIdentity,
+          nativeOwnership: assetRef.nativeOwnership,
+        };
+        this.update({ detail: { kind: 'loading', assetRef: readOnlyAssetRef } });
+        this.readDetailFile(readOnlyAssetRef, detail, action.file, generation);
+        return;
+      }
       case 'openLocator':
         this.locatorGeneration += 1;
         this.update({ locator: { kind: 'open', searchText: '', snapshot: null } });
@@ -206,10 +258,12 @@ export class ReadOnlyWorkbenchSession {
         return;
       }
       case 'selectLocatorResult': {
+        this.detailGeneration += 1;
         this.locatorGeneration += 1;
-        this.preserveUnsupportedLocatorDetail = action.result.destination.kind !== 'skillDetail';
+        this.preserveUnsupportedLocatorDetail =
+          action.result.destination.kind === 'unsupportedReadOnly';
         const filters = this.filtersForLocatorDestination(action.result.destinationViewContext);
-        if (action.result.destination.kind !== 'skillDetail') {
+        if (action.result.destination.kind === 'unsupportedReadOnly') {
           this.pendingRereadSelection = null;
           this.pendingLocatorDetail = null;
           const assetRef = action.result.destination.assetRef;
@@ -218,6 +272,7 @@ export class ReadOnlyWorkbenchSession {
             viewContext: action.result.destinationViewContext,
             filters,
             selected: null,
+            detail: { kind: 'idle' },
             detailError: {
               assetRef,
               reasonCode: action.result.destination.reasonCode as ReasonCode,
@@ -236,15 +291,18 @@ export class ReadOnlyWorkbenchSession {
           viewContext: action.result.destinationViewContext,
           filters,
           selected: action.result,
+          detail: { kind: 'loading', assetRef: action.result.destination.assetRef },
           detailError: null,
           locator: { kind: 'closed' },
           presentation: this.resetPage(),
         });
         this.refresh(true);
+        this.readDetail(action.result.destination.assetRef);
         return;
       }
       case 'retry':
         this.refresh(true);
+        if (this.state.selected !== null) this.readDetail(this.state.selected.assetRef);
         return;
     }
   }
@@ -263,7 +321,9 @@ export class ReadOnlyWorkbenchSession {
           message: '读取条件无效，请调整后重试。',
         },
         selected: null,
+        detail: { kind: 'idle' },
       });
+      this.detailGeneration += 1;
       this.pendingRereadSelection = null;
       return;
     }
@@ -277,6 +337,9 @@ export class ReadOnlyWorkbenchSession {
     void this.gateway.read(query).then((result) => {
       if (this.disposed || generation !== this.workbenchGeneration) return;
       if (result.kind === 'readFailed') {
+        // 当前 authoritative workbench read 已失败，旧 detail/nativeFile 不再有
+        // 可绑定的 selection；先废弃它们，迟到结果不得复活 detail。
+        this.detailGeneration += 1;
         this.pendingRereadSelection = null;
         const detailAsset = this.pendingLocatorDetail;
         this.pendingLocatorDetail = null;
@@ -285,6 +348,7 @@ export class ReadOnlyWorkbenchSession {
         this.update({
           loadState: { kind: 'failed', reasonCode: result.reasonCode, message: result.message },
           selected: null,
+          detail: { kind: 'idle' },
           detailError:
             detailAsset === null
               ? preserveUnsupported
@@ -324,6 +388,7 @@ export class ReadOnlyWorkbenchSession {
       this.update({
         loadState,
         selected,
+        detail: selected === null ? { kind: 'idle' } : this.state.detail,
         detailError: preserveUnsupported ? this.state.detailError : null,
         availableProjectIds,
         presentation:
@@ -331,12 +396,14 @@ export class ReadOnlyWorkbenchSession {
             ? this.state.presentation
             : { ...this.state.presentation, page: projected.page },
       });
+      if (selected === null) this.detailGeneration += 1;
     });
   }
 
   private invalidateAndReread(): void {
     // event 不携带事实：到达瞬间先失效旧 snapshot/cells，后续仅接受新 read。
     this.workbenchGeneration += 1;
+    this.detailGeneration += 1;
     // locator snapshot 同样不是权威事实；若用户正在搜索，保留输入和 open state，
     // 立即清空旧结果并用同一 searchText 发起新的 authoritative read。
     const locatorSearchText =
@@ -350,6 +417,7 @@ export class ReadOnlyWorkbenchSession {
     this.update({
       loadState: { kind: 'loading' },
       selected: null,
+      detail: { kind: 'idle' },
       detailError: null,
       availableProjectIds: [],
       locator:
@@ -390,6 +458,70 @@ export class ReadOnlyWorkbenchSession {
             },
           });
         }
+      });
+  }
+
+  /**
+   * 类型详情只经同一个 FrontendGateway 的只读 query 链取得。Skill 先显示
+   * structured detail/tree；只有用户选择“查看源码”后才请求 nativeFile。
+   */
+  private readDetail(assetRef: ReadOnlyAssetRef): void {
+    const generation = ++this.detailGeneration;
+    void (async () => {
+      const detailResult = await this.gateway.read({ kind: 'assetDetail', asset: assetRef });
+      if (this.disposed || generation !== this.detailGeneration) return;
+      if (detailResult.kind === 'readFailed') {
+        this.update({
+          detail: {
+            kind: 'failed',
+            reasonCode: detailResult.reasonCode,
+            message: detailResult.message,
+          },
+        });
+        return;
+      }
+      if (assetRef.assetType === 'skill') {
+        this.update({ detail: { kind: 'ready', detail: detailResult.snapshot } });
+        return;
+      }
+      this.readDetailFile(
+        assetRef,
+        detailResult.snapshot,
+        detailResult.snapshot.detail.primaryFile,
+        generation,
+      );
+    })();
+  }
+
+  private readDetailFile(
+    assetRef: ReadOnlyAssetRef,
+    detail: AssetDetailSnapshot,
+    file: NativeFileRef,
+    generation: number,
+  ): void {
+    // nativeFile 只在用户明确打开 Skill 文件，或长期指令/Subagent 的默认正文
+    // surface 需要读取时触发；仍与同一 asset detail revision 绑定。
+    void this.gateway
+      .read({ kind: 'nativeFile', asset: assetRef, fileId: file.fileId })
+      .then((fileResult) => {
+        if (this.disposed || generation !== this.detailGeneration) return;
+        if (
+          fileResult.kind === 'readFailed' ||
+          fileResult.snapshot.assetRevision !== detail.revision
+        ) {
+          this.update({
+            detail: {
+              kind: 'failed',
+              reasonCode: fileResult.kind === 'readFailed' ? fileResult.reasonCode : 'READ_FAILED',
+              message:
+                fileResult.kind === 'readFailed'
+                  ? fileResult.message
+                  : '详情与原生文件版本不一致，请重读。',
+            },
+          });
+          return;
+        }
+        this.update({ detail: { kind: 'ready', detail, file: fileResult.snapshot } });
       });
   }
 

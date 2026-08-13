@@ -140,6 +140,7 @@ export interface WorkbenchActualReadSnapshot {
 
 export type LocatorDestination =
   | { kind: 'skillDetail'; assetRef: ReadOnlyAssetRef }
+  | { kind: 'typeSpecificDetail'; assetRef: ReadOnlyAssetRef }
   | { kind: 'unsupportedReadOnly'; assetRef: ReadOnlyAssetRef; reasonCode: string };
 
 export interface LocatorResult extends Omit<ReadOnlyRow, 'redactedSummary' | 'ownershipHint'> {

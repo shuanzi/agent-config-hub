@@ -6,7 +6,7 @@
 use crate::catalog::{locator_match_field, mask_synthetic_secrets, Catalog, LocatorDisplayFields};
 use crate::domain::{
     derive_workbench_status_memberships, AgentId, ApplicabilityResolution, AssetStatusFilter,
-    GlobalLocatorQuery, GlobalLocatorSnapshot, LocatorDestination, LocatorGroup,
+    AssetType, GlobalLocatorQuery, GlobalLocatorSnapshot, LocatorDestination, LocatorGroup,
     LocatorMatchedField, LocatorResult, MvpAssetType, ProjectApplicabilityQuery,
     ProjectApplicabilitySegmentKind, ProjectApplicabilitySnapshot, ProjectApplicabilityView, Query,
     ReadFailure, ReadResult, ReasonCode, RecoveryAction, SegmentSource, SkillActivation,
@@ -53,12 +53,18 @@ impl GatewayCore {
                 }
             }
             Query::AssetDetail(detail_query) => {
+                if detail_query.asset.asset_type == AssetType::Hook {
+                    return Self::executable_content_risk();
+                }
                 match self.catalog.asset_detail(&detail_query.asset) {
                     Some(snapshot) => ReadResult::Succeeded(Snapshot::AssetDetail(snapshot)),
                     None => Self::read_failed("资产不存在或当前不可读，请重读。"),
                 }
             }
             Query::NativeFile(file_query) => {
+                if file_query.asset.asset_type == AssetType::Hook {
+                    return Self::executable_content_risk();
+                }
                 match self
                     .catalog
                     .native_file(&file_query.asset, &file_query.file_id)
@@ -75,6 +81,14 @@ impl GatewayCore {
             reason_code: ReasonCode::ReadFailed,
             // 人类可读 message 统一过出口遮蔽（当前为固定文案，遮蔽是恒等防御）。
             message: mask_synthetic_secrets(message),
+            recovery_action: Some(RecoveryAction::RetryRead),
+        })
+    }
+
+    fn executable_content_risk() -> ReadResult<Snapshot> {
+        ReadResult::Failed(ReadFailure {
+            reason_code: ReasonCode::ExecutableContentRisk,
+            message: "可执行 Hook 内容不提供只读展示。".to_string(),
             recovery_action: Some(RecoveryAction::RetryRead),
         })
     }

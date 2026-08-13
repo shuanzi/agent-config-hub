@@ -138,6 +138,16 @@ pub struct AssetRef {
     pub native_ownership: NativeOwnership,
 }
 
+/// Hook 只允许在 adapter compatibility 边界被解码为这一条安全记录。未知字段
+/// 的原始值不属于任何 snapshot 或 UI surface：record 只公开稳定字段名和
+/// `EXECUTABLE_CONTENT_RISK`，从而既不丢弃 adapter 扩展，也不泄露敏感内容。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HookCompatibilityRecord {
+    pub asset: AssetRef,
+    pub reason_code: ReasonCode,
+    pub unknown_field_names: Vec<String>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AnomalyKind {
     ReadOnly,
@@ -518,6 +528,11 @@ pub enum LocatorDestination {
     SkillDetail {
         asset: AssetRef,
     },
+    /// FE-02：长期指令和 Subagent 使用同一只读详情 destination。Hook 永远
+    /// 不会构造此 variant。
+    TypeSpecificDetail {
+        asset: AssetRef,
+    },
     UnsupportedReadOnly {
         asset: AssetRef,
         reason_code: ReasonCode,
@@ -700,6 +715,8 @@ pub struct AssetDetail {
     pub effective_contexts: Vec<EffectiveContext>,
     pub primary_file: NativeFileRef,
     pub file_tree_root: Option<FileTreeNode>,
+    /// 类型特定的只读事实；不含 draft、intent 或任何可执行 payload。
+    pub read_surface: AssetReadSurface,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -762,6 +779,27 @@ pub struct NativeFileRef {
     pub can_preview: ActionAvailability,
     pub can_edit: ActionAvailability,
     pub has_draft_changes: bool,
+}
+
+/// FE-02 类型特定只读详情。Subagent 的未知/扩展内容不解析为可编辑字段；
+/// 正文仍只通过 NativeFile 在遮蔽后读取。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AssetReadSurface {
+    Skill {
+        agent_target_states: Vec<SkillTargetState>,
+        source_read_availability: ActionAvailability,
+        unknown_content_reason: Option<ReasonCode>,
+    },
+    LongTermInstruction {
+        markdown_file: NativeFileRef,
+    },
+    Subagent {
+        model: Option<String>,
+        tools: Vec<String>,
+        permissions: Vec<String>,
+        body_file: NativeFileRef,
+        read_only_reason: Option<ReasonCode>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

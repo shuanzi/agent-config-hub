@@ -1,0 +1,10 @@
+{
+  "fixtureId": "FX-02",
+  "name": "multifile-skill-mixed",
+  "description": "隔离的多文件 Skill、长期指令和 Subagent 只读数据。所有内容均为合成占位值。",
+  "safety": {
+    "syntheticOnly": true,
+    "executeContent": false,
+    "sensitiveValuesMaskedAtReadBoundary": true
+  }
+}

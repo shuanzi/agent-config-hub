@@ -48,10 +48,10 @@
 
 ### FE-02：类型特定只读详情与 Hook 负向边界
 
-- [ ] 3.7 重新读取并验证：仅当 ARCH-GATE=`closed`、FE-02 正式 Ticket Status=`ready-for-agent` 和 direct blocker FE-01=done 且有 evidence，才可开始 FE-02 slice；task-only 功能检查点不得替代上述正式状态、gate 或 direct blocker evidence。任一不满足，记录 blocker 并停止 FE-02 slice。
-- [ ] 3.8 在 FE-02 内完成最小 contract／domain／Rust-first wire delta，定义 Skill／Subagent／长期指令的只读 read surfaces、Hook UI 不可达及 FX-03 decode／未知字段／风险／遮蔽／no-execution 边界；不增加编辑。
-- [ ] 3.9 在 FE-02 内生成或复验 TypeScript wire、vectors 与 drift，并实现类型特定只读详情和相应安全 finding 表面。
-- [ ] 3.10 在 FE-02 内只执行 L0／L1 read／contract-security、L2 只读详情与 Hook 不可达、L3 actual multi-file read；明确无 L3 write，且不得以 Mock 代替所需 closure 证据。上述功能检查完成仅可记录为 non-closure 的 task-only `functional checks complete`，不得标记 done、更新 frontier 或替代正式 gate／direct blocker evidence。
+- [x] 3.7 重新读取并验证：仅当 ARCH-GATE=`closed`、FE-02 正式 Ticket Status=`ready-for-agent` 和 direct blocker FE-01=done 且有 evidence，才可开始 FE-02 slice；task-only 功能检查点不得替代上述正式状态、gate 或 direct blocker evidence。任一不满足，记录 blocker 并停止 FE-02 slice。
+- [x] 3.8 在 FE-02 内完成最小 contract／domain／Rust-first wire delta，定义 Skill／Subagent／长期指令的只读 read surfaces、Hook UI 不可达及 FX-03 decode／未知字段／风险／遮蔽／no-execution 边界；不增加编辑。
+- [x] 3.9 在 FE-02 内生成或复验 TypeScript wire、vectors 与 drift，并实现类型特定只读详情和相应安全 finding 表面。
+- [x] 3.10 在 FE-02 内只执行 L0／L1 read／contract-security、L2 只读详情与 Hook 不可达、L3 actual multi-file read；明确无 L3 write，且不得以 Mock 代替所需 closure 证据。上述功能检查完成仅可记录为 non-closure 的 task-only `functional checks complete`，不得标记 done、更新 frontier 或替代正式 gate／direct blocker evidence。
 - [ ] 3.11 仅在 FE-02 自身授权建立的 registry entry 已存在且 3.10 已记录 `functional checks complete` 后，先运行 PF-02／PF-03 read evidence，再运行 `npm run verify:ticket -- FE-02`；保留命令、层级、运行标识和未覆盖边界。PF fail／inconclusive 或正式 closure 失败均阻止 FE-02 done。
 - [ ] 3.12 对 FE-02 进行独立只读复审；任何功能、PF 或正式 closure 失败／inconclusive 均停止本 slice 尚未开始的后续实现、PF、closure，仍须进入本复审并独立记录 finding；复审本身不是 closure，不得标记 done 或更新 FE-03 与 FE-10 frontier；只有全部证据满足 acceptance，才可标记 FE-02 done 并更新该 frontier。
 
