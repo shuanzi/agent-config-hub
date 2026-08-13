@@ -3,16 +3,19 @@ import { describe, expect, it } from 'vitest';
 // @ts-expect-error runtime registry module is a plain Node ESM module.
 import { TICKET_REGISTRY } from '../../scripts/orchestrator/ticket-registry.mjs';
 
-const executionModule =
-  (await import('../../scripts/orchestrator/verify-ticket-execution.mjs')) as {
-    deriveStepRuntimeAdvisory: (input: {
-      step: {
-        id: string;
-        softRuntimeBudget?: { thresholdMs: number; classification: string };
-      };
-      result: { exitCode: number; timedOut: boolean; durationMs: number };
-    }) => unknown;
-  };
+const importRuntimeModule = (modulePath: string) => import(modulePath);
+
+const executionModule = (await importRuntimeModule(
+  '../../scripts/orchestrator/verify-ticket-execution.mjs',
+)) as {
+  deriveStepRuntimeAdvisory: (input: {
+    step: {
+      id: string;
+      softRuntimeBudget?: { thresholdMs: number; classification: string };
+    };
+    result: { exitCode: number; timedOut: boolean; durationMs: number };
+  }) => unknown;
+};
 
 describe('verify:ticket step runtime advisory public seam', () => {
   const frontendStep = TICKET_REGISTRY['FE-01'].steps.find(
@@ -31,9 +34,13 @@ describe('verify:ticket step runtime advisory public seam', () => {
         },
       ],
     };
-    const frontendResult = manifest.steps.find((step) => step.id === 'frontend');
+    const frontendSteps = manifest.steps.filter((step) => step.id === 'frontend');
+    const [frontendResult, duplicateFrontendResult] = frontendSteps;
 
-    expect(manifest.steps.filter((step) => step.id === 'frontend')).toHaveLength(1);
+    expect(frontendSteps).toHaveLength(1);
+    if (frontendResult === undefined || duplicateFrontendResult !== undefined) {
+      throw new Error('manifest must contain exactly one frontend step');
+    }
     expect(
       executionModule.deriveStepRuntimeAdvisory({
         step: frontendStep,

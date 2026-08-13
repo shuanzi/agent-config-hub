@@ -41,13 +41,18 @@ describe('FE-01 ticket registry', () => {
     );
 
     expect(thresholdMs).toBe(600_000);
+    const runtimeDebtPolicy = [
+      '仅当 stable index `.artifacts/verification/FE-01/latest-clean-subject-accepted-with-waiver.json` 解析的 backing manifest 的 `steps` 数组中唯一 `id=frontend` 的 step 同时满足 `status=pass`、`exitCode=0`、`timedOut=false`，且 `durationMs > ',
+      thresholdMs,
+      '`（按该 manifest `commit` 对应 registry 的 `steps` 数组中唯一 `id=frontend` step 的 `softRuntimeBudget.thresholdMs`）时，才记录 `deferred / post-optimization` 的 `test-infrastructure-debt`。',
+    ].join('');
     expect(issue).toContain(
       [
         '## FE-01 frontend test runtime debt（non-status record）',
         '',
-        `仅当 stable index \`.artifacts/verification/FE-01/latest-clean-subject-accepted-with-waiver.json\` 解析的 backing manifest 的 \`steps\` 数组中唯一 \`id=frontend\` 的 step 同时满足 \`status=pass\`、\`exitCode=0\`、\`timedOut=false\`，且 \`durationMs > ${thresholdMs}\`（按该 manifest \`commit\` 对应 registry 的 \`steps\` 数组中唯一 \`id=frontend\` step 的 \`softRuntimeBudget.thresholdMs\`）时，才记录 \`deferred / post-optimization\` 的 \`test-infrastructure-debt\`。`,
+        runtimeDebtPolicy,
         '',
-        '该记录为 \`non-blocking\`，不改变 PF-01 automatic \`fail\`/exit \`1\`、FE-01 closure 或 \`RELEASE-GATE\`。',
+        '该记录为 `non-blocking`，不改变 PF-01 automatic `fail`/exit `1`、FE-01 closure 或 `RELEASE-GATE`。',
       ].join('\n'),
     );
   });
