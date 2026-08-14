@@ -86,6 +86,7 @@ import {
   pf01ComparisonProvenance,
   validateFrozenPf01Budget,
 } from './pf01-budget.mjs';
+import { collectReadPfManifestResults } from './verify-ticket-performance.mjs';
 
 /** step 退出码 → 状态映射（ARC-06c §3.17）：0=pass，2=inconclusive，其余=fail */
 function stepStatusOf(exitCode) {
@@ -217,7 +218,9 @@ async function main() {
   const runId = makeRunId();
   const evidenceRoot = path.join(ARTIFACTS_ROOT, 'verification', ticketId, runId);
   const performanceDir =
-    ticket.performance === undefined ? null : path.join(evidenceRoot, 'performance');
+    ticket.performance === undefined && ticket.performances === undefined
+      ? null
+      : path.join(evidenceRoot, 'performance');
   if (performanceDir !== null) fs.mkdirSync(performanceDir, { recursive: true });
   console.log(`verify:ticket ${ticketId} run ${runId}`);
   console.log(`evidence: ${sanitizeText(evidenceRoot)}`);
@@ -304,14 +307,25 @@ async function main() {
 
   const endAt = new Date().toISOString();
 
-  // performance evidence 扫描（perf.mjs 已自行扫描其 summary/budgets；此处兜底）
+  // PF-01 保持 historical singular scanner/manifest；read PF 使用递归 physical-file
+  // scan + 每 profile 的脱敏 projection，禁止将嵌套目录、symlink 或 raw 内容跳过扫描。
+  let readPerformanceEvidence;
   if (performanceDir !== null && fs.existsSync(performanceDir)) {
-    for (const file of fs.readdirSync(performanceDir)) {
-      const full = path.join(performanceDir, file);
-      const scan = scanEvidenceText(fs.readFileSync(full, 'utf8'));
-      if (!scan.clean) {
-        evidenceContaminated = true;
-        contaminationNotes.push(`performance/${file}: 扫描命中`);
+    if (ticket.performances !== undefined) {
+      readPerformanceEvidence = collectReadPfManifestResults({
+        performances: ticket.performances,
+        stepResults,
+        evidenceRoot,
+        expectedCommit: startingGit.commit,
+      });
+    } else {
+      for (const file of fs.readdirSync(performanceDir)) {
+        const full = path.join(performanceDir, file);
+        const scan = scanEvidenceText(fs.readFileSync(full, 'utf8'));
+        if (!scan.clean) {
+          evidenceContaminated = true;
+          contaminationNotes.push(`performance/${file}: 扫描命中`);
+        }
       }
     }
   }
@@ -364,6 +378,7 @@ async function main() {
     stepResults.some((step) => step.status === 'fail') || budget?.status === 'fail'
       ? 'fail'
       : evidenceContaminated ||
+          readPerformanceEvidence?.incomplete === true ||
           stepResults.some((step) => step.status === 'inconclusive') ||
           budget?.status === 'inconclusive'
         ? 'inconclusive'
@@ -436,6 +451,15 @@ async function main() {
     ...(fe01HarnessCapture === null || fe01HarnessCapture.capture.disposition === 'captured'
       ? {}
       : { runLocalHarnessCapture: fe01HarnessCapture?.capture }),
+    ...(readPerformanceEvidence === undefined
+      ? {}
+      : {
+          performanceResults: readPerformanceEvidence.performanceResults,
+          performanceEvidence: {
+            valid: !readPerformanceEvidence.incomplete,
+            notes: readPerformanceEvidence.contaminationNotes,
+          },
+        }),
     startAt,
     endAt,
     completedAt: endAt,

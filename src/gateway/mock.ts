@@ -36,6 +36,13 @@ import {
   type PerfProfile,
 } from './perf-catalog';
 import {
+  buildPf02SourceLargeFixture,
+  buildPf03MultifileFixture,
+  pfReadFixtureDigest,
+  type PfReadFixtureBundle,
+  type PfReadProfile,
+} from './pf-read-fixtures';
+import {
   AGENT_ORDER,
   canonicalizeWorkbenchFilters,
   MVP_ASSET_TYPES,
@@ -254,6 +261,9 @@ export class ScriptedMockGateway implements FrontendGateway {
   private fe02ReadSurfaces = false;
   /** PF-01 perf-catalog scenario 的合成目录；null 时保持 FX-01 单资产语义 */
   private perfCatalog: PerfCatalog | null = null;
+  /** PF-02/PF-03 安全 bundle；只读采样 scenario，不读取真实文件系统。 */
+  private perfReadSurface: PfReadFixtureBundle | null = null;
+  private perfReadFixtureDigest: string | null = null;
 
   async read<Q extends Query>(query: Q): Promise<ReadResult<SnapshotFor<Q>>> {
     this.readCalls.push({ method: 'read', queryKind: query.kind, query });
@@ -267,6 +277,9 @@ export class ScriptedMockGateway implements FrontendGateway {
 
     if (this.perfCatalog !== null) {
       return this.readFromPerfCatalog(query) as ReadResult<SnapshotFor<Q>>;
+    }
+    if (this.perfReadSurface !== null) {
+      return this.readFromPerfReadSurface(query) as ReadResult<SnapshotFor<Q>>;
     }
     if (this.fe02ReadSurfaces) {
       return this.readFromFx02(query) as ReadResult<SnapshotFor<Q>>;
@@ -469,6 +482,36 @@ export class ScriptedMockGateway implements FrontendGateway {
   }
 
   /**
+   * 启用 PF-02/PF-03 L2 read-surface scenario。bundle 来自冻结的安全 builder；
+   * mock 只返还其 public masked snapshot，绝不持有或读取用户文件内容。
+   */
+  enablePerfReadSurface(pfId: 'PF-02' | 'PF-03', profile: PfReadProfile): void {
+    this.perfReadSurface =
+      pfId === 'PF-02' ? buildPf02SourceLargeFixture(profile) : buildPf03MultifileFixture(profile);
+    this.perfReadFixtureDigest = pfReadFixtureDigest(this.perfReadSurface);
+  }
+
+  /** 采样页仅可查询 public-safe bundle 元数据；不暴露原始内容或文件系统路径。 */
+  perfReadSurfaceMetadata(): {
+    descriptorId: 'PF-02' | 'PF-03';
+    profile: PfReadProfile;
+    fixtureDigest: string;
+    shape: Record<string, number | string>;
+    files: NativeFileRef[];
+  } | null {
+    const bundle = this.perfReadSurface;
+    return bundle === null || this.perfReadFixtureDigest === null
+      ? null
+      : {
+          descriptorId: bundle.descriptorId,
+          profile: bundle.profile,
+          fixtureDigest: this.perfReadFixtureDigest,
+          shape: bundle.shape,
+          files: bundle.files.map((snapshot) => snapshot.file),
+        };
+  }
+
+  /**
    * PF-01 采样辅助：给定列表条件返回期望行数（perf 未启用时返回 null）。
    * 仅供性能探针断言“结果稳定为期望行数”，不属于 FrontendGateway 契约。
    */
@@ -573,6 +616,39 @@ export class ScriptedMockGateway implements FrontendGateway {
         };
         return this.readSucceeded(snapshot);
       }
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // PF-02/PF-03 read-surface 读取路径（只在 enablePerfReadSurface 后可达）
+  // -------------------------------------------------------------------------
+
+  private readFromPerfReadSurface(
+    query: Query,
+  ): ReadResult<AssetDetailSnapshot | NativeFileSnapshot | WorkbenchActualReadSnapshot> {
+    const bundle = this.perfReadSurface;
+    if (bundle === null) return this.readFailed('READ_FAILED');
+    const asset = bundle.detail.detail.asset;
+    switch (query.kind) {
+      case 'workbench':
+        return query.assetType === 'skill'
+          ? this.readSucceeded({ ...bundle.workbench, query })
+          : this.readFailed('READ_FAILED');
+      case 'assetDetail':
+        return query.asset.assetId === asset.assetId
+          ? this.readSucceeded(bundle.detail)
+          : this.readFailed('READ_FAILED');
+      case 'nativeFile': {
+        if (query.asset.assetId !== asset.assetId) return this.readFailed('READ_FAILED');
+        const snapshot = bundle.files.find((candidate) => candidate.file.fileId === query.fileId);
+        return snapshot === undefined
+          ? this.readFailed('READ_FAILED')
+          : this.readSucceeded(snapshot);
+      }
+      case 'assetList':
+      case 'globalLocator':
+      case 'projectApplicability':
+        return this.readFailed('UNSUPPORTED_CAPABILITY');
     }
   }
 

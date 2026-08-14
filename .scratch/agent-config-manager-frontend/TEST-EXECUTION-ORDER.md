@@ -534,6 +534,85 @@ printf 'historical=%d current=%d delta=%d registered=%d\n' "${#historical[@]}" "
 
 上述登记只支持 task 3.10 的 `functional checks complete` checkpoint。PF-02、PF-03、FE-02 registry、`npm run verify:ticket -- FE-02`、closure verdict 与 downstream frontier 仍未建立或执行；不得由本节结果推导。
 
+## FE-02 当前 change：PF 测试增量登记（7）
+
+本节只登记 task 3.11 的 PF-02／PF-03 descriptor、fixture、collector、evidence 与 closure orchestration contract 新增的七个 assertion paths；它保留上文历史 `56/56` 与功能阶段 `5/5` 的归档审计，不回填或重解释其当时结论。七个路径的唯一 primary classification 均为 `performance/FE-02-PF-02-PF-03`：
+
+- `performance/pf-read.collector.test.ts` — L2 mock renderer 的页面内 User Timing／MutationObserver／双 rAF 采样；仅写脱敏 read samples 与 fixture attestation，无 L3、RSS、Hook 或 write credit。
+- `tests/l1/pf02-pf03-descriptor.test.ts` — 冻结 profile、metric、样本数、预算公式、fixture digest 与 descriptor self-digest。
+- `tests/l1/pf-read-fixtures.test.ts` — 四个 profile 的确定性完整 safe bundle、只读／零 draft、遮蔽、shape 与 Node SHA-256 交叉核验。
+- `tests/l1/pf-read-collector-contract.test.ts` — collector 前态恢复、页内 intent 计时、独立 WDIO config 与 PF-01 config 隔离边界。
+- `tests/l1/pf-read-evidence.test.ts` — first-baseline inconclusive、物理 evidence、measurement digest、冻结预算公式／provenance 与安全 manifest projection。
+- `tests/l1/fe02-performance-registry.test.ts` — FE-02 四个独立 PF profile、registry step 与 FE-01 singular performance／waiver 隔离。
+- `tests/l1/verify-ticket-performance.test.ts` — 五份 current artifacts、raw samples 重算、物理 frozen budget／baseline triple、step lifecycle 与 generic fail-closed manifest 聚合。
+
+`performance/wdio.read.conf.ts`、`scripts/orchestrator/perf-read.mjs`、`scripts/orchestrator/pf-read-evidence.mjs`、`scripts/orchestrator/pf-read-measurement-inputs.mjs` 与 `scripts/orchestrator/verify-ticket-performance.mjs` 是本阶段的采样／判定／closure 支撑入口，不是 assertion paths，也不计入上述七项。当前静态盘点为历史 external assertions `56` + FE-02 functional delta `5` + FE-02 PF delta `7` = `68`（`tests/` 57、`performance/` 3、`src-tauri/tests/` 8）；embedded Rust target 仍为 1，因此合计 69 targets。上文各阶段数字继续作为各自时间点的 archived snapshot。
+
+本阶段使用以下独立 PF delta audit；它先复原历史 56 路径与功能阶段 5 路径的精确并集，再从当前 inventory 求新增集合并与本节七个登记路径比较。2026-08-14 执行预期为 `historical=56 functional=5 previous=61 current=68 delta=7 registered=7`，且两个 `diff` 均为零：
+
+```zsh
+set -e
+matrix='.scratch/agent-config-manager-frontend/TEST-EXECUTION-ORDER.md'
+
+historical=("${(@f)$(awk '
+  BEGIN { tick = sprintf("%c", 96) }
+  /^## 当前测试库存与 primary classification$/ { inventory = 1; next }
+  inventory && /^## 人工选择规则/ { exit }
+  inventory && substr($0, 1, 3) == "- " tick && substr($0, length($0), 1) == tick {
+    path = substr($0, 4, length($0) - 4)
+    if (path ~ /^(tests\/|performance\/|src-tauri\/tests\/)/) print path
+  }
+' "$matrix" | LC_ALL=C sort)}")
+
+functional=("${(@f)$(awk '
+  BEGIN { tick = sprintf("%c", 96) }
+  /^## FE-02 当前 change：测试增量登记（5）$/ { section = 1; next }
+  section && /^## / { exit }
+  section && substr($0, 1, 3) == "- " tick {
+    body = substr($0, 4); tick_pos = index(body, tick)
+    if (tick_pos > 1) {
+      path = substr(body, 1, tick_pos - 1)
+      if (path ~ /^(tests\/|performance\/|src-tauri\/tests\/)/) print path
+    }
+  }
+' "$matrix" | LC_ALL=C sort)}")
+
+registered=("${(@f)$(awk '
+  BEGIN { tick = sprintf("%c", 96) }
+  /^## FE-02 当前 change：PF 测试增量登记（7）$/ { section = 1; next }
+  section && /^## / { exit }
+  section && substr($0, 1, 3) == "- " tick {
+    body = substr($0, 4); tick_pos = index(body, tick)
+    if (tick_pos > 1) {
+      path = substr(body, 1, tick_pos - 1)
+      if (path ~ /^(tests\/|performance\/|src-tauri\/tests\/)/) print path
+    }
+  }
+' "$matrix" | LC_ALL=C sort)}")
+
+previous=("${(@f)$(printf '%s\n' "${historical[@]}" "${functional[@]}" | LC_ALL=C sort -u)}")
+current=("${(@f)$({
+  find tests -type f \( -name '*.test.ts' -o -name '*.test.tsx' -o -name '*.journey.test.ts' \) -print
+  find performance -type f -name '*.test.ts' -print
+  find src-tauri/tests -type f -name '*.rs' -print
+} | LC_ALL=C sort)}")
+
+missing="$(comm -23 <(printf '%s\n' "${previous[@]}") <(printf '%s\n' "${current[@]}"))"
+[[ -z "$missing" ]]
+delta=("${(@f)$(comm -13 <(printf '%s\n' "${previous[@]}") <(printf '%s\n' "${current[@]}"))}")
+
+[[ "${#historical[@]}" == 56 ]]
+[[ "${#functional[@]}" == 5 ]]
+[[ "${#previous[@]}" == 61 ]]
+[[ "${#current[@]}" == 68 ]]
+[[ "${#delta[@]}" == 7 ]]
+[[ "${#registered[@]}" == 7 ]]
+diff -u <(printf '%s\n' "${registered[@]}") <(printf '%s\n' "${delta[@]}")
+printf 'historical=%d functional=%d previous=%d current=%d delta=%d registered=%d\n' "${#historical[@]}" "${#functional[@]}" "${#previous[@]}" "${#current[@]}" "${#delta[@]}" "${#registered[@]}"
+```
+
+该登记只证明 PF 合同、采样入口和正式 closure 聚合路径已纳入 FE-02 自有测试库存；聚焦测试、脏树 smoke 或首次无预算 baseline 均不得推导 `budget-frozen`、`verify:ticket` closure、FE-02 `done` 或 downstream frontier。
+
 ## 统一 performance optimization backlog 模板
 
 此表是后续独立 optimization change 的人工计划模板，当前不登记新 performance debt。填写一行不会生成或修改 manifest、automatic result、waiver、stable index、budget、descriptor 或 ticket status。
