@@ -22,7 +22,7 @@
 - `ARCH-GATE` 已关闭；FE-07R 已由 run `20260810T071547Z` 的 L0/L1/L3 actual-read evidence 和独立只读复审关闭；FE-01 已由稳定索引 `.artifacts/verification/FE-01/latest-clean-subject-accepted-with-waiver.json` 的自身 closure 关闭，当前唯一 frontier 是 FE-02；`RELEASE-GATE` 继续受 FE-02 至 FE-10 的完成证据阻塞。
 - FE-07R 的最小 bootstrap/harness 已建立并实际运行；其 synthetic FX-19 actual-read evidence 不证明真实用户配置、生产 artifact、L2、PF 或写路径，也不得借给 FE-01 closure。
 - FE-01 的 PF-01 是 development acceptance（L2 Vite dev/mock + L3 debug test-harness）：automatic result 仍为 `fail`/exit `1` 且 `samplingRun=false`，只因 exact manual `accepted-with-waiver`、final physical evidence 与 lineage 成立而闭合；相关性能债务为 `deferred / post-optimization`。它不是 automatic PASS 或 release/reference evidence，不能解除 `RELEASE-GATE`。
-- 每张票据的正式关闭入口为 `npm run verify:ticket -- FE-XX`；FE-07R 与 FE-01 已验证，FE-02 至 FE-10 仍为 `planned / unverified`。底层 Cargo、Vitest 或 WebdriverIO 命令只能用于定位，不能单独关闭票据。
+- 每张票据的正式关闭入口为 `npm run verify:ticket -- FE-XX`；FE-07R 与 FE-01 已验证。FE-02 的正式 run `20260815T001547631Z-p58215-000` 已执行但以 PF-02 stress comparison failure／manifest `status=fail` 结束，仍为 `ready-for-agent` 且未闭合；FE-03 至 FE-10 仍为 `planned / unverified`。底层 Cargo、Vitest 或 WebdriverIO 命令只能用于定位，不能单独关闭票据。
 - 验证证据写入 `.artifacts/verification/<FE-ID>/<run-id>/` 并保持 L0–L4 provenance；mock、test harness 与 production artifact 不能互相替代。
 - 每个 FE 票据必须在一个全新上下文中完成；FE-07R 是唯一 foundation/read slice，FE-01 至 FE-10 各自交付可演示用户行为，不拆横向组件、状态层或 API 封装任务。
 - 每个 fixture 只有一张主票据；其他票据可复用同一敏感或安全不变量，但不得夺取 fixture 的主归属。

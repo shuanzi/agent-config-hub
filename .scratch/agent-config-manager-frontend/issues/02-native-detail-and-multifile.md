@@ -20,10 +20,12 @@
 
 ## 验证命令契约
 
-**状态：** `functional checks complete (task-only, non-closure; 2026-08-14)`。Ticket Status 仍为 `ready-for-agent`；PF-02／PF-03、正式 `npm run verify:ticket -- FE-02`、独立复审与 frontier 更新均未运行或完成。
+**状态：** `formal closure failed (non-closure; 2026-08-15)`。Ticket Status 仍为 `ready-for-agent`。用户批准的四份 PF-02／PF-03 versioned budget 已由首次 clean baseline 冻结；正式 run `20260815T001547631Z-p58215-000`（commit `bf62cefd4cf5e82782e21bdb0e4aafb6d9041a62`，起止 clean）以 root exit `1`／manifest `status=fail` 结束：L0／L1／L2／L3 与 PF-02 representative 通过，PF-02 stress 的 `pf02.source.scroll.render_stable` p50 `11.35ms` 超 frozen regression ceiling `8.5ms`，PF-03 两个 profile 因 fail-stop 信号中断而 incomplete。3.11 未完成；3.12 已完成本次独立只读复审但结论为 `NO-GO`，不构成 closure；FE-02 `done` 与 frontier 更新均未完成。
 
 **已复核前置条件：** ARCH-GATE=`closed`；FE-01 已 `done`，并由 `.artifacts/verification/FE-01/latest-clean-subject-accepted-with-waiver.json` 提供用户确认可接受的 stable direct-blocker evidence；`FX-02`、`FX-03` 与敏感占位变体只在隔离测试数据根复现，未读取或执行用户内容。
 
 **task-only 功能检查：** L0 `verify-toolchain`、`verify-static` 均 10/10；L1 Rust `fe02_read_surfaces` 10/10，Vitest wire/session 17/17；L2 FX-02 read-only journey 5/5；L3 FX-02 tracer 1/1。L3 同轮 identity 与实际启动的 `src-tauri/target/debug/agent-config-manager` SHA-256 均为 `20e2d01db859d80d673caeba7e8aad46a3259c356aa899f75de3633673cf209f`。
 
-**provenance 与未覆盖边界：** L2 仅为 scripted Mock renderer，不取得 IPC／磁盘 credit；L3 仅证明隔离 synthetic FX-02 经 WebView → IPC → Rust/core → 临时磁盘的 actual multi-file read，明确无 Hook、write、draft、`prepare`、`apply`、production artifact 或 L4 credit。路径／上下文／来源／覆盖／兼容为同一 read snapshot 的权威事实；当前 snapshot 不提供漂移、最近变更或恢复点的权威正向事实，UI 明示 unavailable，未伪造 history/recovery。PF-02／PF-03 仍为 `planned / unverified`，上述通过不得替代正式 closure。
+**provenance 与未覆盖边界：** L2 仅为 scripted Mock renderer，不取得 IPC／磁盘 credit；L3 仅证明隔离 synthetic FX-02 经 WebView → IPC → Rust/core → 临时磁盘的 actual multi-file read，明确无 Hook、write、draft、`prepare`、`apply`、production artifact 或 L4 credit。路径／上下文／来源／覆盖／兼容为同一 read snapshot 的权威事实；当前 snapshot 不提供漂移、最近变更或恢复点的权威正向事实，UI 明示 unavailable，未伪造 history/recovery。PF-02 stress 的 frozen-budget comparison failure 是正式 blocker；PF-03 incomplete 不形成 pass 或 fail 的性能结论；任何已通过层级均不得替代正式 closure。
+
+**独立只读复审（2026-08-15）：** 结论为 `NO-GO`，无 P0；有效 finding 包括三个 P1（正式 closure failure；普通标点／Unicode 多文件路径可折叠成相同 `fileId` 并读错文件；文件类型检查与 `fs::read` 分离造成 symlink swap TOCTOU）和三个 P2（SIGINT／SIGTERM 只转发当前子进程，使后续 PF 与 manifest 的 aborted／completed 语义失真；PF-02 stress 的 n=10 双峰样本无法从现有证据区分 collector 帧相位、宿主调度或产品回归；本票 evidence ledger 曾滞后于正式失败事实，已由本段纠正）。复审不构成 closure；代码级 P1、信号语义 P2、PF blocker 与 PF-03 incomplete 均未解决，禁止标记 `done` 或更新 FE-03／FE-10 frontier。
