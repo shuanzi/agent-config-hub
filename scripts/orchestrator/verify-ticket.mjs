@@ -8,6 +8,10 @@
  *
  * 状态模型：step 退出码映射 0=pass / 2=inconclusive / 其余=fail；
  * 常规整体 status 有 fail→fail，否则有 inconclusive→inconclusive，否则 pass。
+ * 父进程收到 SIGINT/SIGTERM 时：runStep 仍把信号转发给当前子进程（lib.mjs 是 PF
+ * 测量方法输入，保持字节不变）；verify-ticket 级 tracker 记录信号，主循环在当前
+ * 步骤结束后（或下一步启动前）终止后续步骤，manifest 记 `aborted` 且
+ * `completedAt=null`，进程以 128+signo 退出；aborted run 永不构成 completed/closure。
  * registry 默认执行新的 automatic sampling。仅未来 FE-01 registry 的精确 automatic-pass
  * record，或本次 subject-bound exact manual disposition，经 immutable validation 成功后，
  * 才将 perf 改为不采样的 historical validation；旧 waiver 仍永不进入 ticket closure。
@@ -56,6 +60,7 @@ import {
 } from './fe01-pf01-subject-waiver.mjs';
 import {
   automaticPassPf01BudgetState,
+  createAbortSignalTracker,
   deriveStepRuntimeAdvisory,
   executeTicketStep,
   finalizeAutomaticPassValidation,
@@ -65,6 +70,7 @@ import {
   isAutomaticPassPerfStep,
   isSubjectWaiverPerfStep,
   planTicketExecutionSteps,
+  signalExitCode,
   subjectWaiverPf01BudgetState,
   ticketManifestExitCode,
 } from './verify-ticket-execution.mjs';
@@ -242,7 +248,17 @@ async function main() {
   }
 
   const stepResults = [];
+  const abortTracker = createAbortSignalTracker();
+  let aborted = null;
   for (const step of executionSteps) {
+    // 信号可能在上一步结束后、下一步启动前到达：不再启动新步骤。
+    if (abortTracker.received() !== null) {
+      aborted = { signal: abortTracker.received(), stepId: null, at: new Date().toISOString() };
+      console.error(
+        `ABORTED  verify:ticket 收到 ${aborted.signal}，步骤 ${step.id} 不再启动；后续步骤不再执行`,
+      );
+      break;
+    }
     console.log(`\n=== [${step.layer}] ${step.id}: ${step.cmd} ${step.args.join(' ')}`);
     const result = await executeTicketStep({
       step,
@@ -303,6 +319,15 @@ async function main() {
     console.log(
       `${STATUS_LABEL[meta.status]}  [${step.layer}] ${step.id}  exit ${result.exitCode} (${result.durationMs}ms)`,
     );
+    // 父进程收到 SIGINT/SIGTERM（lib.mjs 的 runStep 已把信号转发给当前子进程）：
+    // run 记为 aborted，终止后续步骤，不再把 manifest 写成 completed 语义。
+    if (abortTracker.received() !== null) {
+      aborted = { signal: abortTracker.received(), stepId: step.id, at: new Date().toISOString() };
+      console.error(
+        `ABORTED  verify:ticket 收到 ${aborted.signal}，终止于步骤 ${step.id}；后续步骤不再执行`,
+      );
+      break;
+    }
   }
 
   const endAt = new Date().toISOString();
@@ -462,7 +487,8 @@ async function main() {
         }),
     startAt,
     endAt,
-    completedAt: endAt,
+    completedAt: aborted === null ? endAt : null,
+    ...(aborted === null ? {} : { aborted }),
   };
   if (ticket.performance !== undefined) {
     manifest.budgetState = budget?.label;
@@ -591,6 +617,10 @@ async function main() {
 
   console.log(`\nverify:ticket ${ticketId}: ${manifest.status}`);
   console.log(`manifest: ${sanitizeText(path.join(evidenceRoot, 'manifest.json'))}`);
+  // aborted run 以信号语义退出（128 + signo），不伪装成正常 completed exit。
+  if (aborted !== null) {
+    process.exit(signalExitCode(aborted.signal));
+  }
   // closure accepted-with-waiver=0；manifest 与 PF step 仍分别保留 waiver/fail-1 事实。
   process.exit(
     ticketManifestExitCode(manifest.status, {

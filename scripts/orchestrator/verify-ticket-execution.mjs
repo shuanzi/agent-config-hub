@@ -1,3 +1,4 @@
+/* global process */
 /** verify:ticket 的 performance execution seam；仅未来 exact automatic-pass record 可跳过 perf.mjs。 */
 import {
   FE01_PF01_AUTOMATIC_PASS_MODE,
@@ -365,4 +366,35 @@ export async function executeTicketStep({ step, runStepImpl }) {
     };
   }
   return runStepImpl();
+}
+
+/** 由终止信号推导退出码（128 + signo）。 */
+export function signalExitCode(signal) {
+  const numbers = { SIGHUP: 1, SIGINT: 2, SIGQUIT: 3, SIGKILL: 9, SIGTERM: 15 };
+  return 128 + (numbers[signal] ?? 15);
+}
+
+/**
+ * verify:ticket 进程级 SIGINT/SIGTERM 跟踪：runStep（lib.mjs，PF 测量方法输入，
+ * 冻结预算按其 sha256 绑定）保持字节不变，仍负责把信号转发给当前子进程；
+ * 本 tracker 只记录父进程收到过信号，由主循环在步骤间终止后续执行并把 run
+ * 记为 aborted。aborted run 永不构成 completed/closure。
+ */
+export function createAbortSignalTracker(target = process) {
+  let received = null;
+  const onSigint = () => {
+    received ??= 'SIGINT';
+  };
+  const onSigterm = () => {
+    received ??= 'SIGTERM';
+  };
+  target.on('SIGINT', onSigint);
+  target.on('SIGTERM', onSigterm);
+  return {
+    received: () => received,
+    dispose: () => {
+      target.off('SIGINT', onSigint);
+      target.off('SIGTERM', onSigterm);
+    },
+  };
 }
