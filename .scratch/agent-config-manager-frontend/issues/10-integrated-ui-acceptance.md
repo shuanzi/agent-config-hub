@@ -2,9 +2,9 @@
 
 **Acceptance state:** `Frozen (2026-08-10; planning acceptance only)`
 
-**Ticket Status:** `blocked`（不是 `done`；等待 FE-02 的 `done` 与 provenance-appropriate evidence）
+**Ticket Status:** `ready-for-agent`（不是 `done`；本票据尚未开始实现或产生自身 closure evidence）
 
-**Blocked by:** FE-02 — 原生详情与多文件资产。
+**Direct blocker evidence:** FE-02 已 `done`；其 final run `20260815T130239344Z-p33436-000` 的 accepted-with-waiver 记录见 `.artifacts/verification/FE-02/latest-clean-subject-accepted-with-waiver.json`。
 
 **Primary contract fixture:** `FX-12 sensitive-narrow-keyboard`
 
