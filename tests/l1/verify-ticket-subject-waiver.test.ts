@@ -26,12 +26,14 @@ describe('verify:ticket subject accepted-with-waiver execution seam', () => {
       }),
     ).toBe(0);
     expect(ticketManifestExitCode('accepted-with-waiver')).toBe(1);
+    // FE-02 waiver closure: the FE-02 subject accepted-with-waiver path is now
+    // wired, so an exact validated waiver maps the manifest to success (0).
     expect(
       ticketManifestExitCode('accepted-with-waiver', {
         ticketId: 'FE-02',
         exactSubjectWaiver: true,
       }),
-    ).toBe(1);
+    ).toBe(0);
     expect(ticketManifestExitCode('pass')).toBe(0);
     expect(ticketManifestExitCode('inconclusive')).toBe(2);
     expect(ticketManifestExitCode('fail')).toBe(1);

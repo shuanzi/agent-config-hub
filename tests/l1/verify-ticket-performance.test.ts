@@ -1,5 +1,6 @@
 import {
   copyFileSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -24,6 +25,16 @@ import { evaluateReadPfEvidence } from '../../scripts/orchestrator/pf-read-evide
 // prettier-ignore
 // @ts-expect-error runtime registry module is a plain Node ESM module.
 import { TICKET_REGISTRY } from '../../scripts/orchestrator/ticket-registry.mjs';
+// prettier-ignore
+// @ts-expect-error runtime subject waiver validator is a plain Node ESM module.
+import { validateFe02Pf02SubjectWaiver } from '../../scripts/orchestrator/fe02-pf02-subject-waiver.mjs';
+
+// 常规采样路径的 lifecycle 用例必须剥离 registry 上的 subjectWaiverPath 绑定；
+// waiver 分支行为由文件末尾的独立 describe 覆盖。
+function withoutSubjectWaiver(performance: Record<string, unknown>) {
+  const { subjectWaiverPath: _omitted, ...rest } = performance;
+  return rest;
+}
 
 type Profile = 'representative' | 'stress';
 type PerformanceConfig = {
@@ -241,10 +252,12 @@ function sha256File(filePath: string): string {
 
 function createFrozenPf02ComparisonFixture() {
   const repoRoot = mkdtempSync(join(tmpdir(), 'acm-pf-read-frozen-repo-'));
-  const config = (TICKET_REGISTRY['FE-02'].performances as PerformanceConfig[]).find(
-    (performance) =>
-      performance.descriptorId === 'PF-02' && performance.profile === 'representative',
-  );
+  const config = (TICKET_REGISTRY['FE-02'].performances as PerformanceConfig[])
+    .map((performance) => withoutSubjectWaiver(performance as unknown as Record<string, unknown>))
+    .find(
+      (performance) =>
+        performance.descriptorId === 'PF-02' && performance.profile === 'representative',
+    ) as PerformanceConfig | undefined;
   if (config === undefined) throw new Error('PF-02 representative registry fixture missing');
   const staticFiles = [
     ...PF_READ_REQUIRED_L2_MODULES,
@@ -382,11 +395,11 @@ describe('verify:ticket multi-PF manifest projection', () => {
     const evidenceRoot = mkdtempSync(join(tmpdir(), 'acm-pf-read-manifest-'));
     const performances = (TICKET_REGISTRY['FE-02'].performances as PerformanceConfig[]).map(
       (performance) => ({
-        ...performance,
+        ...withoutSubjectWaiver(performance as unknown as Record<string, unknown>),
         // 该 lifecycle fixture 必须和已冻结的真实 registry budget 隔离。
         budgetPath: `performance/budgets/test-no-budget-${performance.descriptorId.toLowerCase()}-${performance.profile}.json`,
       }),
-    );
+    ) as PerformanceConfig[];
     const steps = stepResults(performances);
 
     try {
@@ -526,7 +539,9 @@ describe('verify:ticket multi-PF manifest projection', () => {
     },
   ])('$label 必须 generic incomplete，不能成为 manifest 成功 PF evidence', ({ mutate }) => {
     const evidenceRoot = mkdtempSync(join(tmpdir(), 'acm-pf-read-manifest-invalid-'));
-    const performances = TICKET_REGISTRY['FE-02'].performances as PerformanceConfig[];
+    const performances = (TICKET_REGISTRY['FE-02'].performances as PerformanceConfig[]).map(
+      (performance) => withoutSubjectWaiver(performance as unknown as Record<string, unknown>),
+    ) as PerformanceConfig[];
     const steps = stepResults(performances);
     try {
       for (const [index, config] of performances.entries()) {
@@ -556,7 +571,9 @@ describe('verify:ticket multi-PF manifest projection', () => {
 
   it('summary validation/budgetValidation 中的敏感占位或绝对路径只能 generic incomplete，绝不先投影泄漏', () => {
     const evidenceRoot = mkdtempSync(join(tmpdir(), 'acm-pf-read-manifest-secret-'));
-    const performances = TICKET_REGISTRY['FE-02'].performances as PerformanceConfig[];
+    const performances = (TICKET_REGISTRY['FE-02'].performances as PerformanceConfig[]).map(
+      (performance) => withoutSubjectWaiver(performance as unknown as Record<string, unknown>),
+    ) as PerformanceConfig[];
     try {
       for (const [index, config] of performances.entries()) {
         writeCurrentEvidence(
@@ -598,7 +615,9 @@ describe('verify:ticket multi-PF manifest projection', () => {
     'fixture-attestation.json',
     'l2-dev-module-graph.json',
   ])('current evidence 缺失或 symlink %s 时必须 generic incomplete', (artifactName) => {
-    const performances = TICKET_REGISTRY['FE-02'].performances as PerformanceConfig[];
+    const performances = (TICKET_REGISTRY['FE-02'].performances as PerformanceConfig[]).map(
+      (performance) => withoutSubjectWaiver(performance as unknown as Record<string, unknown>),
+    ) as PerformanceConfig[];
     for (const mode of ['missing', 'symlink'] as const) {
       const evidenceRoot = mkdtempSync(join(tmpdir(), 'acm-pf-read-manifest-artifact-'));
       const external = mkdtempSync(join(tmpdir(), 'acm-pf-read-manifest-external-'));
@@ -701,6 +720,147 @@ describe('verify:ticket multi-PF manifest projection', () => {
       expect(collected.performanceResults[0]).toMatchObject({ validation: { valid: false } });
     } finally {
       rmSync(fixture.repoRoot, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('verify:ticket subject waiver entry projection', () => {
+  const WAIVER_PATH = 'performance/waivers/fe-02-pf-02-representative-scroll-render-stable.json';
+
+  function waiverPerformances() {
+    return (TICKET_REGISTRY['FE-02'].performances as PerformanceConfig[]).map((performance) => ({
+      ...performance,
+      // 三个正常采样 entry 与已冻结真实 budget 隔离；waiver entry 不读取本次 budget/evidence。
+      budgetPath: `performance/budgets/test-no-budget-${performance.descriptorId.toLowerCase()}-${performance.profile}.json`,
+    }));
+  }
+
+  function historicalStep() {
+    return {
+      id: 'perf-pf02-representative',
+      exitCode: 1,
+      status: 'fail',
+      execution: {
+        mode: 'historical-subject-waiver-validation',
+        samplingRun: false,
+        historicalRunId: '20260815T060139784Z-p84684-000',
+        initialWaiverValidation: 'valid',
+      },
+    };
+  }
+
+  function waiverSteps(performances: Array<Record<string, unknown>>) {
+    return performances.map((config) =>
+      (config as { subjectWaiverPath?: string }).subjectWaiverPath === WAIVER_PATH
+        ? historicalStep()
+        : {
+            id: `perf-${(config.descriptorId as string).toLowerCase().replace('-', '')}-${config.profile}`,
+            exitCode: 2,
+            status: 'inconclusive',
+          },
+    );
+  }
+
+  it('waiver entry 从 exact validation 投影：automatic fail/1 保留、不计 incomplete、其余 entry 正常评估', () => {
+    const validation = validateFe02Pf02SubjectWaiver();
+    expect(validation.valid).toBe(true);
+    const evidenceRoot = mkdtempSync(join(tmpdir(), 'acm-pf-read-manifest-waiver-'));
+    const performances = waiverPerformances();
+    try {
+      for (const config of performances) {
+        if ((config as { subjectWaiverPath?: string }).subjectWaiverPath === undefined) {
+          writeCurrentEvidence(evidenceRoot, config);
+        }
+      }
+      const collected = collectReadPfManifestResults({
+        performances,
+        stepResults: waiverSteps(performances),
+        evidenceRoot,
+        expectedCommit: 'a'.repeat(40),
+        subjectWaiverValidation: validation,
+      });
+
+      expect(collected).toMatchObject({ incomplete: false, contaminationNotes: [] });
+      expect(collected.performanceResults).toHaveLength(4);
+      // waiver entry 不要求本次 run 的 evidence 目录存在。
+      expect(existsSync(join(evidenceRoot, 'performance/PF-02/representative'))).toBe(false);
+      expect(collected.performanceResults[0]).toMatchObject({
+        pfId: 'PF-02',
+        profile: 'representative',
+        step: { id: 'perf-pf02-representative', exitCode: 1, status: 'fail' },
+        descriptor: {
+          path: 'performance/descriptors/pf-02.source-large.json',
+          digest: '53df623aeb8538e1ad8e2821c287603241647de870dcd2c04c8816cb1beff86e',
+        },
+        fixtureDigest: 'fc1100b4835e795128117099bc6c246497a26ef0d37bbbb941c3b87d41989e56',
+        budgetState: expect.stringContaining('historical-subject-waiver-validation'),
+        validation: { valid: true },
+        budgetValidation: {
+          status: 'historical-subject-waiver-validation',
+          automaticResult: { status: 'fail', exitCode: 1 },
+        },
+        measurementInputDigest: 'a1b474199c61bf46c769d83f22c6b7953be7f1053db0c1cbf3ed108e9259de45',
+        subjectWaiver: {
+          waiverPath: WAIVER_PATH,
+          runId: '20260815T060139784Z-p84684-000',
+          commit: '7936cb91f54c94e836124b0d46337247776431d2',
+          violation: {
+            metric: 'pf02.source.scroll.render_stable',
+            statistic: 'p50',
+            observedMs: 12.95,
+            thresholdMs: 3.9375,
+            deltaMs: 9.0125,
+          },
+        },
+      });
+      for (const result of collected.performanceResults.slice(1)) {
+        expect(result).toMatchObject({ validation: { valid: true } });
+      }
+      expect(JSON.stringify(collected)).not.toMatch(/SYNTHETIC-SECRET-|\/Users\//);
+    } finally {
+      rmSync(evidenceRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('validation 无效或 step 非 historical no-sampling 时，waiver entry 只能 generic incomplete', () => {
+    const evidenceRoot = mkdtempSync(join(tmpdir(), 'acm-pf-read-manifest-waiver-invalid-'));
+    const performances = waiverPerformances();
+    try {
+      for (const config of performances) {
+        if ((config as { subjectWaiverPath?: string }).subjectWaiverPath === undefined) {
+          writeCurrentEvidence(evidenceRoot, config);
+        }
+      }
+      for (const [validation, steps] of [
+        [{ valid: false }, waiverSteps(performances)],
+        // 真实采样 fail 且未写本次 evidence：不能借 waiver 投影。
+        [
+          validateFe02Pf02SubjectWaiver(),
+          waiverSteps(performances).map((step) =>
+            step.id === 'perf-pf02-representative'
+              ? { id: step.id, exitCode: 1, status: 'fail' }
+              : step,
+          ),
+        ],
+        // 未提供 waiver validation。
+        [undefined, waiverSteps(performances)],
+      ] as const) {
+        const collected = collectReadPfManifestResults({
+          performances,
+          stepResults: steps,
+          evidenceRoot,
+          expectedCommit: 'a'.repeat(40),
+          subjectWaiverValidation: validation,
+        });
+        expect(collected.incomplete).toBe(true);
+        expect(collected.performanceResults[0]).toMatchObject({ validation: { valid: false } });
+        expect(collected.performanceResults.slice(1)).toSatisfy(
+          (results: Array<{ validation: { valid: boolean } }>) =>
+            results.every((result) => result.validation.valid),
+        );
+      }
+    } finally {
+      rmSync(evidenceRoot, { recursive: true, force: true });
     }
   });
 });

@@ -10,6 +10,10 @@ import {
   FE01_PF01_SUBJECT_WAIVER_PATH,
   FE01_PF01_SUBJECT_WAIVER_SHA256,
 } from './fe01-pf01-subject-waiver.mjs';
+import {
+  FE02_PF02_SUBJECT_WAIVER_PATH,
+  FE02_PF02_SUBJECT_WAIVER_SHA256,
+} from './fe02-pf02-subject-waiver.mjs';
 
 export const AUTOMATIC_PASS_EXECUTION_MODE = FE01_PF01_AUTOMATIC_PASS_MODE;
 export const SUBJECT_WAIVER_EXECUTION_MODE = FE01_PF01_SUBJECT_WAIVER_MODE;
@@ -42,11 +46,22 @@ const SUBJECT_VIOLATION = Object.freeze({
   thresholdMs: 15.75,
   deltaMs: 0.45,
 });
+const FE02_SUBJECT_WAIVER_STEP_ID = 'perf-pf02-representative';
+const FE02_SUBJECT_VIOLATION = Object.freeze({
+  metric: 'pf02.source.scroll.render_stable',
+  statistic: 'p50',
+  observedMs: 12.95,
+  thresholdMs: 3.9375,
+  deltaMs: 9.0125,
+});
 
 /** manifest 保持 accepted-with-waiver，而 closure command 成功交付；automatic PF fail/1 不变。 */
 export function ticketManifestExitCode(status, { ticketId, exactSubjectWaiver = false } = {}) {
   if (status === 'pass') return 0;
   if (status === 'accepted-with-waiver' && ticketId === 'FE-01' && exactSubjectWaiver === true) {
+    return 0;
+  }
+  if (status === 'accepted-with-waiver' && ticketId === 'FE-02' && exactSubjectWaiver === true) {
     return 0;
   }
   if (status === 'inconclusive') return 2;
@@ -69,7 +84,19 @@ export function hasExactAutomaticPassConfiguration({ ticketId, ticket }) {
   );
 }
 
+/** FE-02 的 waiver 挂在 registry `performances[]` 的 PF-02 representative entry 上。 */
+export function fe02SubjectWaiverPerformance(ticket) {
+  return Array.isArray(ticket?.performances)
+    ? ticket.performances.find(
+        (entry) => entry?.subjectWaiverPath === FE02_PF02_SUBJECT_WAIVER_PATH,
+      )
+    : undefined;
+}
+
 export function hasExactSubjectWaiverConfiguration({ ticketId, ticket }) {
+  if (ticketId === 'FE-02') {
+    return fe02SubjectWaiverPerformance(ticket) !== undefined;
+  }
   return (
     ticketId === 'FE-01' &&
     ticket?.performance !== null &&
@@ -110,6 +137,50 @@ function subjectWaiverBinding(value) {
     value?.performanceDebt?.status !== 'deferred' ||
     value?.performanceDebt?.phase !== 'post-optimization' ||
     value?.performanceDebt?.rootCause !== 'unknown'
+  ) {
+    return null;
+  }
+  return {
+    waiverPath: value.waiverPath,
+    waiverSha256: value.waiverSha256,
+    automaticResult,
+    baseline: value.baseline,
+    subject: value.subject,
+    measurementContract: value.measurementContract,
+    budget: value.budget,
+    artifacts: value.artifacts,
+    performanceDebt: value.performanceDebt,
+  };
+}
+
+/** FE-02 subject waiver 的 current-HEAD binding；与 FE-01 同一判定形状，常量各自独立。 */
+function fe02SubjectWaiverBinding(value) {
+  const automaticResult = value?.automaticResult;
+  if (
+    value?.valid !== true ||
+    value.waiverPath !== FE02_PF02_SUBJECT_WAIVER_PATH ||
+    value.waiverSha256 !== FE02_PF02_SUBJECT_WAIVER_SHA256 ||
+    value.manualDisposition !== 'accepted-with-waiver' ||
+    automaticResult?.status !== 'fail' ||
+    automaticResult?.exitCode !== 1 ||
+    automaticResult?.runId !== '20260815T060139784Z-p84684-000' ||
+    automaticResult?.run !==
+      '.artifacts/verification/FE-02/20260815T060139784Z-p84684-000/performance/PF-02/representative' ||
+    automaticResult?.commit !== '7936cb91f54c94e836124b0d46337247776431d2' ||
+    automaticResult?.worktreeDirty !== false ||
+    !sameJson(automaticResult?.violation, FE02_SUBJECT_VIOLATION) ||
+    value?.baseline?.runId !== '20260814T153344617Z-p43084-000' ||
+    value?.baseline?.commit !== '9470f64e9b1edb4695092675fbfbd2043ac7b354' ||
+    value?.subject?.runId !== automaticResult.runId ||
+    value?.subject?.commit !== automaticResult.commit ||
+    value?.measurementContract?.descriptorDigest !==
+      '53df623aeb8538e1ad8e2821c287603241647de870dcd2c04c8816cb1beff86e' ||
+    value?.budget?.path !== 'performance/budgets/pf-02.representative.budgets.json' ||
+    typeof value?.budget?.sha256 !== 'string' ||
+    value?.artifacts === null || typeof value?.artifacts !== 'object' ||
+    value?.performanceDebt?.status !== 'deferred' ||
+    value?.performanceDebt?.phase !== 'post-optimization' ||
+    typeof value?.performanceDebt?.rootCause !== 'string'
   ) {
     return null;
   }
@@ -179,6 +250,23 @@ export function planTicketExecutionSteps({
     }
   }
   if (!hasExactSubjectWaiverConfiguration({ ticketId, ticket })) return ticket.steps;
+  // FE-02：waiver 初始校验 valid 时，仅 perf-pf02-representative 改为 historical
+  // no-sampling；其余三个 PF step 照常采样。
+  if (ticketId === 'FE-02') {
+    const binding = fe02SubjectWaiverBinding(subjectWaiverValidation);
+    if (binding === null) return ticket.steps;
+    return ticket.steps.map((step) =>
+      step.id === FE02_SUBJECT_WAIVER_STEP_ID
+        ? {
+            ...step,
+            executionMode: SUBJECT_WAIVER_EXECUTION_MODE,
+            samplingRun: false,
+            historicalRunId: binding.automaticResult.runId,
+            initialWaiverValidation: 'valid',
+          }
+        : step,
+    );
+  }
   const binding = subjectWaiverBinding(subjectWaiverValidation);
   if (binding === null) return ticket.steps;
   return ticket.steps.map((step) =>
@@ -205,7 +293,7 @@ export function isAutomaticPassPerfStep(step) {
 
 export function isSubjectWaiverPerfStep(step) {
   return (
-    step?.id === 'perf' &&
+    (step?.id === 'perf' || step?.id === FE02_SUBJECT_WAIVER_STEP_ID) &&
     step.executionMode === SUBJECT_WAIVER_EXECUTION_MODE &&
     step.samplingRun === false
   );
@@ -248,6 +336,30 @@ export async function finalizeSubjectWaiverValidation({
   }
   const initialBinding = subjectWaiverBinding(initialSubjectWaiverValidation);
   const finalBinding = subjectWaiverBinding(finalSubjectWaiverValidation);
+  return {
+    finalSubjectWaiverValidation,
+    finalSubjectWaiverValidationStatus:
+      initialBinding !== null && finalBinding !== null && sameJson(initialBinding, finalBinding)
+        ? 'valid'
+        : 'invalid',
+    bindingStable:
+      initialBinding !== null && finalBinding !== null && sameJson(initialBinding, finalBinding),
+  };
+}
+
+/** FE-02 版本：起止各跑一次 FE-02 validator，binding 漂移即 invalid。 */
+export async function finalizeFe02SubjectWaiverValidation({
+  initialSubjectWaiverValidation,
+  validateSubjectWaiver,
+}) {
+  let finalSubjectWaiverValidation;
+  try {
+    finalSubjectWaiverValidation = await validateSubjectWaiver();
+  } catch {
+    finalSubjectWaiverValidation = undefined;
+  }
+  const initialBinding = fe02SubjectWaiverBinding(initialSubjectWaiverValidation);
+  const finalBinding = fe02SubjectWaiverBinding(finalSubjectWaiverValidation);
   return {
     finalSubjectWaiverValidation,
     finalSubjectWaiverValidationStatus:
@@ -319,6 +431,47 @@ export function subjectWaiverPf01BudgetState({ subjectWaiverCompletion }) {
       automaticResult: binding.automaticResult,
       provenance: {
         kind: 'fe-01-pf-01-subject-waiver',
+        mode: SUBJECT_WAIVER_EXECUTION_MODE,
+        record: { path: binding.waiverPath, sha256: binding.waiverSha256 },
+        budget: binding.budget,
+        baseline: binding.baseline,
+        subject: binding.subject,
+        measurementContract: binding.measurementContract,
+        artifacts: binding.artifacts,
+      },
+      performanceDebt: binding.performanceDebt,
+    };
+  }
+  return {
+    label: 'historical-subject-waiver-validation invalid（未启动当前 PF sampling）',
+    status: 'fail',
+    validation: {
+      valid: false,
+      violations: [
+        ...(Array.isArray(validation?.violations) ? validation.violations : []),
+        'subject waiver 起止 exact binding 不精确或发生漂移',
+      ],
+    },
+  };
+}
+
+/** FE-02 版本：manual disposition 保留 PF-02 representative 的 historical automatic fail/1。 */
+export function subjectWaiverPf02BudgetState({ subjectWaiverCompletion }) {
+  const validation = subjectWaiverCompletion?.finalSubjectWaiverValidation;
+  const binding = fe02SubjectWaiverBinding(validation);
+  if (
+    subjectWaiverCompletion?.finalSubjectWaiverValidationStatus === 'valid' &&
+    subjectWaiverCompletion.bindingStable === true &&
+    binding !== null
+  ) {
+    return {
+      label: 'historical-subject-waiver-validation（immutable automatic fail/exit 1；未启动当前 PF sampling）',
+      status: 'accepted-with-waiver',
+      validation: { valid: true, violations: [] },
+      descriptorDigest: binding.measurementContract.descriptorDigest,
+      automaticResult: binding.automaticResult,
+      provenance: {
+        kind: 'fe-02-pf-02-subject-waiver',
         mode: SUBJECT_WAIVER_EXECUTION_MODE,
         record: { path: binding.waiverPath, sha256: binding.waiverSha256 },
         budget: binding.budget,

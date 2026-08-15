@@ -158,6 +158,10 @@ export const TICKET_REGISTRY = Object.freeze({
         descriptorPath: 'performance/descriptors/pf-02.source-large.json',
         budgetPath: 'performance/budgets/pf-02.representative.budgets.json',
         evidenceRelativeDir: 'performance/PF-02/representative',
+        // 仅本次 FE-02 subject 的 exact manual disposition 可启动 historical validation；
+        // 其余三个 entry 永不取得不采样特权。
+        subjectWaiverPath:
+          'performance/waivers/fe-02-pf-02-representative-scroll-render-stable.json',
         unfrozenLabel:
           'baseline-collected / budget-not-frozen / inconclusive（首次完整 clean profile 只收集样本，不产生 closure）',
         frozenLabel: 'budget-frozen（performance/budgets/pf-02.representative.budgets.json）',

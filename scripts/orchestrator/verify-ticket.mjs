@@ -45,11 +45,19 @@ import {
   maybeWriteLatestCleanSubjectAcceptedWithWaiver,
   validateFe01SubjectAcceptedWithWaiverCandidate,
 } from './latest-clean-subject-accepted-with-waiver.mjs';
+import {
+  maybeWriteLatestCleanFe02SubjectAcceptedWithWaiver,
+  validateFe02SubjectAcceptedWithWaiverCandidate,
+} from './latest-clean-fe02-subject-accepted-with-waiver.mjs';
 import { finalizeFe01RunLocalHarnessCapture } from './fe01-run-local-harness-capture.mjs';
 import {
   FE01_SUBJECT_PHYSICAL_CANDIDATE,
   finalizeFe01SubjectWaiverPhysicalDisposition,
 } from './fe01-subject-waiver-physical-disposition.mjs';
+import {
+  FE02_SUBJECT_PHYSICAL_CANDIDATE,
+  finalizeFe02SubjectWaiverPhysicalDisposition,
+} from './fe02-subject-waiver-physical-disposition.mjs';
 import {
   FE01_PF01_AUTOMATIC_PASS_PATH,
   validateFe01Pf01AutomaticPass,
@@ -58,12 +66,14 @@ import {
   FE01_PF01_SUBJECT_WAIVER_PATH,
   validateFe01Pf01SubjectWaiver,
 } from './fe01-pf01-subject-waiver.mjs';
+import { validateFe02Pf02SubjectWaiver } from './fe02-pf02-subject-waiver.mjs';
 import {
   automaticPassPf01BudgetState,
   createAbortSignalTracker,
   deriveStepRuntimeAdvisory,
   executeTicketStep,
   finalizeAutomaticPassValidation,
+  finalizeFe02SubjectWaiverValidation,
   finalizeSubjectWaiverValidation,
   hasExactAutomaticPassConfiguration,
   hasExactSubjectWaiverConfiguration,
@@ -71,11 +81,15 @@ import {
   isSubjectWaiverPerfStep,
   planTicketExecutionSteps,
   signalExitCode,
+  SUBJECT_WAIVER_EXECUTION_MODE,
   subjectWaiverPf01BudgetState,
+  subjectWaiverPf02BudgetState,
   ticketManifestExitCode,
 } from './verify-ticket-execution.mjs';
 import { deriveFe01SubjectWaiverClosureStatus } from './fe01-subject-waiver-verdict.mjs';
+import { deriveFe02SubjectWaiverClosureStatus } from './fe02-subject-waiver-verdict.mjs';
 import { validateFe01SubjectClosureLineage } from './fe01-subject-lineage.mjs';
+import { validateFe02SubjectClosureLineage } from './fe02-subject-lineage.mjs';
 import {
   assertPf01L3ViteModuleClosure,
   assertPf01L3BuildEnvironment,
@@ -207,7 +221,9 @@ async function main() {
   const startingGit = await gitInfo();
   const subjectWaiverPathExact = hasExactSubjectWaiverConfiguration({ ticketId, ticket });
   const initialSubjectWaiverValidation = subjectWaiverPathExact
-    ? validateFe01Pf01SubjectWaiver({ recordPath: FE01_PF01_SUBJECT_WAIVER_PATH })
+    ? ticketId === 'FE-02'
+      ? validateFe02Pf02SubjectWaiver({})
+      : validateFe01Pf01SubjectWaiver({ recordPath: FE01_PF01_SUBJECT_WAIVER_PATH })
     : undefined;
   const automaticPassPathExact = hasExactAutomaticPassConfiguration({ ticketId, ticket });
   const initialAutomaticPassValidation = automaticPassPathExact
@@ -332,8 +348,32 @@ async function main() {
 
   const endAt = new Date().toISOString();
 
+  const historicalAutomaticPassValidation = executionSteps.some(isAutomaticPassPerfStep);
+  const historicalSubjectWaiverValidation = executionSteps.some(isSubjectWaiverPerfStep);
+  const automaticPassCompletion = historicalAutomaticPassValidation
+    ? await finalizeAutomaticPassValidation({
+        initialAutomaticPassValidation,
+        validateAutomaticPass: () =>
+          validateFe01Pf01AutomaticPass({ recordPath: FE01_PF01_AUTOMATIC_PASS_PATH }),
+      })
+    : undefined;
+  const subjectWaiverCompletion = historicalSubjectWaiverValidation
+    ? ticketId === 'FE-02'
+      ? await finalizeFe02SubjectWaiverValidation({
+          initialSubjectWaiverValidation,
+          validateSubjectWaiver: () => validateFe02Pf02SubjectWaiver({}),
+        })
+      : await finalizeSubjectWaiverValidation({
+          initialSubjectWaiverValidation,
+          validateSubjectWaiver: () =>
+            validateFe01Pf01SubjectWaiver({ recordPath: FE01_PF01_SUBJECT_WAIVER_PATH }),
+        })
+    : undefined;
+
   // PF-01 保持 historical singular scanner/manifest；read PF 使用递归 physical-file
   // scan + 每 profile 的脱敏 projection，禁止将嵌套目录、symlink 或 raw 内容跳过扫描。
+  // 配置 subjectWaiverPath 的 entry 在 historical step 下从 final waiver validation 投影，
+  // 不要求本次 run 的 evidence 目录。
   let readPerformanceEvidence;
   if (performanceDir !== null && fs.existsSync(performanceDir)) {
     if (ticket.performances !== undefined) {
@@ -342,6 +382,7 @@ async function main() {
         stepResults,
         evidenceRoot,
         expectedCommit: startingGit.commit,
+        subjectWaiverValidation: subjectWaiverCompletion?.finalSubjectWaiverValidation,
       });
     } else {
       for (const file of fs.readdirSync(performanceDir)) {
@@ -354,23 +395,6 @@ async function main() {
       }
     }
   }
-
-  const historicalAutomaticPassValidation = executionSteps.some(isAutomaticPassPerfStep);
-  const historicalSubjectWaiverValidation = executionSteps.some(isSubjectWaiverPerfStep);
-  const automaticPassCompletion = historicalAutomaticPassValidation
-    ? await finalizeAutomaticPassValidation({
-        initialAutomaticPassValidation,
-        validateAutomaticPass: () =>
-          validateFe01Pf01AutomaticPass({ recordPath: FE01_PF01_AUTOMATIC_PASS_PATH }),
-      })
-    : undefined;
-  const subjectWaiverCompletion = historicalSubjectWaiverValidation
-    ? await finalizeSubjectWaiverValidation({
-        initialSubjectWaiverValidation,
-        validateSubjectWaiver: () =>
-          validateFe01Pf01SubjectWaiver({ recordPath: FE01_PF01_SUBJECT_WAIVER_PATH }),
-      })
-    : undefined;
   const perfResult = stepResults.find((step) => step.id === 'perf');
   if (perfResult?.execution !== undefined && automaticPassCompletion !== undefined) {
     perfResult.execution.finalAutomaticPassValidation =
@@ -379,16 +403,23 @@ async function main() {
     const { logs: _logs, ...perfMeta } = perfResult;
     writeJson(path.join(evidenceRoot, 'steps', 'perf', 'meta.json'), perfMeta);
   }
-  if (perfResult?.execution !== undefined && subjectWaiverCompletion !== undefined) {
-    perfResult.execution.finalWaiverValidation =
+  // historical subject-waiver step 按 execution mode 定位（FE-01 为 perf，FE-02 为
+  // perf-pf02-representative），起止 binding 结果回写其 meta。
+  const subjectWaiverStepResult = stepResults.find(
+    (step) => step.execution?.mode === SUBJECT_WAIVER_EXECUTION_MODE,
+  );
+  if (subjectWaiverStepResult !== undefined && subjectWaiverCompletion !== undefined) {
+    subjectWaiverStepResult.execution.finalWaiverValidation =
       subjectWaiverCompletion.finalSubjectWaiverValidationStatus;
-    perfResult.execution.bindingStable = subjectWaiverCompletion.bindingStable;
-    const { logs: _logs, ...perfMeta } = perfResult;
-    writeJson(path.join(evidenceRoot, 'steps', 'perf', 'meta.json'), perfMeta);
+    subjectWaiverStepResult.execution.bindingStable = subjectWaiverCompletion.bindingStable;
+    const { logs: _logs, ...perfMeta } = subjectWaiverStepResult;
+    writeJson(path.join(evidenceRoot, 'steps', subjectWaiverStepResult.id, 'meta.json'), perfMeta);
   }
   const budget =
     ticket.performance === undefined
-      ? null
+      ? ticketId === 'FE-02' && historicalSubjectWaiverValidation
+        ? subjectWaiverPf02BudgetState({ subjectWaiverCompletion })
+        : null
       : historicalSubjectWaiverValidation
         ? subjectWaiverPf01BudgetState({ subjectWaiverCompletion })
       : historicalAutomaticPassValidation
@@ -397,7 +428,9 @@ async function main() {
   const git = await gitInfo();
   const gitIdentityConsistent = sameGitIdentity(startingGit, git);
   const subjectLineage = historicalSubjectWaiverValidation
-    ? validateFe01SubjectClosureLineage({ finalCommit: git.commit })
+    ? ticketId === 'FE-02'
+      ? validateFe02SubjectClosureLineage({ finalCommit: git.commit })
+      : validateFe01SubjectClosureLineage({ finalCommit: git.commit })
     : undefined;
   const computedOverallStatus =
     stepResults.some((step) => step.status === 'fail') || budget?.status === 'fail'
@@ -409,16 +442,27 @@ async function main() {
         ? 'inconclusive'
         : 'pass';
   const subjectWaiverVerdict = historicalSubjectWaiverValidation
-    ? deriveFe01SubjectWaiverClosureStatus({
-        ticketId,
-        steps: stepResults,
-        budgetStatus: budget?.status,
-        evidenceContaminated,
-        worktreeDirty: git.worktreeDirty,
-        initialWaiverValidation: initialSubjectWaiverValidation,
-        finalWaiverValidation: subjectWaiverCompletion?.finalSubjectWaiverValidation,
-        subjectLineage,
-      })
+    ? ticketId === 'FE-02'
+      ? deriveFe02SubjectWaiverClosureStatus({
+          ticketId,
+          steps: stepResults,
+          budgetStatus: budget?.status,
+          evidenceContaminated,
+          worktreeDirty: git.worktreeDirty,
+          initialWaiverValidation: initialSubjectWaiverValidation,
+          finalWaiverValidation: subjectWaiverCompletion?.finalSubjectWaiverValidation,
+          subjectLineage,
+        })
+      : deriveFe01SubjectWaiverClosureStatus({
+          ticketId,
+          steps: stepResults,
+          budgetStatus: budget?.status,
+          evidenceContaminated,
+          worktreeDirty: git.worktreeDirty,
+          initialWaiverValidation: initialSubjectWaiverValidation,
+          finalWaiverValidation: subjectWaiverCompletion?.finalSubjectWaiverValidation,
+          subjectLineage,
+        })
     : undefined;
   let overallStatus = gitIdentityConsistent
     ? subjectWaiverVerdict?.status ?? computedOverallStatus
@@ -527,12 +571,15 @@ async function main() {
             waiverSha256: subjectWaiverCompletion.finalSubjectWaiverValidation.waiverSha256,
           }),
       source:
-        '用户授权的 exact FE-01 subject PF-01 disposition；immutable subject artifact raw samples 与 frozen budget 重算，非本次 perf sampling。',
+        ticketId === 'FE-02'
+          ? '用户授权的 exact FE-02 subject PF-02 representative disposition；immutable subject artifact raw samples 与 frozen budget 重算，非本次 perf sampling。'
+          : '用户授权的 exact FE-01 subject PF-01 disposition；immutable subject artifact raw samples 与 frozen budget 重算，非本次 perf sampling。',
     };
     manifest.pfAutomaticResult = budget?.automaticResult;
     manifest.performanceDebt = budget?.performanceDebt;
     if (overallStatus === 'accepted-with-waiver') {
-      manifest.physicalValidation = FE01_SUBJECT_PHYSICAL_CANDIDATE;
+      manifest.physicalValidation =
+        ticketId === 'FE-02' ? FE02_SUBJECT_PHYSICAL_CANDIDATE : FE01_SUBJECT_PHYSICAL_CANDIDATE;
     }
   }
   if (
@@ -572,25 +619,49 @@ async function main() {
   }
   let exactSubjectWaiver = subjectWaiverVerdict?.status === 'accepted-with-waiver';
   if (manifest.status === 'accepted-with-waiver') {
-    const eligibility = validateFe01SubjectAcceptedWithWaiverCandidate({
-      root: REPO_ROOT,
-      evidenceRoot,
-      ticketId,
-      manifest,
-    });
-    const disposition = finalizeFe01SubjectWaiverPhysicalDisposition({ manifest, eligibility });
+    const eligibility =
+      ticketId === 'FE-02'
+        ? validateFe02SubjectAcceptedWithWaiverCandidate({
+            root: REPO_ROOT,
+            evidenceRoot,
+            ticketId,
+            manifest,
+          })
+        : validateFe01SubjectAcceptedWithWaiverCandidate({
+            root: REPO_ROOT,
+            evidenceRoot,
+            ticketId,
+            manifest,
+          });
+    const disposition = (
+      ticketId === 'FE-02'
+        ? finalizeFe02SubjectWaiverPhysicalDisposition
+        : finalizeFe01SubjectWaiverPhysicalDisposition
+    )({ manifest, eligibility });
     manifest = disposition.manifest;
     exactSubjectWaiver = disposition.exactSubjectWaiver;
     writeJson(path.join(evidenceRoot, 'manifest.json'), manifest);
     if (exactSubjectWaiver) {
-      const acceptedIndex = await maybeWriteLatestCleanSubjectAcceptedWithWaiver({
-        root: REPO_ROOT,
-        evidenceRoot,
-        ticketId,
-        manifest,
-      });
+      const acceptedIndex =
+        ticketId === 'FE-02'
+          ? await maybeWriteLatestCleanFe02SubjectAcceptedWithWaiver({
+              root: REPO_ROOT,
+              evidenceRoot,
+              ticketId,
+              manifest,
+            })
+          : await maybeWriteLatestCleanSubjectAcceptedWithWaiver({
+              root: REPO_ROOT,
+              evidenceRoot,
+              ticketId,
+              manifest,
+            });
       if (!acceptedIndex.eligible || !acceptedIndex.validated) {
-        const rejected = finalizeFe01SubjectWaiverPhysicalDisposition({
+        const rejected = (
+          ticketId === 'FE-02'
+            ? finalizeFe02SubjectWaiverPhysicalDisposition
+            : finalizeFe01SubjectWaiverPhysicalDisposition
+        )({
           manifest,
           eligibility: acceptedIndex,
         });

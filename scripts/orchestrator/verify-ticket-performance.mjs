@@ -24,6 +24,9 @@ const REQUIRED_ARTIFACTS = Object.freeze([
   'proposed-budgets.json',
 ]);
 const READ_LAYER = 'L2 mock renderer（headless Chrome + Vite dev server；非 release-like artifact）';
+const SUBJECT_WAIVER_BUDGET_STATE =
+  'historical-subject-waiver-validation（immutable automatic fail/exit 1；未启动当前 PF sampling）';
+const SUBJECT_WAIVER_EXECUTION_MODE = 'historical-subject-waiver-validation';
 
 function perfStepId(performance) {
   return `perf-${performance.descriptorId.toLowerCase().replace('-', '')}-${performance.profile}`;
@@ -442,9 +445,68 @@ function validateCurrentProfileEvidence({ evidenceRoot, performance, expectedCom
 }
 
 /**
+ * 配置了 subjectWaiverPath 的 entry 在 historical subject-waiver step 下不要求本次 run 的
+ * evidence 目录；从 waiver validation 投影脱敏 metadata。step 的 automatic fail/exit 1
+ * 事实原样保留，budgetState 仅标注 historical-subject-waiver-validation；waiver binding
+ * 不精确或 step 不是 historical no-sampling 时抛错，由调用方记为 incomplete。
+ */
+function projectSubjectWaiverManifestResult({ performance, step, validation }) {
+  const contract = validation?.measurementContract;
+  const automaticResult = validation?.automaticResult;
+  if (
+    !safeRelative(performance?.descriptorPath) ||
+    !safeRelative(performance?.evidenceRelativeDir) ||
+    validation?.valid !== true ||
+    validation.waiverPath !== performance.subjectWaiverPath ||
+    !isDigest(validation.waiverSha256) ||
+    step?.id !== perfStepId(performance) ||
+    step.execution?.mode !== SUBJECT_WAIVER_EXECUTION_MODE ||
+    step.execution?.samplingRun !== false ||
+    step.exitCode !== 1 ||
+    step.status !== 'fail' ||
+    contract?.descriptorPath !== performance.descriptorPath ||
+    !isDigest(contract?.descriptorDigest) ||
+    !isDigest(contract?.fixture?.sha256) ||
+    !isDigest(contract?.measurementInputs?.digest) ||
+    automaticResult?.status !== 'fail' ||
+    automaticResult?.exitCode !== 1 ||
+    typeof automaticResult?.runId !== 'string' ||
+    !/^[0-9a-f]{40}$/i.test(automaticResult?.commit)
+  ) {
+    throw new Error('read PF subject waiver projection 未绑定 exact validated disposition');
+  }
+  return {
+    pfId: performance.descriptorId,
+    profile: performance.profile,
+    step: { id: step.id, exitCode: step.exitCode, status: step.status },
+    descriptor: { path: performance.descriptorPath, digest: contract.descriptorDigest },
+    fixtureDigest: contract.fixture.sha256,
+    metrics: [],
+    summaryRelativePath: `${performance.evidenceRelativeDir}/summary.json`,
+    budgetState: SUBJECT_WAIVER_BUDGET_STATE,
+    validation: { valid: true },
+    budgetValidation: {
+      status: SUBJECT_WAIVER_EXECUTION_MODE,
+      automaticResult: { status: 'fail', exitCode: 1 },
+    },
+    runner: contract.runner,
+    toolchain: contract.toolchain,
+    measurementInputDigest: contract.measurementInputs.digest,
+    subjectWaiver: {
+      waiverPath: validation.waiverPath,
+      waiverSha256: validation.waiverSha256,
+      runId: automaticResult.runId,
+      commit: automaticResult.commit,
+      violation: automaticResult.violation,
+    },
+  };
+}
+
+/**
  * Reads and projects one manifest entry per registered PF profile. The helper
  * cannot elevate incomplete/tainted evidence; raw summary strings never leave
- * this boundary.
+ * this boundary. Entries carrying a subjectWaiverPath are projected from the
+ * exact waiver validation instead of current-run evidence.
  */
 export function collectReadPfManifestResults({
   performances,
@@ -452,6 +514,7 @@ export function collectReadPfManifestResults({
   evidenceRoot,
   expectedCommit,
   repoRoot = REPO_ROOT,
+  subjectWaiverValidation = undefined,
 }) {
   const performanceResults = [];
   let incomplete = false;
@@ -459,6 +522,16 @@ export function collectReadPfManifestResults({
     const step = stepResults.find((candidate) => candidate.id === perfStepId(performance));
     try {
       if (step === undefined) throw new Error('read PF registered step 缺失');
+      if (performance.subjectWaiverPath !== undefined) {
+        performanceResults.push(
+          projectSubjectWaiverManifestResult({
+            performance,
+            step,
+            validation: subjectWaiverValidation,
+          }),
+        );
+        continue;
+      }
       const summary = validateCurrentProfileEvidence({
         evidenceRoot,
         performance,
