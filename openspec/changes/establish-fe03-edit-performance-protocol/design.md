@@ -23,7 +23,7 @@ formal closure 证据，也不改变冻结 acceptance。
 - 定义 `fe03-edit-pf/v1` 的两条独立、可验证和 fail-closed 的 edit 测量 lineage，使
   PF-02/PF-03 不能与 FE-02 read lineage 混淆。
 - 将 FE-03 功能验证、edit-PF、预算冻结、formal closure 和独立审查拆成不可跳过的 gate。
-- 选择 Rust-first 不透明 `modify` grant，并精确限制 mock、缓存和 provenance 边界。
+- 选择 Rust-first 不透明 `modify` grant，并将 grant 有效期内的敏感明文限制在受控、不可序列化、frontend-local 的 `ephemeral sensitive buffer`；该 buffer 不得成为 shared/persisted `editAsset` draft、session snapshot 或任何 provenance 输入。
 - 为未来 additive verifier route 定义交叉借证的拒绝条件，同时保持 legacy FE-02 read
   行为不变。
 
@@ -70,15 +70,18 @@ edit descriptor bytes + descriptor digest
   -> scripted mock FrontendGateway + FE-03 draft/session
   -> WDIO edit actions -> raw samples
   -> edit evaluator + measurement attestation
-  -> FE-03 manifest entry -> edit-only budget lineage/comparison
+  -> FE-03 manifest entry -> baseline absence attestation OR exact approved budget lineage/formal comparison
 ```
 
 PF-02 edit 的 action set 必须实际包含安全合成文本的 edit 输入与同 revision 草稿投影；
 PF-03 edit 必须实际包含独立的多文件草稿、active-file 切换和草稿投影。二者使用不含敏感
 明文、grant 或真实路径的安全 fixture。所有 descriptor、fixture、WDIO environment、
 collector/config/runner/evaluator/attestation module 的实际 bytes digest、actual L2 SUT module
-graph digest/attestation、raw 目录、manifest `measurementProtocol` 和 budget 的值必须携带同一
-protocol ID、descriptor ID、profile、descriptor digest、fixture digest 与 run identity。
+graph digest/attestation、raw 目录和 manifest `measurementProtocol` 必须携带同一 protocol ID、
+descriptor ID、profile、descriptor digest、fixture digest 与 run identity。record phase 的 budget
+binding 必须 fail closed 且互斥：no-budget baseline 记录必须携带 `budgetState=not-frozen` 与可
+验证的 budget-lineage absence attestation，明确不存在 budget/freeze/history reference；只有用户
+批准后的 formal comparison/closure record 才必须携带 exact approved budget lineage/path/freeze。
 仅有相同 path 或逻辑 identity 不足以证明输入相同；任一实际文件 bytes 或 graph membership
 漂移都必须使本次 measurement fail closed。
 
@@ -102,12 +105,19 @@ provenance-valid closure，故拒绝。
 替代前一个 gate。
 
 1. prerequisite change 通过独立审查，并经用户验收/冻结和合并后，才可恢复原 FE-03。
-2. 完成 FE-03 tasks 3.19–3.22：先 RED→GREEN，再记录仅针对本票据的 L0/L1/L2
-   functional checks complete。此阶段不实施或执行 edit-PF，且无 L3/真实 write credit。
-3. 仅在第 2 步完成后，实现上述 edit-PF protocol 与 additive verification route。
+2. 完成 FE-03 tasks 3.19–3.22 的完整 RED→GREEN：在 3.19 通过后先复核 Rust-first
+   grant 可由既有 `SensitiveRevealQuery`／`FrontendGateway.read` read/session seam 消费且无需新
+   command、trust boundary 或 serialization source；随后完成 3.20／3.21 的三类 draft、wire、
+   shared draft/UI，并完成 mock/session consumer 及 L0/L1/L2 grant 失效／重新遮蔽测试和完整
+   FX-04 functional coverage。只有全部完成后才记录仅针对本票据的 task-only
+   `functional checks complete`。此阶段不实施 descriptor、collector 或 edit-PF，且无
+   L3/真实 write credit。
+3. 仅在第 2 步完整记录 `functional checks complete` 后，实现上述 edit-PF protocol 与
+   additive verification route。
 4. 使用完整、一次性的 edit-only input graph 采集 no-budget baseline。结果只能标注
-   `baseline-collected`、`budget-not-frozen` 和 `non-closure`；不得从 FE-02 继承预算，也
-   不得重跑挑选通过结果。
+   `baseline-collected`、`budgetState=not-frozen` 和 `non-closure`，并绑定可验证的
+   budget-lineage absence attestation，明确不存在 budget/freeze/history reference；不得从
+   FE-02 继承预算、写入任何预算文件，或重跑挑选通过结果。
 5. 从第 4 步的完整 lineage 计算独立的 exact proposed budget table，逐项列出
    descriptor/profile/metric identity、公式、baseline 输入、拟冻结数值、run/digest lineage，
    并标记为 `proposed-not-frozen` 与 `non-closure`；只在回主任务的审批请求中呈现，不写入
@@ -128,8 +138,11 @@ provenance-valid closure，故拒绝。
 未来的 verifier 只在新的 FE-03 registration/route 被显式选择时读取
 `fe03-edit-pf/v1`。它必须将 descriptor bytes/digest、fixture digest、collector/config/
 runner/evaluator/attestation module 的 identity 与实际 bytes digest、actual L2 SUT module
-graph digest/attestation、raw samples、manifest entry、budget path/freeze lineage 与 ticket
-`FE-03` 逐项绑定；缺失或不匹配均为 fail closed。
+graph digest/attestation、raw samples、manifest entry 与 ticket `FE-03` 逐项绑定；record phase 的
+budget binding 也必须 fail closed：no-budget baseline 必须验证 `budgetState=not-frozen` 与
+budget-lineage absence attestation 且拒绝 budget/freeze/history reference，只有用户批准后的
+formal comparison/closure record 才验证 exact approved budget lineage/path/freeze。任一缺失或
+不匹配均为 fail closed。
 
 新增的负向测试至少覆盖：将任何 FE-02 read descriptor、fixture digest、raw directory、
 budget、waiver 或 manifest 交给 FE-03 route；将任一 edit identity/evidence 交给 legacy
@@ -147,29 +160,51 @@ artifacts 所表达的语义和 fail-closed 分支不变；新代码只能是 ad
 
 两种候选的比较如下。
 
-| 候选                                | authority 与生命周期                                                                                                                                                                                                                                      | 结论                                                                                       |
-| ----------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
-| frontend-local ephemeral capability | 前端可用本地计时器、销毁回调和当前 UI 选择清理临时状态，但若由前端构造或签发 token，前端会成为可伪造的授权事实源，且不能权威验证 revision、scope 或跨适配器身份。                                                                                         | 不能作为安全授权；仅可在收到权威 grant 后承担本地 TTL 提示/销毁租约。                      |
-| Rust-first opaque authoritative DTO | `GatewayCore` 是唯一签发者和验证者；既有 `SensitiveRevealQuery(scope=modify)` 经 `FrontendGateway.read` 返回短生命周期、不透明 DTO。Rust wire DTO/生成 declaration 遵循 ADR-0011，TypeScript 只消费/传递，不构造 claims 或成为第二 serialization source。 | 选择。它保留冻结 read/session seam 与 Rust-first wire source，并使授权可在唯一权威方复验。 |
+| 候选                                      | authority 与生命周期                                                                                                                                                                                                                                                                            | 结论                                                                                                   |
+| ----------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| frontend-local ephemeral sensitive buffer | 前端只能在已收到权威 grant 的有效期内，使用受控、不可序列化、frontend-local buffer 暂存所需敏感明文；它不含可签发 claim，且不是 shared/persisted `editAsset` draft 或 session snapshot。若由前端构造或签发 token，前端会成为可伪造的授权事实源，且不能权威验证 revision、scope 或跨适配器身份。 | buffer 不是安全授权；仅可在收到权威 grant 后承担本地显示、TTL 提示及立即清零。                         |
+| Rust-first opaque authoritative DTO       | `GatewayCore` 是唯一签发者和验证者；既有 `SensitiveRevealQuery(scope=modify)` 经 `FrontendGateway.read` 返回短生命周期、不透明 DTO。Rust wire DTO/生成 declaration 遵循 ADR-0011，TypeScript 只消费/传递，不构造 claims 或成为第二 serialization source。                                       | 选择唯一授权来源；它保留冻结 read/session seam 与 Rust-first wire source，并使授权可在唯一权威方复验。 |
 
 未来 Rust core 签发的 opaque grant 必须由权威状态绑定 `assetId`、`fileId`、
 `SensitiveSegmentRef`、asset/file revision、`scope=modify`、允许的 workbench surface、不可
-预测 identity 与 TTL。Rust core 在任何 future consumer 使用时复验全部 binding 和 expiry；
-asset/file/segment 切换、revision 改变或 TTL 到期时，前端立即丢弃 grant 和明文，重新遮蔽，
-而 Rust 仍在下一次使用时拒绝旧 grant。grant 或敏感明文不得进入日志、analytics、错误文本、
-缓存、session snapshot、draft、fixture、golden vector 或 PF artifact；普通 edit-PF fixture
-不得含 grant 或敏感片段。
+预测 identity 与 TTL。grant 有效期内，grant 及所需敏感明文仅可在受控、不可序列化、
+frontend-local 的 `ephemeral sensitive buffer` 存在；该 buffer 不是 shared/persisted
+`editAsset` draft。Rust core 在任何 future consumer 使用时复验全部 binding 和 expiry；TTL
+到期或 asset/file/segment/scope/surface 切换、revision 改变时，前端必须立即清零 buffer、使
+grant 失效并重新遮蔽，而 Rust 仍在下一次使用时拒绝旧 grant。grant 或敏感明文不得进入
+shared/persisted draft、session snapshot、事件、搜索、诊断／analytics、错误文本、日志、缓存、
+fixture、vector/golden 或 PF artifact；普通 edit-PF fixture 不得含 grant 或敏感片段。
 
-FE-03 的 L0/L1/L2 mock 只能模拟“权威 grant 已存在/已失效”这一预期状态，验证 UI 清除和
-遮蔽行为。mock 不是发行者或验证者，不产生真实授权、Tauri IPC、磁盘写入或 L3 credit，也不
-得以 frontend 自签 token 代替 Rust grant。
+FE-03 的 L0/L1/L2 mock/session consumer 只能模拟“权威 grant 已存在/已失效”这一预期状态，
+验证 asset/file/segment/scope/surface/revision 切换及 TTL 到期时的 buffer 清零和重新遮蔽。
+mock 不是发行者或验证者，不能签发或取得 actual authorization credit，不产生真实授权、Tauri
+IPC、磁盘写入或 L3 credit，也不得以 frontend 自签 token 代替 Rust grant。
 
 当前选择的前提是 grant 可作为既有 read result/snapshot 的 Rust-first DTO 在既有
 `FrontendGateway` read/session seam 内消费，不新增 command、信任边界或第二个
 serialization source。若实施发现需要任一项，实施必须标记 `ARCH-GATE: reopen-required`，
 停止该路径并回主任务请求用户架构决定；不得在 FE-03 或本 change 中自行扩展。
 
-### 5. 将 provenance 按层和票据隔离
+### 5. 在 task-only functional gate 一次完成 FX-04 与 grant consumer 边界
+
+在完成原 3.19 的正式前提与 Rust-first seam 检查后，3.20–3.22 的 RED→GREEN 必须完整覆盖
+冻结的 `FX-04 dirty-multifile-draft`，并与上述 mock/session grant consumer 一起成为同一个
+functional gate。它至少要求三类 `editAsset` draft、长期指令首次实际变更建 draft、单活动
+草稿、dirty guard、unknown preservation，以及普通编辑无损保留未触碰秘密／敏感修改仍需有效
+`modify` grant；同一 asset 内的 file 切换及 source/structured view 切换不得提示，且必须保留
+shared draft 与展开状态；locator failure、取消和 continue-editing 不得丢失 draft 或改变
+destination，continue-editing 不提交、不切换；该行为只适用于 pending locator
+result/context-switch 的 dirty guard。只有存在 pending locator result/context switch 且用户
+explicit discard，才原子提交该结果的 type、destination、`AssetRef` 和 detail；普通 discard 只清
+frontend draft，不调用 apply 或写盘，也不触发 locator 提交。draft/discard 均不得产生
+`PreparedOperation`、review、confirm、replayable payload、IPC、磁盘写入或 apply。
+
+仅当这些 FX-04、grant invalidation/re-masking 和 3.19–3.22 的其余功能 coverage 都完成时，才可
+记录 task-only `functional checks complete`。该记录保持 `non-closure`，不提供 L3、actual IPC、
+write、authorization 或 closure credit；在此之前以及之后记录前，均不得实施 descriptor、collector
+或 edit-PF。
+
+### 6. 将 provenance 按层和票据隔离
 
 FE-02 stable evidence 只能解除 FE-03 的上游 blocker，不给 FE-03 closure credit。FE-03 的
 future L0、L1、L2 和 PF 记录各自的 command、输入 identity、运行 ID、覆盖范围和不能宣称的
@@ -193,8 +228,9 @@ artifacts、mock 行为、runtime evidence 和 formal closure 也必须在 manif
 
 ## Migration Plan
 
-本 change 当前没有部署或数据迁移：仅有规划 artifact，因而无需 rollout、rollback 或任何
-runtime state 变更。
+本纠偏 PR 当前没有部署或数据迁移：changed-path scope 仅为本 change 的 `proposal.md`、
+`design.md`、`specs/fe03-edit-performance-protocol/spec.md` 和 `tasks.md`，因而无需 rollout、
+rollback 或任何 runtime state 变更。
 
 在获得 prerequisite change 的独立审查、用户验收/冻结和合并之后，按“功能 → protocol
 implementation → no-budget baseline → exact proposed budgets → 用户 freeze →
