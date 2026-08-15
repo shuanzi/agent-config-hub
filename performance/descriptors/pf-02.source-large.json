@@ -1,0 +1,83 @@
+{
+  "descriptorId": "PF-02",
+  "name": "source-large",
+  "schemaVersion": 1,
+  "seed": 2026081402,
+  "shapeDimensions": {
+    "textBytes": "合成 UTF-8 文本原始字节数",
+    "lineCount": "合成文本行数",
+    "longestLineBytes": "最长单行 UTF-8 字节数",
+    "unknownFieldCount": "保留的合成未知字段数",
+    "commentCount": "合成注释行数",
+    "maskedSensitiveSegmentCount": "默认遮蔽的合成敏感片段数"
+  },
+  "profiles": {
+    "representative": {
+      "textBytes": 262144,
+      "lineCount": 4096,
+      "longestLineBytes": 512,
+      "unknownFieldCount": 8,
+      "commentCount": 128,
+      "maskedSensitiveSegmentCount": 16
+    },
+    "stress": {
+      "textBytes": 1048576,
+      "lineCount": 16384,
+      "longestLineBytes": 2048,
+      "unknownFieldCount": 32,
+      "commentCount": 512,
+      "maskedSensitiveSegmentCount": 64
+    }
+  },
+  "contentRules": [
+    "同一 seed 与 profile 必须逐字节确定性生成；仅生成 synthetic fixture。",
+    "敏感占位值仅在 gateway 前的合成源中出现，并在 gateway 边界前完成遮蔽；离开 gateway、日志和 evidence 不得含明文。",
+    "未知字段和注释必须按 profile 保真生成。",
+    "不生成 Hook、可执行内容、真实文件系统读取、edit、draft 或任何写入路径。"
+  ],
+  "metrics": [
+    {
+      "id": "pf02.source.open.content_visible",
+      "surface": "大文本打开",
+      "definition": "页内打开只读源文件 intent → native-file-text 内容可见并经连续两次 rAF 稳定确认",
+      "selector": "[data-testid=\"native-file-text\"]",
+      "layer": "L2 mock renderer（headless Chrome + Vite dev server；非 release-like artifact）",
+      "minSamplesByProfile": { "representative": 20, "stress": 10 }
+    },
+    {
+      "id": "pf02.source.scroll.render_stable",
+      "surface": "大文本滚动",
+      "definition": "页内 source scroll intent → native-file-text 内容仍可见，detail-panel 的 scrollTop 达到目标并经连续两次 rAF 稳定确认",
+      "selector": ".detail-panel",
+      "layer": "L2 mock renderer（headless Chrome + Vite dev server；非 release-like artifact）",
+      "minSamplesByProfile": { "representative": 20, "stress": 10 }
+    },
+    {
+      "id": "pf02.source.readonly_switch.content_visible",
+      "surface": "只读文本切换",
+      "definition": "页内切换另一只读文本文件 intent → native-file-text 内容可见并经连续两次 rAF 稳定确认",
+      "selector": "[data-testid=\"native-file-text\"]",
+      "layer": "L2 mock renderer（headless Chrome + Vite dev server；非 release-like artifact）",
+      "minSamplesByProfile": { "representative": 20, "stress": 10 }
+    }
+  ],
+  "budgetFormula": {
+    "absoluteCeilingMs": "ceil(p95 * 1.5 / 10) * 10",
+    "regressionAllowance": "current p50 <= baseline p50 * 1.25"
+  },
+  "budgetStatus": "formula-authorized / clean-manifest-gated",
+  "fixture": {
+    "generator": "src/gateway/pf-read-fixtures.ts#buildPf02SourceLargeFixture",
+    "algorithm": "sha256",
+    "canonicalization": "对完整安全 bundle 的 workbench、detail、files（连同 schemaVersion、descriptorId、profile、seed、shape）按 JSON.stringify(value, null, 2) 编码 UTF-8 后求 sha256；由 pfReadFixtureDigest 复算。",
+    "profileDigests": {
+      "representative": "fc1100b4835e795128117099bc6c246497a26ef0d37bbbb941c3b87d41989e56",
+      "stress": "91c8c9502f06b4f6162bc107b248bb2451b27b3ecfd7c9e3fe338ab3408395f3"
+    }
+  },
+  "digest": {
+    "algorithm": "sha256",
+    "canonicalization": "将本文件 digest.value 置为空字符串后对文件原始字节求 sha256；由 scripts/orchestrator/lib.mjs 的 pfDescriptorDigest 复算",
+    "value": "53df623aeb8538e1ad8e2821c287603241647de870dcd2c04c8816cb1beff86e"
+  }
+}

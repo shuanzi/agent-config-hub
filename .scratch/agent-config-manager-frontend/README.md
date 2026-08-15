@@ -1,7 +1,7 @@
 # Agent Config Manager 前端本地票据集
 
 > 契约状态：冻结的产品基线 v0.2 与前端契约 v0.2（2026-08-10）；`CR-FE-001` 保留为历史已确认条款
-> 当前 tracker 状态：FE-07R、FE-01 为 `done`；FE-02 为唯一 `ready-for-agent` frontier；FE-03 至 FE-10 为 `blocked`
+> 当前 tracker 状态：FE-07R、FE-01、FE-02 为 `done`；FE-03 与 FE-10 为 `ready-for-agent` frontier；FE-04 至 FE-09 为 `blocked`
 > 产品事实来源：`docs/product/Agent_Config_Manager_MVP_产品决策基线_v0.2.md`（Frozen）
 > 前端事实来源：`docs/frontend/Agent_Config_Manager_前端契约_v0.2.md`（Frozen）
 > 技术方案与影响复核：`docs/architecture/Agent_Config_Manager_MVP_技术方案_v0.1.md`（已验收，`ARCH-GATE` closed，2026-07-27）及 `docs/architecture/Agent_Config_Manager_MVP_技术方案_v0.1_影响复核_addendum_2026-08-10.md`
@@ -19,10 +19,10 @@
 ## 工作规则
 
 - 真相链依次为冻结产品基线 v0.2、冻结前端契约 v0.2、技术方案 v0.1 与其 2026-08-10 addendum、冻结 FE acceptance、实际 ticket evidence；上位冻结文档不能被当作 runtime、ticket closure 或 gate evidence。
-- `ARCH-GATE` 已关闭；FE-07R 已由 run `20260810T071547Z` 的 L0/L1/L3 actual-read evidence 和独立只读复审关闭；FE-01 已由稳定索引 `.artifacts/verification/FE-01/latest-clean-subject-accepted-with-waiver.json` 的自身 closure 关闭，当前唯一 frontier 是 FE-02；`RELEASE-GATE` 继续受 FE-02 至 FE-10 的完成证据阻塞。
+- `ARCH-GATE` 已关闭；FE-07R 已由 run `20260810T071547Z` 的 L0/L1/L3 actual-read evidence 和独立只读复审关闭；FE-01 已由稳定索引 `.artifacts/verification/FE-01/latest-clean-subject-accepted-with-waiver.json` 的自身 closure 关闭；FE-02 已由稳定索引 `.artifacts/verification/FE-02/latest-clean-subject-accepted-with-waiver.json` 的自身 closure（accepted-with-waiver）关闭，当前 frontier 是 FE-03 与 FE-10；`RELEASE-GATE` 继续受 FE-03 至 FE-10 的完成证据阻塞。
 - FE-07R 的最小 bootstrap/harness 已建立并实际运行；其 synthetic FX-19 actual-read evidence 不证明真实用户配置、生产 artifact、L2、PF 或写路径，也不得借给 FE-01 closure。
 - FE-01 的 PF-01 是 development acceptance（L2 Vite dev/mock + L3 debug test-harness）：automatic result 仍为 `fail`/exit `1` 且 `samplingRun=false`，只因 exact manual `accepted-with-waiver`、final physical evidence 与 lineage 成立而闭合；相关性能债务为 `deferred / post-optimization`。它不是 automatic PASS 或 release/reference evidence，不能解除 `RELEASE-GATE`。
-- 每张票据的正式关闭入口为 `npm run verify:ticket -- FE-XX`；FE-07R 与 FE-01 已验证，FE-02 至 FE-10 仍为 `planned / unverified`。底层 Cargo、Vitest 或 WebdriverIO 命令只能用于定位，不能单独关闭票据。
+- 每张票据的正式关闭入口为 `npm run verify:ticket -- FE-XX`；FE-07R、FE-01 与 FE-02 已验证。FE-02 的正式 run `20260815T130239344Z-p33436-000`（commit `b1c4cbe`，起止 clean）以 manifest `status=accepted-with-waiver` 结束：L0–L3 与 PF-03 实时采样全 PASS，PF-02 representative/stress 两个 step 保留 automatic `fail`/exit `1` 并经两份用户授权的 exact subject waiver 闭合；其 PF-02 是 development acceptance，automatic fail 事实不被掩盖，不构成 automatic PASS 或 release/reference evidence。FE-03 至 FE-10 仍为 `planned / unverified`。底层 Cargo、Vitest 或 WebdriverIO 命令只能用于定位，不能单独关闭票据。
 - 验证证据写入 `.artifacts/verification/<FE-ID>/<run-id>/` 并保持 L0–L4 provenance；mock、test harness 与 production artifact 不能互相替代。
 - 每个 FE 票据必须在一个全新上下文中完成；FE-07R 是唯一 foundation/read slice，FE-01 至 FE-10 各自交付可演示用户行为，不拆横向组件、状态层或 API 封装任务。
 - 每个 fixture 只有一张主票据；其他票据可复用同一敏感或安全不变量，但不得夺取 fixture 的主归属。
@@ -36,15 +36,15 @@
 |---|---|---|---|
 | FE-07R | foundation/read；FX-19 project applicability projection | done | `ARCH-GATE` closed；run `20260810T071547Z` L0/L1/L3 actual-read PASS；独立复审无 P0–P3 |
 | FE-01 | 行为；FX-01 只读工作台 | done | 自身 closure：`.artifacts/verification/FE-01/latest-clean-subject-accepted-with-waiver.json`；FE-07R evidence 非本票 credit |
-| FE-02 | 行为；FX-02、FX-03 | ready-for-agent | FE-01 `done` evidence：`.artifacts/verification/FE-01/latest-clean-subject-accepted-with-waiver.json` |
-| FE-03 | 行为；FX-04 | blocked | FE-02 `done` evidence |
+| FE-02 | 行为；FX-02、FX-03 | done | 自身 closure：`.artifacts/verification/FE-02/latest-clean-subject-accepted-with-waiver.json`；FE-01 `done` evidence 非本票 credit |
+| FE-03 | 行为；FX-04 | ready-for-agent | FE-02 `done` evidence：`.artifacts/verification/FE-02/latest-clean-subject-accepted-with-waiver.json` |
 | FE-04 | 行为；FX-05、FX-16、FX-18 | blocked | FE-03 `done` evidence |
 | FE-05 | 行为；FX-08、FX-15、FX-17 | blocked | FE-04 `done` evidence |
 | FE-06 | 行为；FX-09、FX-10、FX-11 | blocked | FE-04 `done` evidence |
 | FE-07 | 行为；FX-07 | blocked | FE-04 `done` evidence |
 | FE-08 | 行为；FX-06、FX-14 | blocked | FE-04 `done` evidence |
 | FE-09 | 行为；FX-13 | blocked | FE-04 `done` evidence |
-| FE-10 | 行为；FX-12 | blocked | FE-02 `done` evidence |
+| FE-10 | 行为；FX-12 | ready-for-agent | FE-02 `done` evidence：`.artifacts/verification/FE-02/latest-clean-subject-accepted-with-waiver.json` |
 
 ## 依赖图
 
@@ -95,4 +95,4 @@ flowchart LR
 
 ## Frontier
 
-当前唯一实现 frontier 是 FE-02。FE-01 已 `done`，其自身 stable subject accepted-with-waiver evidence 位于 `.artifacts/verification/FE-01/latest-clean-subject-accepted-with-waiver.json`；FE-07R 的 provenance-appropriate actual-read evidence 只曾解除 FE-01 direct blocker，不计入 FE-01 closure。FE-03 至 FE-10 的直接 blocker 尚未完成，继续保持 `blocked`；`RELEASE-GATE` 继续保持 `blocked`。
+当前实现 frontier 是 FE-03 与 FE-10。FE-02 已 `done`，其自身 stable subject accepted-with-waiver evidence 位于 `.artifacts/verification/FE-02/latest-clean-subject-accepted-with-waiver.json`；FE-01 已 `done`，其 stable evidence 位于 `.artifacts/verification/FE-01/latest-clean-subject-accepted-with-waiver.json`；FE-07R 的 provenance-appropriate actual-read evidence 只曾解除 FE-01 direct blocker，不计入 FE-01 closure。FE-04 至 FE-09 的直接 blocker 尚未完成，继续保持 `blocked`；`RELEASE-GATE` 继续保持 `blocked`。

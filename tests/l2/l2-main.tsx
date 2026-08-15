@@ -7,6 +7,10 @@
  * - mock 切换为 perf-catalog 合成目录（?perfProfile=stress 选择 stress profile）；
  * - window.__pf01 暴露采样桥：startup 首屏可见耗时（User Timing）、
  *   期望行数计算与搜索 dispatch（供性能探针记点，不含资产名/搜索词于指标名）。
+ *
+ * PF-02/PF-03 扩展（只在 ?scenario=perf-read-surface 时激活）：
+ * - 使用冻结的 public-safe read fixture，不读取真实文件系统；
+ * - window.__pfRead 仅暴露已遮蔽的文件元数据，供 page-internal probe 选择 DOM 文件项。
  */
 import { createRoot } from 'react-dom/client';
 import { ScriptedMockGateway, type RecordedReadCall } from '../../src/gateway/mock';
@@ -37,6 +41,21 @@ interface Pf01Bridge {
   dispatchSearch: (searchText: string) => void;
 }
 
+interface PfReadBridge {
+  getMetadata: () => {
+    descriptorId: 'PF-02' | 'PF-03';
+    profile: 'representative' | 'stress';
+    fixtureDigest: string;
+    shape: Record<string, number | string>;
+    files: Array<{
+      fileId: string;
+      relativePath: string;
+      fileKind: 'text' | 'nonText' | 'unknown';
+      isPrimary: boolean;
+    }>;
+  } | null;
+}
+
 declare global {
   interface Window {
     __fx01?: {
@@ -47,6 +66,7 @@ declare global {
       setAllProjectFilter: (projectId: string) => void;
     };
     __pf01?: Pf01Bridge;
+    __pfRead?: PfReadBridge;
   }
 }
 
@@ -149,6 +169,13 @@ if (scenario === 'perf-catalog') {
     },
     openLocator: () => session.dispatch({ kind: 'openLocator' }),
   };
+  mount(session);
+} else if (scenario === 'perf-read-surface') {
+  const pfId = params.get('pfId') === 'PF-03' ? 'PF-03' : 'PF-02';
+  const profile = params.get('perfProfile') === 'stress' ? 'stress' : 'representative';
+  mock.enablePerfReadSurface(pfId, profile);
+  session = new ReadOnlyWorkbenchSession(mock);
+  window.__pfRead = { getMetadata: () => mock.perfReadSurfaceMetadata() };
   mount(session);
 } else {
   mock.applyScenario(scenario);

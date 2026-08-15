@@ -11,6 +11,9 @@ const fullRounds = [
 ];
 
 const focusedRounds = {
+  'FE-02': [
+    { id: 'cargo test（FE-02 read surfaces）', args: ['test', '--test', 'fe02_read_surfaces'] },
+  ],
   'FE-07R': [
     { id: 'cargo test（FE-07R resolver）', args: ['test', '--test', 'project_applicability'] },
     { id: 'cargo test（FE-07R wire vectors）', args: ['test', '--test', 'wire_vectors'] },

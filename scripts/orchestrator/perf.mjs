@@ -553,4 +553,13 @@ async function main() {
   process.exit(0);
 }
 
+const requestedPf = process.argv[2];
+if (requestedPf === 'PF-02' || requestedPf === 'PF-03') {
+  // PF-01 的 L2+L3 historical implementation 保持原入口和语义；仅新增
+  // read-only PF-02/PF-03 route，后者绝不取得 L3/RSS 或 versioned-budget credit。
+  const { runReadPf } = await import('./perf-read.mjs');
+  const result = await runReadPf();
+  process.exit(result.exitCode);
+}
+
 await main();

@@ -205,6 +205,18 @@ export function buildPerfCatalog(profile: PerfProfile): PerfCatalog {
         : { kind: 'allowed' },
     };
 
+    const primaryFile = {
+      fileId,
+      name: `${name}.md`,
+      relativePath: `${name}.md`,
+      fileKind: 'text' as const,
+      isPrimary: true,
+      canPreview: { kind: 'allowed' as const },
+      canEdit: readOnly
+        ? { kind: 'disabled' as const, reasonCode: 'READ_ONLY_POLICY' as const }
+        : { kind: 'allowed' as const },
+      hasDraftChanges: false,
+    };
     const detail: AssetDetail = {
       asset: summary.asset,
       displayName: name,
@@ -226,18 +238,19 @@ export function buildPerfCatalog(profile: PerfProfile): PerfCatalog {
           scope === 'project' ? 'Project root (synthetic)' : 'User global root (synthetic)',
         precedence,
       })),
-      primaryFile: {
-        fileId,
-        name: `${name}.md`,
-        relativePath: `${name}.md`,
-        fileKind: 'text',
-        isPrimary: true,
-        canPreview: { kind: 'allowed' },
-        canEdit: readOnly
-          ? { kind: 'disabled', reasonCode: 'READ_ONLY_POLICY' }
-          : { kind: 'allowed' },
-        hasDraftChanges: false,
-      },
+      primaryFile,
+      readSurface:
+        assetType === 'skill'
+          ? { kind: 'skill', agentTargetStates: [], sourceReadAvailability: { kind: 'allowed' } }
+          : assetType === 'longTermInstruction'
+            ? { kind: 'longTermInstruction', markdownFile: primaryFile }
+            : {
+                kind: 'subagent',
+                tools: [],
+                permissions: [],
+                bodyFile: primaryFile,
+                readOnlyReason: 'UNKNOWN_FIELD_PRESERVED',
+              },
     };
 
     const inspector: InspectorData = {

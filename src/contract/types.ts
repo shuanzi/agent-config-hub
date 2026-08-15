@@ -332,7 +332,26 @@ export interface AssetDetail {
   effectiveContexts: EffectiveContext[];
   primaryFile: NativeFileRef;
   fileTreeRoot?: FileTreeNode;
+  readSurface: AssetReadSurface;
 }
+
+/** FE-02 类型特定只读事实；不声明任何 draft 或写入 intent。 */
+export type AssetReadSurface =
+  | {
+      kind: 'skill';
+      agentTargetStates: import('../workbench/read-only-model').SkillTargetState[];
+      sourceReadAvailability: ActionAvailability;
+      unknownContentReason?: ReasonCode;
+    }
+  | { kind: 'longTermInstruction'; markdownFile: NativeFileRef }
+  | {
+      kind: 'subagent';
+      model?: string;
+      tools: string[];
+      permissions: string[];
+      bodyFile: NativeFileRef;
+      readOnlyReason?: ReasonCode;
+    };
 
 /** 覆盖关系（FX-01 为空集合） */
 export interface OverrideRelation {

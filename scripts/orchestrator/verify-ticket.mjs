@@ -8,6 +8,10 @@
  *
  * 状态模型：step 退出码映射 0=pass / 2=inconclusive / 其余=fail；
  * 常规整体 status 有 fail→fail，否则有 inconclusive→inconclusive，否则 pass。
+ * 父进程收到 SIGINT/SIGTERM 时：runStep 仍把信号转发给当前子进程（lib.mjs 是 PF
+ * 测量方法输入，保持字节不变）；verify-ticket 级 tracker 记录信号，主循环在当前
+ * 步骤结束后（或下一步启动前）终止后续步骤，manifest 记 `aborted` 且
+ * `completedAt=null`，进程以 128+signo 退出；aborted run 永不构成 completed/closure。
  * registry 默认执行新的 automatic sampling。仅未来 FE-01 registry 的精确 automatic-pass
  * record，或本次 subject-bound exact manual disposition，经 immutable validation 成功后，
  * 才将 perf 改为不采样的 historical validation；旧 waiver 仍永不进入 ticket closure。
@@ -41,11 +45,19 @@ import {
   maybeWriteLatestCleanSubjectAcceptedWithWaiver,
   validateFe01SubjectAcceptedWithWaiverCandidate,
 } from './latest-clean-subject-accepted-with-waiver.mjs';
+import {
+  maybeWriteLatestCleanFe02SubjectAcceptedWithWaiver,
+  validateFe02SubjectAcceptedWithWaiverCandidate,
+} from './latest-clean-fe02-subject-accepted-with-waiver.mjs';
 import { finalizeFe01RunLocalHarnessCapture } from './fe01-run-local-harness-capture.mjs';
 import {
   FE01_SUBJECT_PHYSICAL_CANDIDATE,
   finalizeFe01SubjectWaiverPhysicalDisposition,
 } from './fe01-subject-waiver-physical-disposition.mjs';
+import {
+  FE02_SUBJECT_PHYSICAL_CANDIDATE,
+  finalizeFe02SubjectWaiverPhysicalDisposition,
+} from './fe02-subject-waiver-physical-disposition.mjs';
 import {
   FE01_PF01_AUTOMATIC_PASS_PATH,
   validateFe01Pf01AutomaticPass,
@@ -54,22 +66,32 @@ import {
   FE01_PF01_SUBJECT_WAIVER_PATH,
   validateFe01Pf01SubjectWaiver,
 } from './fe01-pf01-subject-waiver.mjs';
+import { validateFe02Pf02SubjectWaiver } from './fe02-pf02-subject-waiver.mjs';
+import { validateFe02Pf02StressSubjectWaiver } from './fe02-pf02-stress-subject-waiver.mjs';
 import {
   automaticPassPf01BudgetState,
+  createAbortSignalTracker,
   deriveStepRuntimeAdvisory,
   executeTicketStep,
   finalizeAutomaticPassValidation,
+  finalizeFe02SubjectWaiverValidations,
   finalizeSubjectWaiverValidation,
+  FE02_SUBJECT_WAIVER_STEP_IDS,
   hasExactAutomaticPassConfiguration,
   hasExactSubjectWaiverConfiguration,
   isAutomaticPassPerfStep,
   isSubjectWaiverPerfStep,
   planTicketExecutionSteps,
+  signalExitCode,
+  SUBJECT_WAIVER_EXECUTION_MODE,
   subjectWaiverPf01BudgetState,
+  subjectWaiverPf02BudgetState,
   ticketManifestExitCode,
 } from './verify-ticket-execution.mjs';
 import { deriveFe01SubjectWaiverClosureStatus } from './fe01-subject-waiver-verdict.mjs';
+import { deriveFe02SubjectWaiverClosureStatus } from './fe02-subject-waiver-verdict.mjs';
 import { validateFe01SubjectClosureLineage } from './fe01-subject-lineage.mjs';
+import { validateFe02SubjectClosureLineage } from './fe02-subject-lineage.mjs';
 import {
   assertPf01L3ViteModuleClosure,
   assertPf01L3BuildEnvironment,
@@ -86,6 +108,7 @@ import {
   pf01ComparisonProvenance,
   validateFrozenPf01Budget,
 } from './pf01-budget.mjs';
+import { collectReadPfManifestResults } from './verify-ticket-performance.mjs';
 
 /** step 退出码 → 状态映射（ARC-06c §3.17）：0=pass，2=inconclusive，其余=fail */
 function stepStatusOf(exitCode) {
@@ -199,9 +222,19 @@ async function main() {
   const startAt = new Date().toISOString();
   const startingGit = await gitInfo();
   const subjectWaiverPathExact = hasExactSubjectWaiverConfiguration({ ticketId, ticket });
-  const initialSubjectWaiverValidation = subjectWaiverPathExact
-    ? validateFe01Pf01SubjectWaiver({ recordPath: FE01_PF01_SUBJECT_WAIVER_PATH })
-    : undefined;
+  // FE-02：两份 waiver（representative/stress）各自独立做 initial exact validation，
+  // 按 stepId 分发；FE-01 保持单值。
+  const initialFe02SubjectWaiverValidations =
+    subjectWaiverPathExact && ticketId === 'FE-02'
+      ? {
+          'perf-pf02-representative': validateFe02Pf02SubjectWaiver({}),
+          'perf-pf02-stress': validateFe02Pf02StressSubjectWaiver({}),
+        }
+      : undefined;
+  const initialSubjectWaiverValidation =
+    subjectWaiverPathExact && ticketId !== 'FE-02'
+      ? validateFe01Pf01SubjectWaiver({ recordPath: FE01_PF01_SUBJECT_WAIVER_PATH })
+      : undefined;
   const automaticPassPathExact = hasExactAutomaticPassConfiguration({ ticketId, ticket });
   const initialAutomaticPassValidation = automaticPassPathExact
     ? await validateFe01Pf01AutomaticPass({
@@ -213,11 +246,14 @@ async function main() {
     ticket,
     automaticPassValidation: initialAutomaticPassValidation,
     subjectWaiverValidation: initialSubjectWaiverValidation,
+    subjectWaiverValidations: initialFe02SubjectWaiverValidations,
   });
   const runId = makeRunId();
   const evidenceRoot = path.join(ARTIFACTS_ROOT, 'verification', ticketId, runId);
   const performanceDir =
-    ticket.performance === undefined ? null : path.join(evidenceRoot, 'performance');
+    ticket.performance === undefined && ticket.performances === undefined
+      ? null
+      : path.join(evidenceRoot, 'performance');
   if (performanceDir !== null) fs.mkdirSync(performanceDir, { recursive: true });
   console.log(`verify:ticket ${ticketId} run ${runId}`);
   console.log(`evidence: ${sanitizeText(evidenceRoot)}`);
@@ -239,7 +275,17 @@ async function main() {
   }
 
   const stepResults = [];
+  const abortTracker = createAbortSignalTracker();
+  let aborted = null;
   for (const step of executionSteps) {
+    // 信号可能在上一步结束后、下一步启动前到达：不再启动新步骤。
+    if (abortTracker.received() !== null) {
+      aborted = { signal: abortTracker.received(), stepId: null, at: new Date().toISOString() };
+      console.error(
+        `ABORTED  verify:ticket 收到 ${aborted.signal}，步骤 ${step.id} 不再启动；后续步骤不再执行`,
+      );
+      break;
+    }
     console.log(`\n=== [${step.layer}] ${step.id}: ${step.cmd} ${step.args.join(' ')}`);
     const result = await executeTicketStep({
       step,
@@ -300,21 +346,18 @@ async function main() {
     console.log(
       `${STATUS_LABEL[meta.status]}  [${step.layer}] ${step.id}  exit ${result.exitCode} (${result.durationMs}ms)`,
     );
+    // 父进程收到 SIGINT/SIGTERM（lib.mjs 的 runStep 已把信号转发给当前子进程）：
+    // run 记为 aborted，终止后续步骤，不再把 manifest 写成 completed 语义。
+    if (abortTracker.received() !== null) {
+      aborted = { signal: abortTracker.received(), stepId: step.id, at: new Date().toISOString() };
+      console.error(
+        `ABORTED  verify:ticket 收到 ${aborted.signal}，终止于步骤 ${step.id}；后续步骤不再执行`,
+      );
+      break;
+    }
   }
 
   const endAt = new Date().toISOString();
-
-  // performance evidence 扫描（perf.mjs 已自行扫描其 summary/budgets；此处兜底）
-  if (performanceDir !== null && fs.existsSync(performanceDir)) {
-    for (const file of fs.readdirSync(performanceDir)) {
-      const full = path.join(performanceDir, file);
-      const scan = scanEvidenceText(fs.readFileSync(full, 'utf8'));
-      if (!scan.clean) {
-        evidenceContaminated = true;
-        contaminationNotes.push(`performance/${file}: 扫描命中`);
-      }
-    }
-  }
 
   const historicalAutomaticPassValidation = executionSteps.some(isAutomaticPassPerfStep);
   const historicalSubjectWaiverValidation = executionSteps.some(isSubjectWaiverPerfStep);
@@ -326,12 +369,54 @@ async function main() {
       })
     : undefined;
   const subjectWaiverCompletion = historicalSubjectWaiverValidation
-    ? await finalizeSubjectWaiverValidation({
-        initialSubjectWaiverValidation,
-        validateSubjectWaiver: () =>
-          validateFe01Pf01SubjectWaiver({ recordPath: FE01_PF01_SUBJECT_WAIVER_PATH }),
-      })
+    ? ticketId === 'FE-02'
+      ? await finalizeFe02SubjectWaiverValidations({
+          initialSubjectWaiverValidations: initialFe02SubjectWaiverValidations,
+          validateSubjectWaivers: {
+            'perf-pf02-representative': () => validateFe02Pf02SubjectWaiver({}),
+            'perf-pf02-stress': () => validateFe02Pf02StressSubjectWaiver({}),
+          },
+        })
+      : await finalizeSubjectWaiverValidation({
+          initialSubjectWaiverValidation,
+          validateSubjectWaiver: () =>
+            validateFe01Pf01SubjectWaiver({ recordPath: FE01_PF01_SUBJECT_WAIVER_PATH }),
+        })
     : undefined;
+
+  // PF-01 保持 historical singular scanner/manifest；read PF 使用递归 physical-file
+  // scan + 每 profile 的脱敏 projection，禁止将嵌套目录、symlink 或 raw 内容跳过扫描。
+  // 配置 subjectWaiverPath 的 entry 在 historical step 下从 final waiver validation 投影，
+  // 不要求本次 run 的 evidence 目录。
+  let readPerformanceEvidence;
+  if (performanceDir !== null && fs.existsSync(performanceDir)) {
+    if (ticket.performances !== undefined) {
+      readPerformanceEvidence = collectReadPfManifestResults({
+        performances: ticket.performances,
+        stepResults,
+        evidenceRoot,
+        expectedCommit: startingGit.commit,
+        subjectWaiverValidations:
+          ticketId === 'FE-02'
+            ? Object.fromEntries(
+                FE02_SUBJECT_WAIVER_STEP_IDS.map((stepId) => [
+                  stepId,
+                  subjectWaiverCompletion?.perStep?.[stepId]?.finalSubjectWaiverValidation,
+                ]),
+              )
+            : undefined,
+      });
+    } else {
+      for (const file of fs.readdirSync(performanceDir)) {
+        const full = path.join(performanceDir, file);
+        const scan = scanEvidenceText(fs.readFileSync(full, 'utf8'));
+        if (!scan.clean) {
+          evidenceContaminated = true;
+          contaminationNotes.push(`performance/${file}: 扫描命中`);
+        }
+      }
+    }
+  }
   const perfResult = stepResults.find((step) => step.id === 'perf');
   if (perfResult?.execution !== undefined && automaticPassCompletion !== undefined) {
     perfResult.execution.finalAutomaticPassValidation =
@@ -340,16 +425,27 @@ async function main() {
     const { logs: _logs, ...perfMeta } = perfResult;
     writeJson(path.join(evidenceRoot, 'steps', 'perf', 'meta.json'), perfMeta);
   }
-  if (perfResult?.execution !== undefined && subjectWaiverCompletion !== undefined) {
-    perfResult.execution.finalWaiverValidation =
-      subjectWaiverCompletion.finalSubjectWaiverValidationStatus;
-    perfResult.execution.bindingStable = subjectWaiverCompletion.bindingStable;
-    const { logs: _logs, ...perfMeta } = perfResult;
-    writeJson(path.join(evidenceRoot, 'steps', 'perf', 'meta.json'), perfMeta);
+  // historical subject-waiver step 按 execution mode 定位（FE-01 为 perf，FE-02 为
+  // perf-pf02-representative 与 perf-pf02-stress），各自起止 binding 结果回写其 meta。
+  for (const subjectWaiverStepResult of stepResults.filter(
+    (step) => step.execution?.mode === SUBJECT_WAIVER_EXECUTION_MODE,
+  )) {
+    if (subjectWaiverCompletion === undefined) continue;
+    const perStep = subjectWaiverCompletion.perStep?.[subjectWaiverStepResult.id];
+    subjectWaiverStepResult.execution.finalWaiverValidation =
+      ticketId === 'FE-02'
+        ? perStep?.finalSubjectWaiverValidationStatus
+        : subjectWaiverCompletion.finalSubjectWaiverValidationStatus;
+    subjectWaiverStepResult.execution.bindingStable =
+      ticketId === 'FE-02' ? perStep?.bindingStable : subjectWaiverCompletion.bindingStable;
+    const { logs: _logs, ...perfMeta } = subjectWaiverStepResult;
+    writeJson(path.join(evidenceRoot, 'steps', subjectWaiverStepResult.id, 'meta.json'), perfMeta);
   }
   const budget =
     ticket.performance === undefined
-      ? null
+      ? ticketId === 'FE-02' && historicalSubjectWaiverValidation
+        ? subjectWaiverPf02BudgetState({ subjectWaiverCompletions: subjectWaiverCompletion })
+        : null
       : historicalSubjectWaiverValidation
         ? subjectWaiverPf01BudgetState({ subjectWaiverCompletion })
       : historicalAutomaticPassValidation
@@ -358,27 +454,46 @@ async function main() {
   const git = await gitInfo();
   const gitIdentityConsistent = sameGitIdentity(startingGit, git);
   const subjectLineage = historicalSubjectWaiverValidation
-    ? validateFe01SubjectClosureLineage({ finalCommit: git.commit })
+    ? ticketId === 'FE-02'
+      ? validateFe02SubjectClosureLineage({ finalCommit: git.commit })
+      : validateFe01SubjectClosureLineage({ finalCommit: git.commit })
     : undefined;
   const computedOverallStatus =
     stepResults.some((step) => step.status === 'fail') || budget?.status === 'fail'
       ? 'fail'
       : evidenceContaminated ||
+          readPerformanceEvidence?.incomplete === true ||
           stepResults.some((step) => step.status === 'inconclusive') ||
           budget?.status === 'inconclusive'
         ? 'inconclusive'
         : 'pass';
   const subjectWaiverVerdict = historicalSubjectWaiverValidation
-    ? deriveFe01SubjectWaiverClosureStatus({
-        ticketId,
-        steps: stepResults,
-        budgetStatus: budget?.status,
-        evidenceContaminated,
-        worktreeDirty: git.worktreeDirty,
-        initialWaiverValidation: initialSubjectWaiverValidation,
-        finalWaiverValidation: subjectWaiverCompletion?.finalSubjectWaiverValidation,
-        subjectLineage,
-      })
+    ? ticketId === 'FE-02'
+      ? deriveFe02SubjectWaiverClosureStatus({
+          ticketId,
+          steps: stepResults,
+          budgetStatus: budget?.status,
+          evidenceContaminated,
+          worktreeDirty: git.worktreeDirty,
+          initialWaiverValidations: initialFe02SubjectWaiverValidations,
+          finalWaiverValidations: Object.fromEntries(
+            FE02_SUBJECT_WAIVER_STEP_IDS.map((stepId) => [
+              stepId,
+              subjectWaiverCompletion?.perStep?.[stepId]?.finalSubjectWaiverValidation,
+            ]),
+          ),
+          subjectLineage,
+        })
+      : deriveFe01SubjectWaiverClosureStatus({
+          ticketId,
+          steps: stepResults,
+          budgetStatus: budget?.status,
+          evidenceContaminated,
+          worktreeDirty: git.worktreeDirty,
+          initialWaiverValidation: initialSubjectWaiverValidation,
+          finalWaiverValidation: subjectWaiverCompletion?.finalSubjectWaiverValidation,
+          subjectLineage,
+        })
     : undefined;
   let overallStatus = gitIdentityConsistent
     ? subjectWaiverVerdict?.status ?? computedOverallStatus
@@ -436,9 +551,19 @@ async function main() {
     ...(fe01HarnessCapture === null || fe01HarnessCapture.capture.disposition === 'captured'
       ? {}
       : { runLocalHarnessCapture: fe01HarnessCapture?.capture }),
+    ...(readPerformanceEvidence === undefined
+      ? {}
+      : {
+          performanceResults: readPerformanceEvidence.performanceResults,
+          performanceEvidence: {
+            valid: !readPerformanceEvidence.incomplete,
+            notes: readPerformanceEvidence.contaminationNotes,
+          },
+        }),
     startAt,
     endAt,
-    completedAt: endAt,
+    completedAt: aborted === null ? endAt : null,
+    ...(aborted === null ? {} : { aborted }),
   };
   if (ticket.performance !== undefined) {
     manifest.budgetState = budget?.label;
@@ -464,25 +589,71 @@ async function main() {
   }
   if (historicalSubjectWaiverValidation && subjectWaiverCompletion !== undefined) {
     manifest.subjectLineage = subjectLineage;
-    manifest.manualDisposition = {
-      status: 'accepted-with-waiver',
-      waiverValidation: initialSubjectWaiverValidation?.valid === true ? 'valid' : 'invalid',
-      initialWaiverValidation: initialSubjectWaiverValidation?.valid === true ? 'valid' : 'invalid',
-      finalWaiverValidation: subjectWaiverCompletion.finalSubjectWaiverValidationStatus,
-      bindingStable: subjectWaiverCompletion.bindingStable,
-      ...(subjectWaiverCompletion.finalSubjectWaiverValidation?.waiverPath === undefined
-        ? {}
-        : {
-            waiverPath: subjectWaiverCompletion.finalSubjectWaiverValidation.waiverPath,
-            waiverSha256: subjectWaiverCompletion.finalSubjectWaiverValidation.waiverSha256,
-          }),
-      source:
-        '用户授权的 exact FE-01 subject PF-01 disposition；immutable subject artifact raw samples 与 frozen budget 重算，非本次 perf sampling。',
-    };
-    manifest.pfAutomaticResult = budget?.automaticResult;
-    manifest.performanceDebt = budget?.performanceDebt;
+    if (ticketId === 'FE-02') {
+      // FE-02 两份 waiver：保留聚合字段，并以按 stepId 有序的 waivers 数组承载各自事实。
+      const waiverEntries = FE02_SUBJECT_WAIVER_STEP_IDS.map((stepId) => {
+        const perStep = subjectWaiverCompletion.perStep?.[stepId];
+        const finalValidation = perStep?.finalSubjectWaiverValidation;
+        return {
+          stepId,
+          initialWaiverValidation:
+            initialFe02SubjectWaiverValidations?.[stepId]?.valid === true ? 'valid' : 'invalid',
+          finalWaiverValidation: perStep?.finalSubjectWaiverValidationStatus ?? 'invalid',
+          bindingStable: perStep?.bindingStable === true,
+          ...(finalValidation?.waiverPath === undefined
+            ? {}
+            : {
+                waiverPath: finalValidation.waiverPath,
+                waiverSha256: finalValidation.waiverSha256,
+              }),
+        };
+      });
+      manifest.manualDisposition = {
+        status: 'accepted-with-waiver',
+        waiverValidation: waiverEntries.every(
+          (entry) => entry.initialWaiverValidation === 'valid',
+        )
+          ? 'valid'
+          : 'invalid',
+        initialWaiverValidation: waiverEntries.every(
+          (entry) => entry.initialWaiverValidation === 'valid',
+        )
+          ? 'valid'
+          : 'invalid',
+        finalWaiverValidation: waiverEntries.every(
+          (entry) => entry.finalWaiverValidation === 'valid',
+        )
+          ? 'valid'
+          : 'invalid',
+        bindingStable: waiverEntries.every((entry) => entry.bindingStable),
+        waivers: waiverEntries,
+        source:
+          '用户授权的 exact FE-02 subject PF-02 representative+stress disposition；immutable subject artifact raw samples 与 frozen budget 重算，非本次 perf sampling。',
+      };
+      manifest.pfAutomaticResult = budget?.automaticResults;
+      manifest.performanceDebt = budget?.performanceDebts;
+    } else {
+      manifest.manualDisposition = {
+        status: 'accepted-with-waiver',
+        waiverValidation: initialSubjectWaiverValidation?.valid === true ? 'valid' : 'invalid',
+        initialWaiverValidation: initialSubjectWaiverValidation?.valid === true ? 'valid' : 'invalid',
+        finalWaiverValidation: subjectWaiverCompletion.finalSubjectWaiverValidationStatus,
+        bindingStable: subjectWaiverCompletion.bindingStable,
+        ...(subjectWaiverCompletion.finalSubjectWaiverValidation?.waiverPath === undefined
+          ? {}
+          : {
+              waiverPath: subjectWaiverCompletion.finalSubjectWaiverValidation.waiverPath,
+              waiverSha256: subjectWaiverCompletion.finalSubjectWaiverValidation.waiverSha256,
+            }),
+        source:
+          '用户授权的 exact FE-01 subject PF-01 disposition；immutable subject artifact raw samples 与 frozen budget 重算，非本次 perf sampling。',
+      };
+      manifest.pfAutomaticResult = budget?.automaticResult;
+      manifest.performanceDebt = budget?.performanceDebt;
+    }
     if (overallStatus === 'accepted-with-waiver') {
-      manifest.physicalValidation = FE01_SUBJECT_PHYSICAL_CANDIDATE;
+      manifest.physicalValidation =
+        ticketId === 'FE-02' ? FE02_SUBJECT_PHYSICAL_CANDIDATE : FE01_SUBJECT_PHYSICAL_CANDIDATE;
     }
   }
   if (
@@ -522,25 +693,49 @@ async function main() {
   }
   let exactSubjectWaiver = subjectWaiverVerdict?.status === 'accepted-with-waiver';
   if (manifest.status === 'accepted-with-waiver') {
-    const eligibility = validateFe01SubjectAcceptedWithWaiverCandidate({
-      root: REPO_ROOT,
-      evidenceRoot,
-      ticketId,
-      manifest,
-    });
-    const disposition = finalizeFe01SubjectWaiverPhysicalDisposition({ manifest, eligibility });
+    const eligibility =
+      ticketId === 'FE-02'
+        ? validateFe02SubjectAcceptedWithWaiverCandidate({
+            root: REPO_ROOT,
+            evidenceRoot,
+            ticketId,
+            manifest,
+          })
+        : validateFe01SubjectAcceptedWithWaiverCandidate({
+            root: REPO_ROOT,
+            evidenceRoot,
+            ticketId,
+            manifest,
+          });
+    const disposition = (
+      ticketId === 'FE-02'
+        ? finalizeFe02SubjectWaiverPhysicalDisposition
+        : finalizeFe01SubjectWaiverPhysicalDisposition
+    )({ manifest, eligibility });
     manifest = disposition.manifest;
     exactSubjectWaiver = disposition.exactSubjectWaiver;
     writeJson(path.join(evidenceRoot, 'manifest.json'), manifest);
     if (exactSubjectWaiver) {
-      const acceptedIndex = await maybeWriteLatestCleanSubjectAcceptedWithWaiver({
-        root: REPO_ROOT,
-        evidenceRoot,
-        ticketId,
-        manifest,
-      });
+      const acceptedIndex =
+        ticketId === 'FE-02'
+          ? await maybeWriteLatestCleanFe02SubjectAcceptedWithWaiver({
+              root: REPO_ROOT,
+              evidenceRoot,
+              ticketId,
+              manifest,
+            })
+          : await maybeWriteLatestCleanSubjectAcceptedWithWaiver({
+              root: REPO_ROOT,
+              evidenceRoot,
+              ticketId,
+              manifest,
+            });
       if (!acceptedIndex.eligible || !acceptedIndex.validated) {
-        const rejected = finalizeFe01SubjectWaiverPhysicalDisposition({
+        const rejected = (
+          ticketId === 'FE-02'
+            ? finalizeFe02SubjectWaiverPhysicalDisposition
+            : finalizeFe01SubjectWaiverPhysicalDisposition
+        )({
           manifest,
           eligibility: acceptedIndex,
         });
@@ -567,6 +762,10 @@ async function main() {
 
   console.log(`\nverify:ticket ${ticketId}: ${manifest.status}`);
   console.log(`manifest: ${sanitizeText(path.join(evidenceRoot, 'manifest.json'))}`);
+  // aborted run 以信号语义退出（128 + signo），不伪装成正常 completed exit。
+  if (aborted !== null) {
+    process.exit(signalExitCode(aborted.signal));
+  }
   // closure accepted-with-waiver=0；manifest 与 PF step 仍分别保留 waiver/fail-1 事实。
   process.exit(
     ticketManifestExitCode(manifest.status, {

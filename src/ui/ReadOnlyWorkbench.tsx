@@ -1,5 +1,6 @@
 import { useEffect, useRef, useSyncExternalStore, type RefObject } from 'react';
 
+import type { AssetDetailSnapshot, FileTreeNode, NativeFileSnapshot } from '../contract/types';
 import type {
   ReadOnlyWorkbenchSession,
   ReadOnlyWorkbenchState,
@@ -125,27 +126,35 @@ function SegmentList({
   );
 }
 
+function availabilityLabel(availability: { kind: string; reasonCode?: string }): string {
+  return availability.reasonCode === undefined
+    ? availability.kind
+    : `${availability.kind}（${availability.reasonCode}）`;
+}
+
 function SkillCells({
-  row,
+  displayName,
+  cells,
   headingRef,
 }: {
-  row: ReadOnlyRow;
+  displayName: string;
+  cells: ReadOnlyRow['skillTargetStates'];
   headingRef: RefObject<HTMLHeadingElement>;
 }) {
-  if (row.skillTargetStates === undefined) return null;
-  const cells = new Map(row.skillTargetStates.map((cell) => [cell.agent, cell]));
-  const availabilityLabel = (availability: { kind: string; reasonCode?: string }) =>
-    availability.reasonCode === undefined
-      ? availability.kind
-      : `${availability.kind}（${availability.reasonCode}）`;
+  if (cells === undefined) return null;
+  const byAgent = new Map(cells.map((cell) => [cell.agent, cell]));
   return (
-    <section className="skill-target-cells" aria-label="Skill Agent 状态（只读）">
+    <section
+      className="skill-target-cells"
+      aria-label="Skill Agent 状态（只读）"
+      data-testid="skill-readonly-detail"
+    >
       <h2 ref={headingRef} tabIndex={-1} data-testid="skill-detail-heading">
-        Skill 详情：{row.displayName}
+        Skill 详情：{displayName}
       </h2>
       <div className="skill-target-grid">
         {AGENT_ORDER.map((agent) => {
-          const cell = cells.get(agent);
+          const cell = byAgent.get(agent);
           const presence = cell?.presence ?? 'unknown';
           const activation = cell?.activation ?? 'unknown';
           const applicability = cell?.applicability ?? 'unknown';
@@ -177,6 +186,202 @@ function SkillCells({
           );
         })}
       </div>
+    </section>
+  );
+}
+
+function NativeFileTree({
+  session,
+  node,
+  selectedFileId,
+}: {
+  session: ReadOnlyWorkbenchSession;
+  node: FileTreeNode;
+  selectedFileId?: string;
+}) {
+  return (
+    <ul data-testid="native-file-tree" aria-label="原生文件树">
+      {node.file !== undefined && (
+        <li>
+          <button
+            type="button"
+            data-testid="native-file-tree-item"
+            aria-current={node.file.fileId === selectedFileId ? 'true' : undefined}
+            onClick={() => session.dispatch({ kind: 'selectDetailFile', file: node.file! })}
+          >
+            查看源码：{node.file.relativePath}
+            {node.file.isPrimary ? '（主文件）' : ''}
+          </button>
+        </li>
+      )}
+      {node.children?.map((child) => (
+        <li key={`${child.name}-${child.file?.fileId ?? 'directory'}`}>
+          {child.file === undefined && <span>{child.name}</span>}
+          <NativeFileTree session={session} node={child} selectedFileId={selectedFileId} />
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function NativeFileSurface({ file }: { file: NativeFileSnapshot }) {
+  if (file.content.kind === 'source') {
+    return (
+      <section data-testid="native-file-text" aria-label="文本原生文件（只读）">
+        <h3>{file.file.relativePath}</h3>
+        <pre>{file.content.maskedText}</pre>
+        {file.content.sensitiveSegments.length > 0 && (
+          <p role="status" data-testid="safety-finding">
+            敏感字段已遮蔽。
+          </p>
+        )}
+      </section>
+    );
+  }
+  return (
+    <section data-testid="native-file-nontext" aria-label="非文本原生文件（只读）">
+      <h3>{file.file.relativePath}</h3>
+      <p>{file.content.fileKindLabel}</p>
+      <p>{file.content.sizeBytes} bytes</p>
+      <p role="status" data-testid="safety-finding">
+        {file.content.reasonCode}：{file.content.reason}
+      </p>
+    </section>
+  );
+}
+
+function sourceAnchorLabel(anchor: AssetDetailSnapshot['inspector']['sourceAnchor']): string {
+  if (anchor.kind === 'globalRoot') return anchor.label;
+  if (anchor.kind === 'project') return anchor.projectName;
+  return '用户目录';
+}
+
+function ReadOnlyDetail({
+  session,
+  state,
+  headingRef,
+}: {
+  session: ReadOnlyWorkbenchSession;
+  state: ReadOnlyWorkbenchState;
+  headingRef: RefObject<HTMLHeadingElement>;
+}) {
+  if (state.detail.kind === 'idle') return <p>在列表中选择资产以查看只读状态。</p>;
+  if (state.detail.kind === 'loading') {
+    return (
+      <p aria-busy="true" data-testid="readonly-detail-loading">
+        正在读取只读详情…
+      </p>
+    );
+  }
+  if (state.detail.kind === 'failed') {
+    return (
+      <section role="alert" aria-label="只读详情读取失败" data-testid="readonly-detail-error">
+        <h2 ref={headingRef} tabIndex={-1}>
+          无法读取只读详情
+        </h2>
+        <p>{state.detail.reasonCode}</p>
+        <p>{state.detail.message}</p>
+        <button type="button" onClick={() => session.dispatch({ kind: 'retry' })}>
+          重试读取
+        </button>
+      </section>
+    );
+  }
+
+  const { detail, file } = state.detail;
+  const surface = detail.detail.readSurface;
+  const fileTree = detail.detail.fileTreeRoot;
+  const finding =
+    surface.kind === 'skill'
+      ? surface.unknownContentReason
+      : surface.kind === 'subagent'
+        ? surface.readOnlyReason
+        : undefined;
+  return (
+    <section aria-label="类型特定只读详情">
+      {surface.kind === 'skill' && (
+        <SkillCells
+          displayName={detail.detail.displayName}
+          cells={surface.agentTargetStates}
+          headingRef={headingRef}
+        />
+      )}
+      {surface.kind === 'longTermInstruction' && (
+        <section data-testid="long-term-instruction-readonly-detail">
+          <h2 ref={headingRef} tabIndex={-1}>
+            长期指令详情：{detail.detail.displayName}
+          </h2>
+          <p>Markdown（只读）</p>
+        </section>
+      )}
+      {surface.kind === 'subagent' && (
+        <section data-testid="subagent-readonly-detail">
+          <h2 ref={headingRef} tabIndex={-1}>
+            Subagent 详情：{detail.detail.displayName}
+          </h2>
+          <p>模型：{surface.model ?? '未知'}</p>
+          <p>工具：{surface.tools.join('、') || '未知'}</p>
+          <p>权限：{surface.permissions.join('、') || '未知'}</p>
+        </section>
+      )}
+      <p role="status" data-testid="safety-finding">
+        兼容性：{detail.detail.compatibility}
+      </p>
+      {finding !== undefined && (
+        <p role="status" data-testid="safety-finding">
+          {finding}
+        </p>
+      )}
+      {fileTree !== undefined ? (
+        <NativeFileTree session={session} node={fileTree} selectedFileId={file?.file.fileId} />
+      ) : (
+        <ul data-testid="native-file-tree" aria-label="原生文件树">
+          <li>
+            <button
+              type="button"
+              data-testid="native-file-tree-item"
+              aria-current="true"
+              onClick={() =>
+                session.dispatch({ kind: 'selectDetailFile', file: detail.detail.primaryFile })
+              }
+            >
+              查看源码：{detail.detail.primaryFile.relativePath}（主文件）
+            </button>
+          </li>
+        </ul>
+      )}
+      {file === undefined ? (
+        <p data-testid="native-file-not-opened">选择“查看源码”以加载只读文件内容。</p>
+      ) : (
+        <NativeFileSurface file={file} />
+      )}
+      <details>
+        <summary>来源与上下文</summary>
+        <p>来源路径：{detail.inspector.pathDisplay}</p>
+        <p>来源锚点：{sourceAnchorLabel(detail.inspector.sourceAnchor)}</p>
+        {detail.inspector.effectiveContexts.map((context) => (
+          <p key={`${context.agent}-${context.scope}-${context.precedence}`}>
+            {context.agent} · {context.scope} · {context.sourceTierLabel} · 优先级{' '}
+            {context.precedence}
+          </p>
+        ))}
+        {detail.inspector.overrides.length === 0 ? (
+          <p>覆盖关系：当前 read snapshot 未声明覆盖关系</p>
+        ) : (
+          detail.inspector.overrides.map((override) => (
+            <p key={`${override.kind}-${override.otherAssetId}`}>
+              覆盖关系：{override.kind} · {override.otherAssetId} · {override.note}
+            </p>
+          ))
+        )}
+      </details>
+      <details>
+        <summary>历史与恢复</summary>
+        <p>当前版本：{detail.revision}</p>
+        <p>漂移：当前详情 snapshot 未提供权威事实</p>
+        <p>最近变更：当前详情 snapshot 未提供权威事实</p>
+        <p>恢复点：当前详情 snapshot 未提供权威事实</p>
+      </details>
     </section>
   );
 }
@@ -296,10 +501,10 @@ export function ReadOnlyWorkbench({ session }: { session: ReadOnlyWorkbenchSessi
     });
   };
   useEffect(() => {
-    if (state.selected?.assetRef?.assetType === 'skill') {
+    if (state.detail.kind === 'ready' || state.detail.kind === 'failed') {
       detailHeadingRef.current?.focus({ preventScroll: true });
     }
-  }, [state.selected]);
+  }, [state.detail]);
   useEffect(() => {
     if (state.locator.kind === 'open' && state.locator.error !== undefined) {
       locatorErrorHeadingRef.current?.focus();
@@ -480,10 +685,8 @@ export function ReadOnlyWorkbench({ session }: { session: ReadOnlyWorkbenchSessi
               <p>{state.detailError.reasonCode}</p>
               <p>{state.detailError.message}</p>
             </section>
-          ) : state.selected === null ? (
-            <p>在列表中选择资产以查看只读状态。</p>
           ) : (
-            <SkillCells row={state.selected} headingRef={detailHeadingRef} />
+            <ReadOnlyDetail session={session} state={state} headingRef={detailHeadingRef} />
           )}
         </aside>
       </div>

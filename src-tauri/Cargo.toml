@@ -22,6 +22,8 @@ sha2 = "0.10"
 # 已遮蔽、可显示的 metadata 匹配，不接触 nativeFile/source 内容。
 unicode-normalization = "=0.1.25"
 unicode-casefold = "=0.2.0"
+# TOCTOU 修复需要 O_NOFOLLOW；libc 0.2.189 已在传递依赖树中，此处仅提升为直接依赖。
+libc = "=0.2.189"
 tauri-plugin-wdio-webdriver = { version = "1", optional = true }
 
 [dev-dependencies]

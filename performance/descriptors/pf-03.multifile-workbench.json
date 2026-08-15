@@ -1,0 +1,86 @@
+{
+  "descriptorId": "PF-03",
+  "name": "multifile-workbench",
+  "schemaVersion": 1,
+  "seed": 2026081403,
+  "shapeDimensions": {
+    "fileCount": "合成原生文件总数",
+    "maxDirectoryDepth": "合成目录树最大深度",
+    "textFileCount": "合成文本文件数",
+    "nonTextFileCount": "合成非文本文件数",
+    "totalBytes": "合成文件原始字节总数",
+    "activePath": "采样时选择的合成次级文本路径",
+    "dirtyFileCount": "具有草稿或 dirty 状态的文件数"
+  },
+  "profiles": {
+    "representative": {
+      "fileCount": 64,
+      "maxDirectoryDepth": 4,
+      "textFileCount": 48,
+      "nonTextFileCount": 16,
+      "totalBytes": 524288,
+      "activePath": "nested/secondary/readme.md",
+      "dirtyFileCount": 0
+    },
+    "stress": {
+      "fileCount": 256,
+      "maxDirectoryDepth": 6,
+      "textFileCount": 192,
+      "nonTextFileCount": 64,
+      "totalBytes": 2097152,
+      "activePath": "deep/nested/secondary/readme.md",
+      "dirtyFileCount": 0
+    }
+  },
+  "contentRules": [
+    "同一 seed 与 profile 必须逐字节确定性生成；仅生成 synthetic fixture。",
+    "敏感占位值仅在 gateway 前的合成源中出现，并在 gateway 边界前完成遮蔽；离开 gateway、日志和 evidence 不得含明文。未知字段和注释按 profile 保真生成。",
+    "PF-03 必须精确保留 fileCount、depth、text/nontext 比例、totalBytes、activePath 与 dirtyFileCount=0；非文本只提供 metadata。",
+    "不生成 Hook、可执行内容、真实文件系统读取、edit、draft 或任何写入路径。"
+  ],
+  "metrics": [
+    {
+      "id": "pf03.multifile.tree.visible",
+      "surface": "多文件树打开",
+      "definition": "页内选择多文件 Skill intent → native-file-tree 与只读详情 pane 同时可见并经连续两次 rAF 稳定确认",
+      "selector": "[data-testid=\"native-file-tree\"]",
+      "layer": "L2 mock renderer（headless Chrome + Vite dev server；非 release-like artifact）",
+      "minSamplesByProfile": { "representative": 20, "stress": 10 }
+    },
+    {
+      "id": "pf03.multifile.text_switch.content_visible",
+      "surface": "次级文本切换",
+      "definition": "页内选择 activePath 文本 intent → .native-file-text 内容可见并经连续两次 rAF 稳定确认",
+      "selector": "[data-testid=\"native-file-text\"]",
+      "layer": "L2 mock renderer（headless Chrome + Vite dev server；非 release-like artifact）",
+      "minSamplesByProfile": { "representative": 20, "stress": 10 }
+    },
+    {
+      "id": "pf03.multifile.nontext_switch.metadata_visible",
+      "surface": "非文本切换",
+      "definition": "页内选择合成非文本文件 intent → .native-file-nontext metadata 可见并经连续两次 rAF 稳定确认",
+      "selector": "[data-testid=\"native-file-nontext\"]",
+      "layer": "L2 mock renderer（headless Chrome + Vite dev server；非 release-like artifact）",
+      "minSamplesByProfile": { "representative": 20, "stress": 10 }
+    }
+  ],
+  "budgetFormula": {
+    "absoluteCeilingMs": "ceil(p95 * 1.5 / 10) * 10",
+    "regressionAllowance": "current p50 <= baseline p50 * 1.25"
+  },
+  "budgetStatus": "formula-authorized / clean-manifest-gated",
+  "fixture": {
+    "generator": "src/gateway/pf-read-fixtures.ts#buildPf03MultifileFixture",
+    "algorithm": "sha256",
+    "canonicalization": "对完整安全 bundle 的 workbench、detail、files（连同 schemaVersion、descriptorId、profile、seed、shape）按 JSON.stringify(value, null, 2) 编码 UTF-8 后求 sha256；由 pfReadFixtureDigest 复算。",
+    "profileDigests": {
+      "representative": "123f359fc94b70f1f6a94e1237f70f14277570a83103002ea0530d101f0156a7",
+      "stress": "2826168181bbba8aef9be53dfad8d2374183ef7925768b453b4b16a43e329556"
+    }
+  },
+  "digest": {
+    "algorithm": "sha256",
+    "canonicalization": "将本文件 digest.value 置为空字符串后对文件原始字节求 sha256；由 scripts/orchestrator/lib.mjs 的 pfDescriptorDigest 复算",
+    "value": "53b42bf9e55672d994e4cd170a8cc3b950cbd2498368e6878bb3e8e0eea01258"
+  }
+}

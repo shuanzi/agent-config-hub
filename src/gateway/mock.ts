@@ -24,6 +24,10 @@
  */
 import fixture from '../../fixtures/fx-01/fixture.json';
 import skillMdRaw from '../../fixtures/fx-01/native-root/skills/demo-skill/SKILL.md?raw';
+import fx02InstructionRaw from '../../fixtures/fx-02/native-root/long-term-instructions/release-notes.md?raw';
+import fx02SkillRaw from '../../fixtures/fx-02/native-root/skills/multifile-skill-mixed/SKILL.md?raw';
+import fx02UsageRaw from '../../fixtures/fx-02/native-root/skills/multifile-skill-mixed/references/usage.md?raw';
+import fx02SubagentRaw from '../../fixtures/fx-02/native-root/subagents/researcher/SUBAGENT.md?raw';
 import { maskSyntheticSecrets } from '../../fixtures/sensitive-masking';
 import {
   buildPerfCatalog,
@@ -31,6 +35,13 @@ import {
   type PerfCatalog,
   type PerfProfile,
 } from './perf-catalog';
+import {
+  buildPf02SourceLargeFixture,
+  buildPf03MultifileFixture,
+  pfReadFixtureDigest,
+  type PfReadFixtureBundle,
+  type PfReadProfile,
+} from './pf-read-fixtures';
 import {
   AGENT_ORDER,
   canonicalizeWorkbenchFilters,
@@ -152,6 +163,29 @@ function maskInspectorData(inspector: InspectorData): InspectorData {
   };
 }
 
+/** FE-02 L2 fixture：仅暴露已遮蔽的片段关联，不携带原始值或位置。 */
+function fx02MaskedSegments(
+  assetType: AssetRef['assetType'],
+  file: NativeFileRef,
+  revision: string,
+  source: string | undefined,
+): SensitiveSegmentRef[] {
+  if (
+    (assetType !== 'longTermInstruction' && assetType !== 'subagent') ||
+    !source?.includes('SYNTHETIC-SECRET')
+  ) {
+    return [];
+  }
+  return [
+    {
+      segmentId: `seg-${file.fileId}-masked`,
+      fileId: file.fileId,
+      revision,
+      displayState: 'masked',
+    },
+  ];
+}
+
 function toReadOnlyAssetRef(asset: AssetRef): ReadOnlyAssetRef {
   if (asset.assetType === 'hook') {
     throw new Error('Hook is outside the FE-01 locator surface');
@@ -223,8 +257,13 @@ export class ScriptedMockGateway implements FrontendGateway {
   private skillCellFailure: 'unknown' | 'blocked' | null = null;
   private unsupportedLocator = false;
   private failWorkbenchAfterLocator = false;
+  /** FX-02 只读 UI journey 的隔离三类型 fixture；不含 Hook。 */
+  private fe02ReadSurfaces = false;
   /** PF-01 perf-catalog scenario 的合成目录；null 时保持 FX-01 单资产语义 */
   private perfCatalog: PerfCatalog | null = null;
+  /** PF-02/PF-03 安全 bundle；只读采样 scenario，不读取真实文件系统。 */
+  private perfReadSurface: PfReadFixtureBundle | null = null;
+  private perfReadFixtureDigest: string | null = null;
 
   async read<Q extends Query>(query: Q): Promise<ReadResult<SnapshotFor<Q>>> {
     this.readCalls.push({ method: 'read', queryKind: query.kind, query });
@@ -238,6 +277,12 @@ export class ScriptedMockGateway implements FrontendGateway {
 
     if (this.perfCatalog !== null) {
       return this.readFromPerfCatalog(query) as ReadResult<SnapshotFor<Q>>;
+    }
+    if (this.perfReadSurface !== null) {
+      return this.readFromPerfReadSurface(query) as ReadResult<SnapshotFor<Q>>;
+    }
+    if (this.fe02ReadSurfaces) {
+      return this.readFromFx02(query) as ReadResult<SnapshotFor<Q>>;
     }
 
     switch (query.kind) {
@@ -410,6 +455,9 @@ export class ScriptedMockGateway implements FrontendGateway {
         });
         this.failNext('workbench', 'READ_FAILED');
         break;
+      case 'fx02-read-surfaces':
+        this.fe02ReadSurfaces = true;
+        break;
       default:
         break;
     }
@@ -431,6 +479,36 @@ export class ScriptedMockGateway implements FrontendGateway {
    */
   enablePerfCatalog(profile: PerfProfile): void {
     this.perfCatalog = buildPerfCatalog(profile);
+  }
+
+  /**
+   * 启用 PF-02/PF-03 L2 read-surface scenario。bundle 来自冻结的安全 builder；
+   * mock 只返还其 public masked snapshot，绝不持有或读取用户文件内容。
+   */
+  enablePerfReadSurface(pfId: 'PF-02' | 'PF-03', profile: PfReadProfile): void {
+    this.perfReadSurface =
+      pfId === 'PF-02' ? buildPf02SourceLargeFixture(profile) : buildPf03MultifileFixture(profile);
+    this.perfReadFixtureDigest = pfReadFixtureDigest(this.perfReadSurface);
+  }
+
+  /** 采样页仅可查询 public-safe bundle 元数据；不暴露原始内容或文件系统路径。 */
+  perfReadSurfaceMetadata(): {
+    descriptorId: 'PF-02' | 'PF-03';
+    profile: PfReadProfile;
+    fixtureDigest: string;
+    shape: Record<string, number | string>;
+    files: NativeFileRef[];
+  } | null {
+    const bundle = this.perfReadSurface;
+    return bundle === null || this.perfReadFixtureDigest === null
+      ? null
+      : {
+          descriptorId: bundle.descriptorId,
+          profile: bundle.profile,
+          fixtureDigest: this.perfReadFixtureDigest,
+          shape: bundle.shape,
+          files: bundle.files.map((snapshot) => snapshot.file),
+        };
   }
 
   /**
@@ -538,6 +616,425 @@ export class ScriptedMockGateway implements FrontendGateway {
         };
         return this.readSucceeded(snapshot);
       }
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // PF-02/PF-03 read-surface 读取路径（只在 enablePerfReadSurface 后可达）
+  // -------------------------------------------------------------------------
+
+  private readFromPerfReadSurface(
+    query: Query,
+  ): ReadResult<AssetDetailSnapshot | NativeFileSnapshot | WorkbenchActualReadSnapshot> {
+    const bundle = this.perfReadSurface;
+    if (bundle === null) return this.readFailed('READ_FAILED');
+    const asset = bundle.detail.detail.asset;
+    switch (query.kind) {
+      case 'workbench':
+        return query.assetType === 'skill'
+          ? this.readSucceeded({ ...bundle.workbench, query })
+          : this.readFailed('READ_FAILED');
+      case 'assetDetail':
+        return query.asset.assetId === asset.assetId
+          ? this.readSucceeded(bundle.detail)
+          : this.readFailed('READ_FAILED');
+      case 'nativeFile': {
+        if (query.asset.assetId !== asset.assetId) return this.readFailed('READ_FAILED');
+        const snapshot = bundle.files.find((candidate) => candidate.file.fileId === query.fileId);
+        return snapshot === undefined
+          ? this.readFailed('READ_FAILED')
+          : this.readSucceeded(snapshot);
+      }
+      case 'assetList':
+      case 'globalLocator':
+      case 'projectApplicability':
+        return this.readFailed('UNSUPPORTED_CAPABILITY');
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // FE-02 FX-02 浏览器 mock：仅合成 readonly snapshot，不读/执行用户内容。
+  // -------------------------------------------------------------------------
+
+  private fx02Records(): Array<{
+    summary: AssetSummary;
+    detail: AssetDetail;
+    inspector: InspectorData;
+    files: Array<{ file: NativeFileRef; source?: string }>;
+  }> {
+    const readonly = { kind: 'disabled' as const, reasonCode: 'READ_ONLY_POLICY' as const };
+    const file = (
+      fileId: string,
+      name: string,
+      relativePath: string,
+      fileKind: NativeFileRef['fileKind'],
+      isPrimary: boolean,
+    ): NativeFileRef => ({
+      fileId,
+      name,
+      relativePath,
+      fileKind,
+      isPrimary,
+      canPreview:
+        fileKind === 'text'
+          ? ({ kind: 'allowed' } as const)
+          : { kind: 'disabled' as const, reasonCode: 'NON_TEXT_UNPREVIEWABLE' as const },
+      canEdit: readonly,
+      hasDraftChanges: false,
+    });
+    const skillPrimary = file('file-fx02-skill-primary', 'SKILL.md', 'SKILL.md', 'text', true);
+    const skillUsage = file(
+      'file-fx02-skill-usage',
+      'usage.md',
+      'references/usage.md',
+      'text',
+      false,
+    );
+    const skillBinary = file(
+      'file-fx02-skill-opaque',
+      'opaque.bin',
+      'assets/opaque.bin',
+      'nonText',
+      false,
+    );
+    const instructionFile = file(
+      'file-fx02-instruction',
+      'release-notes.md',
+      'release-notes.md',
+      'text',
+      true,
+    );
+    const subagentFile = file('file-fx02-subagent', 'SUBAGENT.md', 'SUBAGENT.md', 'text', true);
+    const summary = (
+      assetId: string,
+      assetType: AssetSummary['asset']['assetType'],
+      nativeUnitRef: string,
+      displayName: string,
+      agents: AssetSummary['agents'],
+    ): AssetSummary => ({
+      asset: {
+        assetId,
+        assetType,
+        nativeUnitRef,
+        adapterIdentity: 'fixture-fx02@synthetic',
+        nativeOwnership: { kind: 'global' },
+      },
+      displayName,
+      anomalies: [
+        { kind: 'readOnly', reasonCode: 'READ_ONLY_POLICY', message: '只读合成 fixture' },
+      ],
+      agents,
+      scope: 'global',
+      contextHint: { kind: 'path', pathHint: 'FX-02/native-root' },
+      sourceTier: { id: 'source-fx02', label: 'FX-02 synthetic root' },
+      availability: readonly,
+    });
+    const inspector = (agents: AssetSummary['agents']): InspectorData => ({
+      agents,
+      scope: 'global',
+      effectiveContexts: agents.map((agent) => ({
+        agent,
+        scope: 'global',
+        sourceTierLabel: 'FX-02 synthetic root',
+        precedence: 0,
+      })),
+      sourceAnchor: { kind: 'globalRoot', label: 'FX-02 synthetic root' },
+      pathDisplay: 'FX-02/native-root',
+      compatibility: 'recognizedReadOnly',
+      overrides: [],
+    });
+    const skillSummary = summary(
+      'asset-fx02-multifile-skill-mixed',
+      'skill',
+      'nunit-fx02-multifile-skill-mixed',
+      'Multifile Skill',
+      ['claude-code'],
+    );
+    const instructionSummary = summary(
+      'asset-fx02-long-term-release-notes',
+      'longTermInstruction',
+      'nunit-fx02-long-term-release-notes',
+      'Release notes',
+      ['codex'],
+    );
+    const subagentSummary = summary(
+      'asset-fx02-subagent-researcher',
+      'subagent',
+      'nunit-fx02-subagent-researcher',
+      'Researcher',
+      ['codex'],
+    );
+    const context = (agents: AssetSummary['agents']): EffectiveContext[] =>
+      agents.map((agent) => ({
+        agent,
+        scope: 'global',
+        sourceTierLabel: 'FX-02 synthetic root',
+        precedence: 0,
+      }));
+    return [
+      {
+        summary: skillSummary,
+        detail: {
+          asset: skillSummary.asset,
+          displayName: skillSummary.displayName,
+          nativeUnitKind: 'multiFileDirectory',
+          revision: 'rev-fx02-skill',
+          compatibility: 'recognizedReadOnly',
+          capabilities: { edit: readonly, convert: readonly, export: readonly, delete: readonly },
+          effectiveContexts: context(skillSummary.agents),
+          primaryFile: skillPrimary,
+          fileTreeRoot: {
+            name: 'multifile-skill-mixed',
+            children: [
+              { name: 'SKILL.md', file: skillPrimary },
+              { name: 'assets', children: [{ name: 'opaque.bin', file: skillBinary }] },
+              { name: 'references', children: [{ name: 'usage.md', file: skillUsage }] },
+            ],
+          },
+          readSurface: {
+            kind: 'skill',
+            agentTargetStates: this.skillTargetStates(),
+            sourceReadAvailability: { kind: 'allowed' },
+            unknownContentReason: 'UNKNOWN_FIELD_PRESERVED',
+          },
+        },
+        inspector: inspector(skillSummary.agents),
+        files: [
+          { file: skillPrimary, source: fx02SkillRaw },
+          { file: skillUsage, source: fx02UsageRaw },
+          { file: skillBinary },
+        ],
+      },
+      {
+        summary: instructionSummary,
+        detail: {
+          asset: instructionSummary.asset,
+          displayName: instructionSummary.displayName,
+          nativeUnitKind: 'singleFile',
+          revision: 'rev-fx02-instruction',
+          compatibility: 'recognizedReadOnly',
+          capabilities: { edit: readonly, convert: readonly, export: readonly, delete: readonly },
+          effectiveContexts: context(instructionSummary.agents),
+          primaryFile: instructionFile,
+          readSurface: { kind: 'longTermInstruction', markdownFile: instructionFile },
+        },
+        inspector: inspector(instructionSummary.agents),
+        files: [{ file: instructionFile, source: fx02InstructionRaw }],
+      },
+      {
+        summary: subagentSummary,
+        detail: {
+          asset: subagentSummary.asset,
+          displayName: subagentSummary.displayName,
+          nativeUnitKind: 'configBlock',
+          revision: 'rev-fx02-subagent',
+          compatibility: 'recognizedReadOnly',
+          capabilities: { edit: readonly, convert: readonly, export: readonly, delete: readonly },
+          effectiveContexts: context(subagentSummary.agents),
+          primaryFile: subagentFile,
+          readSurface: {
+            kind: 'subagent',
+            model: 'synthetic-readonly-model',
+            tools: ['read'],
+            permissions: ['readonly'],
+            bodyFile: subagentFile,
+            readOnlyReason: 'UNKNOWN_FIELD_PRESERVED',
+          },
+        },
+        inspector: inspector(subagentSummary.agents),
+        files: [{ file: subagentFile, source: fx02SubagentRaw }],
+      },
+    ];
+  }
+
+  private readFromFx02(
+    query: Query,
+  ): ReadResult<
+    | AssetListSnapshot
+    | AssetDetailSnapshot
+    | NativeFileSnapshot
+    | WorkbenchActualReadSnapshot
+    | GlobalLocatorSnapshot
+  > {
+    const records = this.fx02Records();
+    switch (query.kind) {
+      case 'assetList': {
+        const assets = records
+          .filter(
+            (record) =>
+              query.scope.kind === 'allAssets' ||
+              record.summary.asset.assetType === query.scope.assetType,
+          )
+          .map((record) => record.summary);
+        return this.readSucceeded({
+          kind: 'assetList',
+          assets,
+          indexStatus: 'fresh',
+          scope: query.scope,
+          queriedAt: new Date().toISOString(),
+          indexUpdatedAt: new Date().toISOString(),
+        });
+      }
+      case 'workbench': {
+        let filters;
+        try {
+          filters = canonicalizeWorkbenchFilters(query.filters, query.viewContext);
+        } catch {
+          return this.readFailed('READ_FAILED');
+        }
+        const rows = records
+          .filter((record) => record.summary.asset.assetType === query.assetType)
+          .filter(
+            (record) =>
+              filters?.agents === undefined ||
+              filters.agents.some((agent) => record.summary.agents.includes(agent)),
+          )
+          .map((record, authoritativeInputOrder): ReadOnlyRow => ({
+            assetRef: toReadOnlyAssetRef(record.summary.asset),
+            assetId: record.summary.asset.assetId,
+            displayName: record.summary.displayName,
+            sortBaseName: record.summary.displayName,
+            authoritativeInputOrder,
+            nativeOwnership: { kind: 'global' },
+            agents: record.summary.agents,
+            sourceTierId: record.summary.sourceTier.id,
+            sourceTierLabel: record.summary.sourceTier.label,
+            redactedSummary: 'FX-02 结构化只读摘要',
+            ownershipHint: 'FX-02 synthetic root',
+            statuses: ['readOnly', 'normal'],
+            skillTargetStates:
+              query.assetType === 'skill'
+                ? record.detail.readSurface.kind === 'skill'
+                  ? record.detail.readSurface.agentTargetStates
+                  : []
+                : [],
+          }));
+        return this.readSucceeded({
+          kind: 'workbench',
+          query: { ...query, ...(filters === undefined ? {} : { filters }) },
+          authoritativeReadRevision: 'rev-fx02-workbench',
+          segments:
+            rows.length === 0
+              ? []
+              : [
+                  {
+                    id: `segment-fx02-${query.assetType}`,
+                    source: 'globalApplicable',
+                    displayLabel: 'Global',
+                    rows,
+                  },
+                ],
+          effectiveContexts: [],
+          findings: [],
+          aggregateTotal: rows.length,
+          indexStatus: 'fresh',
+          readAt: new Date().toISOString(),
+        });
+      }
+      case 'globalLocator': {
+        const groups = MVP_ASSET_TYPES.map((assetType) => {
+          const results = records
+            .filter((record) => record.summary.asset.assetType === assetType)
+            .map((record, authoritativeInputOrder) => ({
+              assetRef: toReadOnlyAssetRef(record.summary.asset),
+              assetId: record.summary.asset.assetId,
+              displayName: record.summary.displayName,
+              sortBaseName: record.summary.displayName,
+              authoritativeInputOrder,
+              nativeOwnership: { kind: 'global' as const },
+              agents: record.summary.agents,
+              sourceTierId: record.summary.sourceTier.id,
+              sourceTierLabel: record.summary.sourceTier.label,
+              redactedSummary: 'FX-02 结构化只读摘要',
+              ownershipHint: 'FX-02 synthetic root',
+              statuses: ['readOnly' as const, 'normal' as const],
+              skillTargetStates: [],
+              destinationViewContext: { kind: 'global' as const },
+              destination:
+                assetType === 'skill'
+                  ? {
+                      kind: 'skillDetail' as const,
+                      assetRef: toReadOnlyAssetRef(record.summary.asset),
+                    }
+                  : {
+                      kind: 'typeSpecificDetail' as const,
+                      assetRef: toReadOnlyAssetRef(record.summary.asset),
+                    },
+              matchedField: mockLocatorMatchedField(query.searchText, {
+                assetRef: toReadOnlyAssetRef(record.summary.asset),
+                assetId: record.summary.asset.assetId,
+                displayName: record.summary.displayName,
+                sortBaseName: record.summary.displayName,
+                authoritativeInputOrder,
+                nativeOwnership: { kind: 'global' },
+                agents: record.summary.agents,
+                redactedSummary: 'FX-02 结构化只读摘要',
+                ownershipHint: 'FX-02 synthetic root',
+              }),
+            }))
+            .filter(
+              (result) => result.matchedField !== null,
+            ) as GlobalLocatorSnapshot['groups'][number]['results'];
+          return { assetType, count: results.length, results };
+        });
+        return this.readSucceeded({
+          kind: 'globalLocator',
+          groups,
+          aggregateTotal: groups.reduce((total, group) => total + group.count, 0),
+          readAt: new Date().toISOString(),
+        });
+      }
+      case 'assetDetail': {
+        const record = records.find(
+          (candidate) => candidate.summary.asset.assetId === query.asset.assetId,
+        );
+        return record === undefined
+          ? this.readFailed('READ_FAILED')
+          : this.readSucceeded({
+              kind: 'assetDetail',
+              detail: record.detail,
+              inspector: record.inspector,
+              revision: record.detail.revision,
+            });
+      }
+      case 'nativeFile': {
+        const record = records.find(
+          (candidate) => candidate.summary.asset.assetId === query.asset.assetId,
+        );
+        const entry = record?.files.find((candidate) => candidate.file.fileId === query.fileId);
+        if (record === undefined || entry === undefined) return this.readFailed('READ_FAILED');
+        const revision = record.detail.revision;
+        const content =
+          entry.file.fileKind === 'text'
+            ? {
+                kind: 'source' as const,
+                maskedText: maskSyntheticSecrets(entry.source ?? ''),
+                sensitiveSegments: fx02MaskedSegments(
+                  record.summary.asset.assetType,
+                  entry.file,
+                  revision,
+                  entry.source,
+                ),
+              }
+            : {
+                kind: 'nonTextMetadata' as const,
+                fileKindLabel: 'binary',
+                sizeBytes: 26,
+                pathDisplay: entry.file.relativePath,
+                reasonCode: 'NON_TEXT_UNPREVIEWABLE' as const,
+                reason: '非文本文件仅提供元数据。',
+              };
+        return this.readSucceeded({
+          kind: 'nativeFile',
+          file: entry.file,
+          revision,
+          assetRevision: revision,
+          content,
+          structuredView: { kind: 'disabled', reasonCode: 'READ_ONLY_POLICY' },
+        });
+      }
+      case 'projectApplicability':
+        return this.readFailed('UNSUPPORTED_CAPABILITY');
     }
   }
 
@@ -1136,6 +1633,11 @@ export class ScriptedMockGateway implements FrontendGateway {
         precedence: context.precedence,
       })),
       primaryFile: this.primaryFileRef(),
+      readSurface: {
+        kind: 'skill',
+        agentTargetStates: this.skillTargetStates(),
+        sourceReadAvailability: { kind: 'allowed' },
+      },
     });
   }
 

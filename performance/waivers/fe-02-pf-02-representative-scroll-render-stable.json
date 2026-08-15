@@ -1,0 +1,89 @@
+{
+  "schemaVersion": 1,
+  "kind": "fe-02-pf-02-representative-scroll-render-stable-exact-performance-waiver",
+  "recordDigest": {
+    "algorithm": "sha256",
+    "canonicalization": "将本文件 recordDigest.value 置为空字符串后对文件原始字节求 sha256；由 FE-02 waiver validator 复算",
+    "value": "dd010238c4aa75a691060da60503a08ef9cf345bd4978ed55776c9ea75dd83f6"
+  },
+  "ticket": "FE-02",
+  "performance": "PF-02",
+  "profile": "representative",
+  "manualDisposition": "accepted-with-waiver",
+  "authorization": {
+    "scope": "仅此 FE-02 subject historical PF-02 representative 的 pf02.source.scroll.render_stable 自动 numeric latency fail；不改变 automatic fail/exit 1、预算、阈值、公式、样本数、collector、verifier 规则或历史 artifact，不泛化、不复用。",
+    "policy": "仅精确 numeric latency violation 可有显式人工 disposition；hard gate 不可 waive；不得称为 automatic PASS。"
+  },
+  "automaticResult": {
+    "status": "fail",
+    "exitCode": 1,
+    "runId": "20260815T060139784Z-p84684-000",
+    "run": ".artifacts/verification/FE-02/20260815T060139784Z-p84684-000/performance/PF-02/representative",
+    "commit": "7936cb91f54c94e836124b0d46337247776431d2",
+    "worktreeDirty": false,
+    "violation": {
+      "metric": "pf02.source.scroll.render_stable",
+      "statistic": "p50",
+      "observedMs": 12.95,
+      "thresholdMs": 3.9375,
+      "deltaMs": 9.0125
+    }
+  },
+  "budget": {
+    "path": "performance/budgets/pf-02.representative.budgets.json",
+    "sha256": "1bd6c4944fdb9de1cf360be2d08745791e3cf7f0e24f449c559b29a439bd4606"
+  },
+  "baseline": {
+    "runId": "20260814T153344617Z-p43084-000",
+    "run": ".artifacts/performance/PF-02/representative/20260814T153344617Z-p43084-000",
+    "commit": "9470f64e9b1edb4695092675fbfbd2043ac7b354",
+    "worktreeDirty": false
+  },
+  "measurementContract": {
+    "descriptorPath": "performance/descriptors/pf-02.source-large.json",
+    "descriptorDigest": "53df623aeb8538e1ad8e2821c287603241647de870dcd2c04c8816cb1beff86e",
+    "measurementInputs": {
+      "schemaVersion": 1,
+      "algorithm": "pf-read-measurement-contract-v1",
+      "digest": "a1b474199c61bf46c769d83f22c6b7953be7f1053db0c1cbf3ed108e9259de45",
+      "l2DevModuleGraphSha256": "0461ec1eb1f9e6ca4b0412cec23a56abd84d728238f50b2cdbd7f01ae5b7b2fa"
+    },
+    "fixture": {
+      "generator": "src/gateway/pf-read-fixtures.ts#buildPf02SourceLargeFixture",
+      "profile": "representative",
+      "sha256": "fc1100b4835e795128117099bc6c246497a26ef0d37bbbb941c3b87d41989e56"
+    },
+    "runner": {
+      "node": "v24.18.0",
+      "npm": "11.16.0",
+      "platform": "darwin",
+      "release": "25.6.0",
+      "macosProductVersion": "26.6.1",
+      "arch": "arm64"
+    },
+    "toolchain": {
+      "cargo": "cargo 1.97.1 (c980f4866 2026-06-30)",
+      "rustc": "rustc 1.97.1 (8bab26f4f 2026-07-14)"
+    }
+  },
+  "artifacts": {
+    "baseline": {
+      "samples.json": "4c69d018fc9b54e45ae7340b6716b8b1cdc352cf2e1d1d5f4a0730dd43e13aa4",
+      "summary.json": "373705bcb83f62ac8278521e69d1bc70804c6a70e87f14b97087f84e99c97e01",
+      "proposed-budgets.json": "10297e8e61e8d315ebc0f036593116e10df0c2b5b45ab1aa7261be9b5fd1b864"
+    },
+    "subject": {
+      "samples.json": "25123773cfe6dc4d24225e8c7c55ed00778adf1cad3b3d2b17b92c52b25b19ff",
+      "summary.json": "9323fa0edab6c98bdb49ff99cc6cdd2c6fd34dd5da22a10c3cb07f395db67137",
+      "fixture-attestation.json": "b588bcd36ab999e618acba98e86d36e2ba01c295d0d5ca3ebe9fbe04c7f2a76e",
+      "l2-dev-module-graph.json": "0461ec1eb1f9e6ca4b0412cec23a56abd84d728238f50b2cdbd7f01ae5b7b2fa",
+      "proposed-budgets.json": "26f646bc424005e9fc9a6c6fefabe31c5c5892af77b06a06b8440c48d79516be"
+    }
+  },
+  "performanceDebt": {
+    "status": "deferred",
+    "phase": "post-optimization",
+    "rootCause": "collector 以两个 requestAnimationFrame 间隔度量 render_stable，冻结 p50 ceiling（3.9375ms）与 headless Chrome 帧量化/宿主调度噪声同量级；同一 commit、全部测量输入零 diff 的三次测量呈双峰（快簇 1.9-6.7ms，慢簇 16-19.3ms）且在 representative/stress 间交替失败，baseline 自身 p95 已达 16.965ms；证据指向宿主调度/测量相位不稳定而非产品回归，未经受控诊断采样进一步证实。",
+    "scope": "仅 PF-02 representative 的 scroll.render_stable p50 9.0125ms 超出 frozen regression threshold；不掩盖 automatic fail。"
+  }
+}
