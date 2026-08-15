@@ -11,7 +11,14 @@ import {
   validateFe02Pf02SubjectWaiver,
 } from './fe02-pf02-subject-waiver.mjs';
 import {
+  FE02_PF02_STRESS_SUBJECT_WAIVER_PATH,
+  FE02_PF02_STRESS_SUBJECT_WAIVER_SHA256,
+  validateFe02Pf02StressSubjectWaiver,
+} from './fe02-pf02-stress-subject-waiver.mjs';
+import {
   FE02_PRODUCT_SUT_TREES,
+  FE02_SUBJECT_COMMIT,
+  FE02_SUBJECT_COMMITS,
   validateFe02SubjectClosureLineage,
 } from './fe02-subject-lineage.mjs';
 import { ticketConfig } from './ticket-registry.mjs';
@@ -40,6 +47,15 @@ const SUBJECT_VIOLATION = {
   thresholdMs: 3.9375,
   deltaMs: 9.0125,
 };
+const STRESS_SUBJECT_COMMIT = '222efc489f85a9efe9997f19badc350f23f50bb2';
+const STRESS_SUBJECT_RUN_ID = '20260815T094047023Z-p76378-000';
+const STRESS_SUBJECT_VIOLATION = {
+  metric: 'pf02.source.scroll.render_stable',
+  statistic: 'p50',
+  observedMs: 12.25,
+  thresholdMs: 8.5,
+  deltaMs: 3.75,
+};
 const REQUIRED_STEPS = [
   ['toolchain', 'pass', 0],
   ['static', 'pass', 0],
@@ -49,7 +65,7 @@ const REQUIRED_STEPS = [
   ['ui-fx02-read-surfaces', 'pass', 0],
   ['tauri-fx02-read', 'pass', 0],
   ['perf-pf02-representative', 'fail', 1],
-  ['perf-pf02-stress', 'pass', 0],
+  ['perf-pf02-stress', 'fail', 1],
   ['perf-pf03-representative', 'pass', 0],
   ['perf-pf03-stress', 'pass', 0],
 ];
@@ -58,6 +74,32 @@ const DESCRIPTOR_DIGEST = '53df623aeb8538e1ad8e2821c287603241647de870dcd2c04c881
 const MEASUREMENT_INPUT_DIGEST =
   'a1b474199c61bf46c769d83f22c6b7953be7f1053db0c1cbf3ed108e9259de45';
 const FIXTURE_SHA256 = 'fc1100b4835e795128117099bc6c246497a26ef0d37bbbb941c3b87d41989e56';
+const STRESS_FIXTURE_SHA256 = '91c8c9502f06b4f6162bc107b248bb2451b27b3ecfd7c9e3fe338ab3408395f3';
+/** 两份 waiver entry 的钉死投影常量（registry performances[] 顺序）。 */
+const WAIVER_ENTRY_SPECS = Object.freeze([
+  Object.freeze({
+    profile: 'representative',
+    stepId: 'perf-pf02-representative',
+    summaryRelativePath: 'performance/PF-02/representative/summary.json',
+    fixtureSha256: FIXTURE_SHA256,
+    waiverPath: FE02_PF02_SUBJECT_WAIVER_PATH,
+    waiverSha256: FE02_PF02_SUBJECT_WAIVER_SHA256,
+    runId: SUBJECT_RUN_ID,
+    commit: SUBJECT_COMMIT,
+    violation: SUBJECT_VIOLATION,
+  }),
+  Object.freeze({
+    profile: 'stress',
+    stepId: 'perf-pf02-stress',
+    summaryRelativePath: 'performance/PF-02/stress/summary.json',
+    fixtureSha256: STRESS_FIXTURE_SHA256,
+    waiverPath: FE02_PF02_STRESS_SUBJECT_WAIVER_PATH,
+    waiverSha256: FE02_PF02_STRESS_SUBJECT_WAIVER_SHA256,
+    runId: STRESS_SUBJECT_RUN_ID,
+    commit: STRESS_SUBJECT_COMMIT,
+    violation: STRESS_SUBJECT_VIOLATION,
+  }),
+]);
 const RUNNER = {
   node: 'v24.18.0',
   npm: '11.16.0',
@@ -115,7 +157,7 @@ const FE02_ACCEPTED_INDEX_KEYS = Object.freeze([
 const SUBJECT_WAIVER_BUDGET_STATE =
   'historical-subject-waiver-validation（immutable automatic fail/exit 1；未启动当前 PF sampling）';
 const MANUAL_DISPOSITION_SOURCE =
-  '用户授权的 exact FE-02 subject PF-02 representative disposition；immutable subject artifact raw samples 与 frozen budget 重算，非本次 perf sampling。';
+  '用户授权的 exact FE-02 subject PF-02 representative+stress disposition；immutable subject artifact raw samples 与 frozen budget 重算，非本次 perf sampling。';
 
 function sameJson(left, right) {
   return JSON.stringify(left) === JSON.stringify(right);
@@ -133,8 +175,8 @@ function exactKeys(value, keys) {
   return value !== null && typeof value === 'object' && !Array.isArray(value) && sameJson(Object.keys(value).sort(), [...keys].sort());
 }
 
-/** waiver entry 从 waiver validation 投影；automatic fail/exit 1 事实不被掩盖。 */
-function exactSubjectWaiverPerformanceResult(entry) {
+/** waiver entry 从各自的 waiver validation 投影；automatic fail/exit 1 事实不被掩盖。 */
+function exactSubjectWaiverPerformanceResult(spec, entry) {
   return (
     exactKeys(entry, [
       'pfId',
@@ -153,12 +195,12 @@ function exactSubjectWaiverPerformanceResult(entry) {
       'subjectWaiver',
     ]) &&
     entry.pfId === 'PF-02' &&
-    entry.profile === 'representative' &&
-    sameJson(entry.step, { id: 'perf-pf02-representative', exitCode: 1, status: 'fail' }) &&
+    entry.profile === spec.profile &&
+    sameJson(entry.step, { id: spec.stepId, exitCode: 1, status: 'fail' }) &&
     sameJson(entry.descriptor, { path: DESCRIPTOR_PATH, digest: DESCRIPTOR_DIGEST }) &&
-    entry.fixtureDigest === FIXTURE_SHA256 &&
+    entry.fixtureDigest === spec.fixtureSha256 &&
     sameJson(entry.metrics, []) &&
-    entry.summaryRelativePath === 'performance/PF-02/representative/summary.json' &&
+    entry.summaryRelativePath === spec.summaryRelativePath &&
     entry.budgetState === SUBJECT_WAIVER_BUDGET_STATE &&
     sameJson(entry.validation, { valid: true }) &&
     sameJson(entry.budgetValidation, {
@@ -169,16 +211,16 @@ function exactSubjectWaiverPerformanceResult(entry) {
     sameJson(entry.toolchain, TOOLCHAIN) &&
     entry.measurementInputDigest === MEASUREMENT_INPUT_DIGEST &&
     sameJson(entry.subjectWaiver, {
-      waiverPath: FE02_PF02_SUBJECT_WAIVER_PATH,
-      waiverSha256: FE02_PF02_SUBJECT_WAIVER_SHA256,
-      runId: SUBJECT_RUN_ID,
-      commit: SUBJECT_COMMIT,
-      violation: SUBJECT_VIOLATION,
+      waiverPath: spec.waiverPath,
+      waiverSha256: spec.waiverSha256,
+      runId: spec.runId,
+      commit: spec.commit,
+      violation: spec.violation,
     })
   );
 }
 
-/** 其余三个 entry 是本次 run 的正常采样投影；只做结构性通过校验，不绑定具体数值。 */
+/** 其余两个 PF-03 entry 是本次 run 的正常采样投影；只做结构性通过校验，不绑定具体数值。 */
 function exactSampledPerformanceResult(entry) {
   return (
     exactKeys(entry, [
@@ -196,9 +238,8 @@ function exactSampledPerformanceResult(entry) {
       'toolchain',
       'measurementInputDigest',
     ]) &&
-    (entry.pfId === 'PF-02' || entry.pfId === 'PF-03') &&
+    entry.pfId === 'PF-03' &&
     (entry.profile === 'representative' || entry.profile === 'stress') &&
-    !(entry.pfId === 'PF-02' && entry.profile === 'representative') &&
     exactKeys(entry.step, ['id', 'exitCode', 'status']) &&
     entry.step.id === `perf-${entry.pfId.toLowerCase().replace('-', '')}-${entry.profile}` &&
     entry.step.exitCode === 0 &&
@@ -219,20 +260,25 @@ function exactSampledPerformanceResult(entry) {
 
 function exactPerformanceResults(value) {
   if (!Array.isArray(value) || value.length !== 4) return false;
-  const waiverEntries = value.filter(
-    (entry) => entry?.pfId === 'PF-02' && entry?.profile === 'representative',
+  const waiverEntries = WAIVER_ENTRY_SPECS.map((spec) =>
+    value.filter((entry) => entry?.pfId === 'PF-02' && entry?.profile === spec.profile),
   );
   return (
-    waiverEntries.length === 1 &&
-    exactSubjectWaiverPerformanceResult(waiverEntries[0]) &&
-    value.filter((entry) => entry !== waiverEntries[0]).every(exactSampledPerformanceResult)
+    waiverEntries.every((matches) => matches.length === 1) &&
+    WAIVER_ENTRY_SPECS.every((spec, index) =>
+      exactSubjectWaiverPerformanceResult(spec, waiverEntries[index][0]),
+    ) &&
+    value
+      .filter((entry) => !waiverEntries.some((matches) => matches[0] === entry))
+      .every(exactSampledPerformanceResult)
   );
 }
 
 function exactSubjectLineage(lineage, finalCommit) {
   return (
     lineage?.valid === true &&
-    lineage.subjectCommit === SUBJECT_COMMIT &&
+    lineage.subjectCommit === FE02_SUBJECT_COMMIT &&
+    sameJson(lineage.subjectCommits, [...FE02_SUBJECT_COMMITS]) &&
     lineage.finalCommit === finalCommit &&
     exactKeys(lineage.trees, FE02_PRODUCT_SUT_TREES) &&
     FE02_PRODUCT_SUT_TREES.every(
@@ -244,7 +290,7 @@ function exactSubjectLineage(lineage, finalCommit) {
 }
 
 function exactStep(step) {
-  const hasHistoricalExecution = step?.id === 'perf-pf02-representative';
+  const hasHistoricalExecution = WAIVER_ENTRY_SPECS.some((spec) => spec.stepId === step?.id);
   const keys = [
     'id',
     'layer',
@@ -314,24 +360,26 @@ function exactClosureSteps(steps) {
   );
 }
 
-function exactHistoricalPerfStep(steps) {
-  const perf = steps?.find((step) => step?.id === 'perf-pf02-representative');
-  return (
-    exactKeys(perf?.execution, [
-      'mode',
-      'samplingRun',
-      'historicalRunId',
-      'initialWaiverValidation',
-      'finalWaiverValidation',
-      'bindingStable',
-    ]) &&
-    perf?.execution?.mode === 'historical-subject-waiver-validation' &&
-    perf.execution.samplingRun === false &&
-    perf.execution.historicalRunId === SUBJECT_RUN_ID &&
-    perf.execution.initialWaiverValidation === 'valid' &&
-    perf.execution.finalWaiverValidation === 'valid' &&
-    perf.execution.bindingStable === true
-  );
+function exactHistoricalPerfSteps(steps) {
+  return WAIVER_ENTRY_SPECS.every((spec) => {
+    const perf = steps?.find((step) => step?.id === spec.stepId);
+    return (
+      exactKeys(perf?.execution, [
+        'mode',
+        'samplingRun',
+        'historicalRunId',
+        'initialWaiverValidation',
+        'finalWaiverValidation',
+        'bindingStable',
+      ]) &&
+      perf?.execution?.mode === 'historical-subject-waiver-validation' &&
+      perf.execution.samplingRun === false &&
+      perf.execution.historicalRunId === spec.runId &&
+      perf.execution.initialWaiverValidation === 'valid' &&
+      perf.execution.finalWaiverValidation === 'valid' &&
+      perf.execution.bindingStable === true
+    );
+  });
 }
 
 function exactRunIdentity(value, commit) {
@@ -559,44 +607,96 @@ function exactManifest(manifest) {
   return (
     exactAcceptedManifestSchema(manifest) &&
     manifest?.status === 'accepted-with-waiver' &&
-    manifest?.manualDisposition?.status === 'accepted-with-waiver' &&
-    manifest?.manualDisposition?.waiverValidation === 'valid' &&
-    manifest?.manualDisposition?.initialWaiverValidation === 'valid' &&
-    manifest?.manualDisposition?.finalWaiverValidation === 'valid' &&
-    manifest?.manualDisposition?.bindingStable === true &&
-    manifest?.manualDisposition?.waiverPath === FE02_PF02_SUBJECT_WAIVER_PATH &&
-    manifest?.manualDisposition?.waiverSha256 === FE02_PF02_SUBJECT_WAIVER_SHA256 &&
-    manifest?.pfAutomaticResult?.status === 'fail' &&
-    manifest?.pfAutomaticResult?.exitCode === 1 &&
-    manifest?.pfAutomaticResult?.runId === SUBJECT_RUN_ID &&
-    manifest?.pfAutomaticResult?.run ===
-      '.artifacts/verification/FE-02/20260815T060139784Z-p84684-000/performance/PF-02/representative' &&
-    manifest?.pfAutomaticResult?.commit === SUBJECT_COMMIT &&
-    manifest?.pfAutomaticResult?.worktreeDirty === false &&
-    sameJson(manifest?.pfAutomaticResult?.violation, SUBJECT_VIOLATION) &&
-    manifest?.performanceDebt?.status === 'deferred' &&
-    manifest?.performanceDebt?.phase === 'post-optimization' &&
-    typeof manifest?.performanceDebt?.rootCause === 'string' &&
+    exactKeys(manifest?.manualDisposition, [
+      'status',
+      'waiverValidation',
+      'initialWaiverValidation',
+      'finalWaiverValidation',
+      'bindingStable',
+      'waivers',
+      'source',
+    ]) &&
+    manifest.manualDisposition.status === 'accepted-with-waiver' &&
+    manifest.manualDisposition.waiverValidation === 'valid' &&
+    manifest.manualDisposition.initialWaiverValidation === 'valid' &&
+    manifest.manualDisposition.finalWaiverValidation === 'valid' &&
+    manifest.manualDisposition.bindingStable === true &&
+    Array.isArray(manifest.manualDisposition.waivers) &&
+    manifest.manualDisposition.waivers.length === WAIVER_ENTRY_SPECS.length &&
+    WAIVER_ENTRY_SPECS.every((spec, index) => {
+      const entry = manifest.manualDisposition.waivers[index];
+      return (
+        exactKeys(entry, [
+          'stepId',
+          'initialWaiverValidation',
+          'finalWaiverValidation',
+          'bindingStable',
+          'waiverPath',
+          'waiverSha256',
+        ]) &&
+        entry.stepId === spec.stepId &&
+        entry.initialWaiverValidation === 'valid' &&
+        entry.finalWaiverValidation === 'valid' &&
+        entry.bindingStable === true &&
+        entry.waiverPath === spec.waiverPath &&
+        entry.waiverSha256 === spec.waiverSha256
+      );
+    }) &&
+    Array.isArray(manifest?.pfAutomaticResult) &&
+    manifest.pfAutomaticResult.length === WAIVER_ENTRY_SPECS.length &&
+    WAIVER_ENTRY_SPECS.every((spec, index) => {
+      const result = manifest.pfAutomaticResult[index];
+      return (
+        result?.status === 'fail' &&
+        result?.exitCode === 1 &&
+        result?.runId === spec.runId &&
+        result?.run ===
+          `.artifacts/verification/FE-02/${spec.runId}/performance/PF-02/${spec.profile}` &&
+        result?.commit === spec.commit &&
+        result?.worktreeDirty === false &&
+        sameJson(result?.violation, spec.violation)
+      );
+    }) &&
+    Array.isArray(manifest?.performanceDebt) &&
+    manifest.performanceDebt.length === WAIVER_ENTRY_SPECS.length &&
+    manifest.performanceDebt.every(
+      (debt) =>
+        debt?.status === 'deferred' &&
+        debt?.phase === 'post-optimization' &&
+        typeof debt?.rootCause === 'string',
+    ) &&
     exactSubjectLineage(manifest?.subjectLineage, manifest.commit)
   );
 }
 
-function exactRecomputedBinding({ manifest, waiver, lineage }) {
+function exactRecomputedBinding({ manifest, waivers, lineage }) {
   return (
-    waiver?.valid === true &&
+    waivers.every((waiver) => waiver?.valid === true) &&
     lineage?.valid === true &&
     sameJson(manifest.manualDisposition, {
-      status: waiver.manualDisposition,
+      status: 'accepted-with-waiver',
       waiverValidation: 'valid',
       initialWaiverValidation: 'valid',
       finalWaiverValidation: 'valid',
       bindingStable: true,
-      waiverPath: waiver.waiverPath,
-      waiverSha256: waiver.waiverSha256,
+      waivers: WAIVER_ENTRY_SPECS.map((spec, index) => ({
+        stepId: spec.stepId,
+        initialWaiverValidation: 'valid',
+        finalWaiverValidation: 'valid',
+        bindingStable: true,
+        waiverPath: waivers[index].waiverPath,
+        waiverSha256: waivers[index].waiverSha256,
+      })),
       source: MANUAL_DISPOSITION_SOURCE,
     }) &&
-    sameJson(manifest.pfAutomaticResult, waiver.automaticResult) &&
-    sameJson(manifest.performanceDebt, waiver.performanceDebt) &&
+    sameJson(
+      manifest.pfAutomaticResult,
+      waivers.map((waiver) => waiver.automaticResult),
+    ) &&
+    sameJson(
+      manifest.performanceDebt,
+      waivers.map((waiver) => waiver.performanceDebt),
+    ) &&
     sameJson(manifest.subjectLineage, lineage)
   );
 }
@@ -719,14 +819,17 @@ function validateAcceptedWithWaiverCandidate({ root, evidenceRoot, ticketId, man
     !validCompletedAt(manifest.completedAt) ||
     !validProvenance(manifest.steps) ||
     !exactClosureSteps(manifest.steps) ||
-    !exactHistoricalPerfStep(manifest.steps) ||
+    !exactHistoricalPerfSteps(manifest.steps) ||
     !exactManifest(manifest)
   ) {
     return rejected('manifest-schema-or-step-identity-invalid');
   }
-  const waiver = validateFe02Pf02SubjectWaiver({ repoRoot: root });
+  const waivers = [
+    validateFe02Pf02SubjectWaiver({ repoRoot: root }),
+    validateFe02Pf02StressSubjectWaiver({ repoRoot: root }),
+  ];
   const lineage = validateFe02SubjectClosureLineage({ repoRoot: root, finalCommit: manifest.commit });
-  if (!exactRecomputedBinding({ manifest, waiver, lineage })) {
+  if (!exactRecomputedBinding({ manifest, waivers, lineage })) {
     return rejected('immutable-waiver-or-lineage-binding-invalid');
   }
   const expectedEvidence = path.join(root, '.artifacts', 'verification', ticketId, manifest.runId);

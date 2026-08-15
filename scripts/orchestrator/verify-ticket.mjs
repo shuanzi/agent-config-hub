@@ -67,14 +67,16 @@ import {
   validateFe01Pf01SubjectWaiver,
 } from './fe01-pf01-subject-waiver.mjs';
 import { validateFe02Pf02SubjectWaiver } from './fe02-pf02-subject-waiver.mjs';
+import { validateFe02Pf02StressSubjectWaiver } from './fe02-pf02-stress-subject-waiver.mjs';
 import {
   automaticPassPf01BudgetState,
   createAbortSignalTracker,
   deriveStepRuntimeAdvisory,
   executeTicketStep,
   finalizeAutomaticPassValidation,
-  finalizeFe02SubjectWaiverValidation,
+  finalizeFe02SubjectWaiverValidations,
   finalizeSubjectWaiverValidation,
+  FE02_SUBJECT_WAIVER_STEP_IDS,
   hasExactAutomaticPassConfiguration,
   hasExactSubjectWaiverConfiguration,
   isAutomaticPassPerfStep,
@@ -220,11 +222,19 @@ async function main() {
   const startAt = new Date().toISOString();
   const startingGit = await gitInfo();
   const subjectWaiverPathExact = hasExactSubjectWaiverConfiguration({ ticketId, ticket });
-  const initialSubjectWaiverValidation = subjectWaiverPathExact
-    ? ticketId === 'FE-02'
-      ? validateFe02Pf02SubjectWaiver({})
-      : validateFe01Pf01SubjectWaiver({ recordPath: FE01_PF01_SUBJECT_WAIVER_PATH })
-    : undefined;
+  // FE-02：两份 waiver（representative/stress）各自独立做 initial exact validation，
+  // 按 stepId 分发；FE-01 保持单值。
+  const initialFe02SubjectWaiverValidations =
+    subjectWaiverPathExact && ticketId === 'FE-02'
+      ? {
+          'perf-pf02-representative': validateFe02Pf02SubjectWaiver({}),
+          'perf-pf02-stress': validateFe02Pf02StressSubjectWaiver({}),
+        }
+      : undefined;
+  const initialSubjectWaiverValidation =
+    subjectWaiverPathExact && ticketId !== 'FE-02'
+      ? validateFe01Pf01SubjectWaiver({ recordPath: FE01_PF01_SUBJECT_WAIVER_PATH })
+      : undefined;
   const automaticPassPathExact = hasExactAutomaticPassConfiguration({ ticketId, ticket });
   const initialAutomaticPassValidation = automaticPassPathExact
     ? await validateFe01Pf01AutomaticPass({
@@ -236,6 +246,7 @@ async function main() {
     ticket,
     automaticPassValidation: initialAutomaticPassValidation,
     subjectWaiverValidation: initialSubjectWaiverValidation,
+    subjectWaiverValidations: initialFe02SubjectWaiverValidations,
   });
   const runId = makeRunId();
   const evidenceRoot = path.join(ARTIFACTS_ROOT, 'verification', ticketId, runId);
@@ -359,9 +370,12 @@ async function main() {
     : undefined;
   const subjectWaiverCompletion = historicalSubjectWaiverValidation
     ? ticketId === 'FE-02'
-      ? await finalizeFe02SubjectWaiverValidation({
-          initialSubjectWaiverValidation,
-          validateSubjectWaiver: () => validateFe02Pf02SubjectWaiver({}),
+      ? await finalizeFe02SubjectWaiverValidations({
+          initialSubjectWaiverValidations: initialFe02SubjectWaiverValidations,
+          validateSubjectWaivers: {
+            'perf-pf02-representative': () => validateFe02Pf02SubjectWaiver({}),
+            'perf-pf02-stress': () => validateFe02Pf02StressSubjectWaiver({}),
+          },
         })
       : await finalizeSubjectWaiverValidation({
           initialSubjectWaiverValidation,
@@ -382,7 +396,15 @@ async function main() {
         stepResults,
         evidenceRoot,
         expectedCommit: startingGit.commit,
-        subjectWaiverValidation: subjectWaiverCompletion?.finalSubjectWaiverValidation,
+        subjectWaiverValidations:
+          ticketId === 'FE-02'
+            ? Object.fromEntries(
+                FE02_SUBJECT_WAIVER_STEP_IDS.map((stepId) => [
+                  stepId,
+                  subjectWaiverCompletion?.perStep?.[stepId]?.finalSubjectWaiverValidation,
+                ]),
+              )
+            : undefined,
       });
     } else {
       for (const file of fs.readdirSync(performanceDir)) {
@@ -404,21 +426,25 @@ async function main() {
     writeJson(path.join(evidenceRoot, 'steps', 'perf', 'meta.json'), perfMeta);
   }
   // historical subject-waiver step 按 execution mode 定位（FE-01 为 perf，FE-02 为
-  // perf-pf02-representative），起止 binding 结果回写其 meta。
-  const subjectWaiverStepResult = stepResults.find(
+  // perf-pf02-representative 与 perf-pf02-stress），各自起止 binding 结果回写其 meta。
+  for (const subjectWaiverStepResult of stepResults.filter(
     (step) => step.execution?.mode === SUBJECT_WAIVER_EXECUTION_MODE,
-  );
-  if (subjectWaiverStepResult !== undefined && subjectWaiverCompletion !== undefined) {
+  )) {
+    if (subjectWaiverCompletion === undefined) continue;
+    const perStep = subjectWaiverCompletion.perStep?.[subjectWaiverStepResult.id];
     subjectWaiverStepResult.execution.finalWaiverValidation =
-      subjectWaiverCompletion.finalSubjectWaiverValidationStatus;
-    subjectWaiverStepResult.execution.bindingStable = subjectWaiverCompletion.bindingStable;
+      ticketId === 'FE-02'
+        ? perStep?.finalSubjectWaiverValidationStatus
+        : subjectWaiverCompletion.finalSubjectWaiverValidationStatus;
+    subjectWaiverStepResult.execution.bindingStable =
+      ticketId === 'FE-02' ? perStep?.bindingStable : subjectWaiverCompletion.bindingStable;
     const { logs: _logs, ...perfMeta } = subjectWaiverStepResult;
     writeJson(path.join(evidenceRoot, 'steps', subjectWaiverStepResult.id, 'meta.json'), perfMeta);
   }
   const budget =
     ticket.performance === undefined
       ? ticketId === 'FE-02' && historicalSubjectWaiverValidation
-        ? subjectWaiverPf02BudgetState({ subjectWaiverCompletion })
+        ? subjectWaiverPf02BudgetState({ subjectWaiverCompletions: subjectWaiverCompletion })
         : null
       : historicalSubjectWaiverValidation
         ? subjectWaiverPf01BudgetState({ subjectWaiverCompletion })
@@ -449,8 +475,13 @@ async function main() {
           budgetStatus: budget?.status,
           evidenceContaminated,
           worktreeDirty: git.worktreeDirty,
-          initialWaiverValidation: initialSubjectWaiverValidation,
-          finalWaiverValidation: subjectWaiverCompletion?.finalSubjectWaiverValidation,
+          initialWaiverValidations: initialFe02SubjectWaiverValidations,
+          finalWaiverValidations: Object.fromEntries(
+            FE02_SUBJECT_WAIVER_STEP_IDS.map((stepId) => [
+              stepId,
+              subjectWaiverCompletion?.perStep?.[stepId]?.finalSubjectWaiverValidation,
+            ]),
+          ),
           subjectLineage,
         })
       : deriveFe01SubjectWaiverClosureStatus({
@@ -558,25 +589,68 @@ async function main() {
   }
   if (historicalSubjectWaiverValidation && subjectWaiverCompletion !== undefined) {
     manifest.subjectLineage = subjectLineage;
-    manifest.manualDisposition = {
-      status: 'accepted-with-waiver',
-      waiverValidation: initialSubjectWaiverValidation?.valid === true ? 'valid' : 'invalid',
-      initialWaiverValidation: initialSubjectWaiverValidation?.valid === true ? 'valid' : 'invalid',
-      finalWaiverValidation: subjectWaiverCompletion.finalSubjectWaiverValidationStatus,
-      bindingStable: subjectWaiverCompletion.bindingStable,
-      ...(subjectWaiverCompletion.finalSubjectWaiverValidation?.waiverPath === undefined
-        ? {}
-        : {
-            waiverPath: subjectWaiverCompletion.finalSubjectWaiverValidation.waiverPath,
-            waiverSha256: subjectWaiverCompletion.finalSubjectWaiverValidation.waiverSha256,
-          }),
-      source:
-        ticketId === 'FE-02'
-          ? '用户授权的 exact FE-02 subject PF-02 representative disposition；immutable subject artifact raw samples 与 frozen budget 重算，非本次 perf sampling。'
-          : '用户授权的 exact FE-01 subject PF-01 disposition；immutable subject artifact raw samples 与 frozen budget 重算，非本次 perf sampling。',
-    };
-    manifest.pfAutomaticResult = budget?.automaticResult;
-    manifest.performanceDebt = budget?.performanceDebt;
+    if (ticketId === 'FE-02') {
+      // FE-02 两份 waiver：保留聚合字段，并以按 stepId 有序的 waivers 数组承载各自事实。
+      const waiverEntries = FE02_SUBJECT_WAIVER_STEP_IDS.map((stepId) => {
+        const perStep = subjectWaiverCompletion.perStep?.[stepId];
+        const finalValidation = perStep?.finalSubjectWaiverValidation;
+        return {
+          stepId,
+          initialWaiverValidation:
+            initialFe02SubjectWaiverValidations?.[stepId]?.valid === true ? 'valid' : 'invalid',
+          finalWaiverValidation: perStep?.finalSubjectWaiverValidationStatus ?? 'invalid',
+          bindingStable: perStep?.bindingStable === true,
+          ...(finalValidation?.waiverPath === undefined
+            ? {}
+            : {
+                waiverPath: finalValidation.waiverPath,
+                waiverSha256: finalValidation.waiverSha256,
+              }),
+        };
+      });
+      manifest.manualDisposition = {
+        status: 'accepted-with-waiver',
+        waiverValidation: waiverEntries.every(
+          (entry) => entry.initialWaiverValidation === 'valid',
+        )
+          ? 'valid'
+          : 'invalid',
+        initialWaiverValidation: waiverEntries.every(
+          (entry) => entry.initialWaiverValidation === 'valid',
+        )
+          ? 'valid'
+          : 'invalid',
+        finalWaiverValidation: waiverEntries.every(
+          (entry) => entry.finalWaiverValidation === 'valid',
+        )
+          ? 'valid'
+          : 'invalid',
+        bindingStable: waiverEntries.every((entry) => entry.bindingStable),
+        waivers: waiverEntries,
+        source:
+          '用户授权的 exact FE-02 subject PF-02 representative+stress disposition；immutable subject artifact raw samples 与 frozen budget 重算，非本次 perf sampling。',
+      };
+      manifest.pfAutomaticResult = budget?.automaticResults;
+      manifest.performanceDebt = budget?.performanceDebts;
+    } else {
+      manifest.manualDisposition = {
+        status: 'accepted-with-waiver',
+        waiverValidation: initialSubjectWaiverValidation?.valid === true ? 'valid' : 'invalid',
+        initialWaiverValidation: initialSubjectWaiverValidation?.valid === true ? 'valid' : 'invalid',
+        finalWaiverValidation: subjectWaiverCompletion.finalSubjectWaiverValidationStatus,
+        bindingStable: subjectWaiverCompletion.bindingStable,
+        ...(subjectWaiverCompletion.finalSubjectWaiverValidation?.waiverPath === undefined
+          ? {}
+          : {
+              waiverPath: subjectWaiverCompletion.finalSubjectWaiverValidation.waiverPath,
+              waiverSha256: subjectWaiverCompletion.finalSubjectWaiverValidation.waiverSha256,
+            }),
+        source:
+          '用户授权的 exact FE-01 subject PF-01 disposition；immutable subject artifact raw samples 与 frozen budget 重算，非本次 perf sampling。',
+      };
+      manifest.pfAutomaticResult = budget?.automaticResult;
+      manifest.performanceDebt = budget?.performanceDebt;
+    }
     if (overallStatus === 'accepted-with-waiver') {
       manifest.physicalValidation =
         ticketId === 'FE-02' ? FE02_SUBJECT_PHYSICAL_CANDIDATE : FE01_SUBJECT_PHYSICAL_CANDIDATE;

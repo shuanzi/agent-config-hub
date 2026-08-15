@@ -28,6 +28,9 @@ import { TICKET_REGISTRY } from '../../scripts/orchestrator/ticket-registry.mjs'
 // prettier-ignore
 // @ts-expect-error runtime subject waiver validator is a plain Node ESM module.
 import { validateFe02Pf02SubjectWaiver } from '../../scripts/orchestrator/fe02-pf02-subject-waiver.mjs';
+// prettier-ignore
+// @ts-expect-error runtime subject waiver validator is a plain Node ESM module.
+import { validateFe02Pf02StressSubjectWaiver } from '../../scripts/orchestrator/fe02-pf02-stress-subject-waiver.mjs';
 
 // 常规采样路径的 lifecycle 用例必须剥离 registry 上的 subjectWaiverPath 绑定；
 // waiver 分支行为由文件末尾的独立 describe 覆盖。
@@ -726,33 +729,59 @@ describe('verify:ticket multi-PF manifest projection', () => {
 
 describe('verify:ticket subject waiver entry projection', () => {
   const WAIVER_PATH = 'performance/waivers/fe-02-pf-02-representative-scroll-render-stable.json';
+  const STRESS_WAIVER_PATH = 'performance/waivers/fe-02-pf-02-stress-scroll-render-stable.json';
 
   function waiverPerformances() {
     return (TICKET_REGISTRY['FE-02'].performances as PerformanceConfig[]).map((performance) => ({
       ...performance,
-      // 三个正常采样 entry 与已冻结真实 budget 隔离；waiver entry 不读取本次 budget/evidence。
+      // 两个正常采样 entry 与已冻结真实 budget 隔离；waiver entry 不读取本次 budget/evidence。
       budgetPath: `performance/budgets/test-no-budget-${performance.descriptorId.toLowerCase()}-${performance.profile}.json`,
     }));
   }
 
-  function historicalStep() {
+  function historicalSteps() {
     return {
-      id: 'perf-pf02-representative',
-      exitCode: 1,
-      status: 'fail',
-      execution: {
-        mode: 'historical-subject-waiver-validation',
-        samplingRun: false,
-        historicalRunId: '20260815T060139784Z-p84684-000',
-        initialWaiverValidation: 'valid',
+      'perf-pf02-representative': {
+        id: 'perf-pf02-representative',
+        exitCode: 1,
+        status: 'fail',
+        execution: {
+          mode: 'historical-subject-waiver-validation',
+          samplingRun: false,
+          historicalRunId: '20260815T060139784Z-p84684-000',
+          initialWaiverValidation: 'valid',
+        },
+      },
+      'perf-pf02-stress': {
+        id: 'perf-pf02-stress',
+        exitCode: 1,
+        status: 'fail',
+        execution: {
+          mode: 'historical-subject-waiver-validation',
+          samplingRun: false,
+          historicalRunId: '20260815T094047023Z-p76378-000',
+          initialWaiverValidation: 'valid',
+        },
       },
     };
   }
 
+  function waiverValidations() {
+    return {
+      'perf-pf02-representative': validateFe02Pf02SubjectWaiver(),
+      'perf-pf02-stress': validateFe02Pf02StressSubjectWaiver(),
+    };
+  }
+
   function waiverSteps(performances: Array<Record<string, unknown>>) {
+    const historical = historicalSteps();
     return performances.map((config) =>
-      (config as { subjectWaiverPath?: string }).subjectWaiverPath === WAIVER_PATH
-        ? historicalStep()
+      (config as { subjectWaiverPath?: string }).subjectWaiverPath !== undefined
+        ? historical[
+            `perf-${(config.descriptorId as string).toLowerCase().replace('-', '')}-${config.profile}` as keyof ReturnType<
+              typeof historicalSteps
+            >
+          ]
         : {
             id: `perf-${(config.descriptorId as string).toLowerCase().replace('-', '')}-${config.profile}`,
             exitCode: 2,
@@ -761,9 +790,10 @@ describe('verify:ticket subject waiver entry projection', () => {
     );
   }
 
-  it('waiver entry 从 exact validation 投影：automatic fail/1 保留、不计 incomplete、其余 entry 正常评估', () => {
-    const validation = validateFe02Pf02SubjectWaiver();
-    expect(validation.valid).toBe(true);
+  it('两个 waiver entry 从各自 exact validation 投影：automatic fail/1 保留、不计 incomplete、其余 entry 正常评估', () => {
+    const validations = waiverValidations();
+    expect(validations['perf-pf02-representative'].valid).toBe(true);
+    expect(validations['perf-pf02-stress'].valid).toBe(true);
     const evidenceRoot = mkdtempSync(join(tmpdir(), 'acm-pf-read-manifest-waiver-'));
     const performances = waiverPerformances();
     try {
@@ -777,13 +807,14 @@ describe('verify:ticket subject waiver entry projection', () => {
         stepResults: waiverSteps(performances),
         evidenceRoot,
         expectedCommit: 'a'.repeat(40),
-        subjectWaiverValidation: validation,
+        subjectWaiverValidations: validations,
       });
 
       expect(collected).toMatchObject({ incomplete: false, contaminationNotes: [] });
       expect(collected.performanceResults).toHaveLength(4);
       // waiver entry 不要求本次 run 的 evidence 目录存在。
       expect(existsSync(join(evidenceRoot, 'performance/PF-02/representative'))).toBe(false);
+      expect(existsSync(join(evidenceRoot, 'performance/PF-02/stress'))).toBe(false);
       expect(collected.performanceResults[0]).toMatchObject({
         pfId: 'PF-02',
         profile: 'representative',
@@ -813,7 +844,36 @@ describe('verify:ticket subject waiver entry projection', () => {
           },
         },
       });
-      for (const result of collected.performanceResults.slice(1)) {
+      expect(collected.performanceResults[1]).toMatchObject({
+        pfId: 'PF-02',
+        profile: 'stress',
+        step: { id: 'perf-pf02-stress', exitCode: 1, status: 'fail' },
+        descriptor: {
+          path: 'performance/descriptors/pf-02.source-large.json',
+          digest: '53df623aeb8538e1ad8e2821c287603241647de870dcd2c04c8816cb1beff86e',
+        },
+        fixtureDigest: '91c8c9502f06b4f6162bc107b248bb2451b27b3ecfd7c9e3fe338ab3408395f3',
+        budgetState: expect.stringContaining('historical-subject-waiver-validation'),
+        validation: { valid: true },
+        budgetValidation: {
+          status: 'historical-subject-waiver-validation',
+          automaticResult: { status: 'fail', exitCode: 1 },
+        },
+        measurementInputDigest: 'a1b474199c61bf46c769d83f22c6b7953be7f1053db0c1cbf3ed108e9259de45',
+        subjectWaiver: {
+          waiverPath: STRESS_WAIVER_PATH,
+          runId: '20260815T094047023Z-p76378-000',
+          commit: '222efc489f85a9efe9997f19badc350f23f50bb2',
+          violation: {
+            metric: 'pf02.source.scroll.render_stable',
+            statistic: 'p50',
+            observedMs: 12.25,
+            thresholdMs: 8.5,
+            deltaMs: 3.75,
+          },
+        },
+      });
+      for (const result of collected.performanceResults.slice(2)) {
         expect(result).toMatchObject({ validation: { valid: true } });
       }
       expect(JSON.stringify(collected)).not.toMatch(/SYNTHETIC-SECRET-|\/Users\//);
@@ -822,20 +882,35 @@ describe('verify:ticket subject waiver entry projection', () => {
     }
   });
 
-  it('validation 无效或 step 非 historical no-sampling 时，waiver entry 只能 generic incomplete', () => {
+  it('任一 validation 无效或 step 非 historical no-sampling 时，对应 waiver entry 只能 generic incomplete', () => {
     const evidenceRoot = mkdtempSync(join(tmpdir(), 'acm-pf-read-manifest-waiver-invalid-'));
     const performances = waiverPerformances();
+    const validations = waiverValidations();
     try {
       for (const config of performances) {
         if ((config as { subjectWaiverPath?: string }).subjectWaiverPath === undefined) {
           writeCurrentEvidence(evidenceRoot, config);
         }
       }
-      for (const [validation, steps] of [
-        [{ valid: false }, waiverSteps(performances)],
+      for (const [validationMap, steps] of [
+        // representative validation 无效：其 entry incomplete，其余不受影响。
+        [
+          { ...validations, 'perf-pf02-representative': { valid: false } },
+          waiverSteps(performances),
+        ],
+        // stress validation 无效：其 entry incomplete，其余不受影响。
+        [{ ...validations, 'perf-pf02-stress': { valid: false } }, waiverSteps(performances)],
+        // waiver validation 张冠李戴（representative validation 喂给 stress entry）。
+        [
+          {
+            ...validations,
+            'perf-pf02-stress': validations['perf-pf02-representative'],
+          },
+          waiverSteps(performances),
+        ],
         // 真实采样 fail 且未写本次 evidence：不能借 waiver 投影。
         [
-          validateFe02Pf02SubjectWaiver(),
+          validations,
           waiverSteps(performances).map((step) =>
             step.id === 'perf-pf02-representative'
               ? { id: step.id, exitCode: 1, status: 'fail' }
@@ -850,15 +925,40 @@ describe('verify:ticket subject waiver entry projection', () => {
           stepResults: steps,
           evidenceRoot,
           expectedCommit: 'a'.repeat(40),
-          subjectWaiverValidation: validation,
+          subjectWaiverValidations: validationMap,
         });
         expect(collected.incomplete).toBe(true);
-        expect(collected.performanceResults[0]).toMatchObject({ validation: { valid: false } });
-        expect(collected.performanceResults.slice(1)).toSatisfy(
-          (results: Array<{ validation: { valid: boolean } }>) =>
-            results.every((result) => result.validation.valid),
-        );
       }
+      // 逐一确认单点 invalid 只污染对应 entry。
+      const repInvalid = collectReadPfManifestResults({
+        performances,
+        stepResults: waiverSteps(performances),
+        evidenceRoot,
+        expectedCommit: 'a'.repeat(40),
+        subjectWaiverValidations: {
+          ...validations,
+          'perf-pf02-representative': { valid: false },
+        },
+      });
+      expect(repInvalid.performanceResults[0]).toMatchObject({ validation: { valid: false } });
+      expect(repInvalid.performanceResults.slice(1)).toSatisfy(
+        (results: Array<{ validation: { valid: boolean } }>) =>
+          results.every((result) => result.validation.valid),
+      );
+      const stressInvalid = collectReadPfManifestResults({
+        performances,
+        stepResults: waiverSteps(performances),
+        evidenceRoot,
+        expectedCommit: 'a'.repeat(40),
+        subjectWaiverValidations: { ...validations, 'perf-pf02-stress': { valid: false } },
+      });
+      expect(stressInvalid.performanceResults[1]).toMatchObject({ validation: { valid: false } });
+      expect([
+        stressInvalid.performanceResults[0],
+        ...stressInvalid.performanceResults.slice(2),
+      ]).toSatisfy((results: Array<{ validation: { valid: boolean } }>) =>
+        results.every((result) => result.validation.valid),
+      );
     } finally {
       rmSync(evidenceRoot, { recursive: true, force: true });
     }

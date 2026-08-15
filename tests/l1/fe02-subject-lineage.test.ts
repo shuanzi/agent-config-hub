@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 // prettier-ignore
 // @ts-expect-error runtime lineage validator is a plain Node ESM module.
-import { FE02_PRODUCT_SUT_TREES, FE02_SUBJECT_COMMIT, validateFe02SubjectClosureLineage } from '../../scripts/orchestrator/fe02-subject-lineage.mjs';
+import { FE02_PRODUCT_SUT_TREES, FE02_REPRESENTATIVE_SUBJECT_COMMIT, FE02_STRESS_SUBJECT_COMMIT, FE02_SUBJECT_COMMIT, FE02_SUBJECT_COMMITS, validateFe02SubjectClosureLineage } from '../../scripts/orchestrator/fe02-subject-lineage.mjs';
 
 const roots: string[] = [];
 
@@ -47,23 +47,39 @@ afterEach(() => {
 });
 
 describe('FE-02 subject waiver final lineage', () => {
-  it('subject 自身与零 SUT 漂移的后代都通过；closure 新增的 orchestrator/docs 不属于 SUT', () => {
-    expect(FE02_SUBJECT_COMMIT).toBe('7936cb91f54c94e836124b0d46337247776431d2');
+  it('较晚 subject 自身与零 SUT 漂移的共同后代都通过；closure 新增的 orchestrator/docs 不属于 SUT', () => {
+    expect(FE02_SUBJECT_COMMITS).toEqual([
+      '7936cb91f54c94e836124b0d46337247776431d2',
+      '222efc489f85a9efe9997f19badc350f23f50bb2',
+    ]);
+    expect(FE02_REPRESENTATIVE_SUBJECT_COMMIT).toBe('7936cb91f54c94e836124b0d46337247776431d2');
+    expect(FE02_STRESS_SUBJECT_COMMIT).toBe('222efc489f85a9efe9997f19badc350f23f50bb2');
+    // SUT 零漂移基线是两个 subject 中较晚的一个。
+    expect(FE02_SUBJECT_COMMIT).toBe(FE02_STRESS_SUBJECT_COMMIT);
     expect(FE02_PRODUCT_SUT_TREES).toEqual([
       'src',
       'src-tauri',
       'fixtures/fx-02',
       'fixtures/fx-03',
     ]);
-    expect(validateFe02SubjectClosureLineage({ finalCommit: FE02_SUBJECT_COMMIT })).toMatchObject({
+    expect(
+      validateFe02SubjectClosureLineage({ finalCommit: FE02_STRESS_SUBJECT_COMMIT }),
+    ).toMatchObject({
       valid: true,
-      subjectCommit: FE02_SUBJECT_COMMIT,
-      finalCommit: FE02_SUBJECT_COMMIT,
+      subjectCommit: FE02_STRESS_SUBJECT_COMMIT,
+      subjectCommits: [...FE02_SUBJECT_COMMITS],
+      finalCommit: FE02_STRESS_SUBJECT_COMMIT,
     });
-    // 当前 HEAD 是 subject 的后代且 src/src-tauri/fixtures 零漂移。
+    // 当前 HEAD 是两个 subject 的共同后代且 src/src-tauri/fixtures 零漂移。
     expect(validateFe02SubjectClosureLineage({ finalCommit: headCommit() })).toMatchObject({
       valid: true,
     });
+  });
+
+  it('较早 subject 不是较晚 subject 的后代，不能单独构成 closure', () => {
+    expect(
+      validateFe02SubjectClosureLineage({ finalCommit: FE02_REPRESENTATIVE_SUBJECT_COMMIT }),
+    ).toMatchObject({ valid: false });
   });
 
   it('拒绝非 subject 后代，避免把其他历史 evidence 借为本次 closure', () => {

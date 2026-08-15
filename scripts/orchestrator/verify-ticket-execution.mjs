@@ -14,6 +14,10 @@ import {
   FE02_PF02_SUBJECT_WAIVER_PATH,
   FE02_PF02_SUBJECT_WAIVER_SHA256,
 } from './fe02-pf02-subject-waiver.mjs';
+import {
+  FE02_PF02_STRESS_SUBJECT_WAIVER_PATH,
+  FE02_PF02_STRESS_SUBJECT_WAIVER_SHA256,
+} from './fe02-pf02-stress-subject-waiver.mjs';
 
 export const AUTOMATIC_PASS_EXECUTION_MODE = FE01_PF01_AUTOMATIC_PASS_MODE;
 export const SUBJECT_WAIVER_EXECUTION_MODE = FE01_PF01_SUBJECT_WAIVER_MODE;
@@ -46,14 +50,51 @@ const SUBJECT_VIOLATION = Object.freeze({
   thresholdMs: 15.75,
   deltaMs: 0.45,
 });
-const FE02_SUBJECT_WAIVER_STEP_ID = 'perf-pf02-representative';
-const FE02_SUBJECT_VIOLATION = Object.freeze({
-  metric: 'pf02.source.scroll.render_stable',
-  statistic: 'p50',
-  observedMs: 12.95,
-  thresholdMs: 3.9375,
-  deltaMs: 9.0125,
-});
+/** FE-02 的两份 subject-bound waiver 各自的钉死绑定常量（representative + stress）。 */
+const FE02_SUBJECT_WAIVER_SPECS = Object.freeze([
+  Object.freeze({
+    stepId: 'perf-pf02-representative',
+    waiverPath: FE02_PF02_SUBJECT_WAIVER_PATH,
+    waiverSha256: FE02_PF02_SUBJECT_WAIVER_SHA256,
+    runId: '20260815T060139784Z-p84684-000',
+    run: '.artifacts/verification/FE-02/20260815T060139784Z-p84684-000/performance/PF-02/representative',
+    commit: '7936cb91f54c94e836124b0d46337247776431d2',
+    violation: Object.freeze({
+      metric: 'pf02.source.scroll.render_stable',
+      statistic: 'p50',
+      observedMs: 12.95,
+      thresholdMs: 3.9375,
+      deltaMs: 9.0125,
+    }),
+    baselineRunId: '20260814T153344617Z-p43084-000',
+    baselineCommit: '9470f64e9b1edb4695092675fbfbd2043ac7b354',
+    descriptorDigest: '53df623aeb8538e1ad8e2821c287603241647de870dcd2c04c8816cb1beff86e',
+    budgetPath: 'performance/budgets/pf-02.representative.budgets.json',
+  }),
+  Object.freeze({
+    stepId: 'perf-pf02-stress',
+    waiverPath: FE02_PF02_STRESS_SUBJECT_WAIVER_PATH,
+    waiverSha256: FE02_PF02_STRESS_SUBJECT_WAIVER_SHA256,
+    runId: '20260815T094047023Z-p76378-000',
+    run: '.artifacts/verification/FE-02/20260815T094047023Z-p76378-000/performance/PF-02/stress',
+    commit: '222efc489f85a9efe9997f19badc350f23f50bb2',
+    violation: Object.freeze({
+      metric: 'pf02.source.scroll.render_stable',
+      statistic: 'p50',
+      observedMs: 12.25,
+      thresholdMs: 8.5,
+      deltaMs: 3.75,
+    }),
+    baselineRunId: '20260814T153438289Z-p43278-000',
+    baselineCommit: '9470f64e9b1edb4695092675fbfbd2043ac7b354',
+    descriptorDigest: '53df623aeb8538e1ad8e2821c287603241647de870dcd2c04c8816cb1beff86e',
+    budgetPath: 'performance/budgets/pf-02.stress.budgets.json',
+  }),
+]);
+/** FE-02 waived PF step 的有序集合（registry performances[] 顺序）。 */
+export const FE02_SUBJECT_WAIVER_STEP_IDS = Object.freeze(
+  FE02_SUBJECT_WAIVER_SPECS.map((spec) => spec.stepId),
+);
 
 /** manifest 保持 accepted-with-waiver，而 closure command 成功交付；automatic PF fail/1 不变。 */
 export function ticketManifestExitCode(status, { ticketId, exactSubjectWaiver = false } = {}) {
@@ -84,18 +125,19 @@ export function hasExactAutomaticPassConfiguration({ ticketId, ticket }) {
   );
 }
 
-/** FE-02 的 waiver 挂在 registry `performances[]` 的 PF-02 representative entry 上。 */
-export function fe02SubjectWaiverPerformance(ticket) {
+/** FE-02 的 waiver 挂在 registry `performances[]` 的 PF-02 representative+stress 两个 entry 上。 */
+export function fe02SubjectWaiverPerformances(ticket) {
   return Array.isArray(ticket?.performances)
-    ? ticket.performances.find(
-        (entry) => entry?.subjectWaiverPath === FE02_PF02_SUBJECT_WAIVER_PATH,
+    ? ticket.performances.filter((entry) =>
+        FE02_SUBJECT_WAIVER_SPECS.some((spec) => spec.waiverPath === entry?.subjectWaiverPath),
       )
-    : undefined;
+    : [];
 }
 
 export function hasExactSubjectWaiverConfiguration({ ticketId, ticket }) {
   if (ticketId === 'FE-02') {
-    return fe02SubjectWaiverPerformance(ticket) !== undefined;
+    const configured = fe02SubjectWaiverPerformances(ticket).map((entry) => entry.subjectWaiverPath);
+    return FE02_SUBJECT_WAIVER_SPECS.every((spec) => configured.includes(spec.waiverPath));
   }
   return (
     ticketId === 'FE-01' &&
@@ -153,31 +195,30 @@ function subjectWaiverBinding(value) {
   };
 }
 
-/** FE-02 subject waiver 的 current-HEAD binding；与 FE-01 同一判定形状，常量各自独立。 */
-function fe02SubjectWaiverBinding(value) {
+/** FE-02 subject waiver 的 current-HEAD binding；与 FE-01 同一判定形状，常量按 spec 各自独立。 */
+function fe02SubjectWaiverBinding(spec, value) {
   const automaticResult = value?.automaticResult;
   if (
     value?.valid !== true ||
-    value.waiverPath !== FE02_PF02_SUBJECT_WAIVER_PATH ||
-    value.waiverSha256 !== FE02_PF02_SUBJECT_WAIVER_SHA256 ||
+    value.waiverPath !== spec.waiverPath ||
+    value.waiverSha256 !== spec.waiverSha256 ||
     value.manualDisposition !== 'accepted-with-waiver' ||
     automaticResult?.status !== 'fail' ||
     automaticResult?.exitCode !== 1 ||
-    automaticResult?.runId !== '20260815T060139784Z-p84684-000' ||
-    automaticResult?.run !==
-      '.artifacts/verification/FE-02/20260815T060139784Z-p84684-000/performance/PF-02/representative' ||
-    automaticResult?.commit !== '7936cb91f54c94e836124b0d46337247776431d2' ||
+    automaticResult?.runId !== spec.runId ||
+    automaticResult?.run !== spec.run ||
+    automaticResult?.commit !== spec.commit ||
     automaticResult?.worktreeDirty !== false ||
-    !sameJson(automaticResult?.violation, FE02_SUBJECT_VIOLATION) ||
-    value?.baseline?.runId !== '20260814T153344617Z-p43084-000' ||
-    value?.baseline?.commit !== '9470f64e9b1edb4695092675fbfbd2043ac7b354' ||
+    !sameJson(automaticResult?.violation, spec.violation) ||
+    value?.baseline?.runId !== spec.baselineRunId ||
+    value?.baseline?.commit !== spec.baselineCommit ||
     value?.subject?.runId !== automaticResult.runId ||
     value?.subject?.commit !== automaticResult.commit ||
-    value?.measurementContract?.descriptorDigest !==
-      '53df623aeb8538e1ad8e2821c287603241647de870dcd2c04c8816cb1beff86e' ||
-    value?.budget?.path !== 'performance/budgets/pf-02.representative.budgets.json' ||
+    value?.measurementContract?.descriptorDigest !== spec.descriptorDigest ||
+    value?.budget?.path !== spec.budgetPath ||
     typeof value?.budget?.sha256 !== 'string' ||
-    value?.artifacts === null || typeof value?.artifacts !== 'object' ||
+    value?.artifacts === null ||
+    typeof value?.artifacts !== 'object' ||
     value?.performanceDebt?.status !== 'deferred' ||
     value?.performanceDebt?.phase !== 'post-optimization' ||
     typeof value?.performanceDebt?.rootCause !== 'string'
@@ -232,6 +273,7 @@ export function planTicketExecutionSteps({
   ticket,
   automaticPassValidation,
   subjectWaiverValidation,
+  subjectWaiverValidations,
 }) {
   if (hasExactAutomaticPassConfiguration({ ticketId, ticket })) {
     const binding = stableBinding(automaticPassValidation);
@@ -250,22 +292,25 @@ export function planTicketExecutionSteps({
     }
   }
   if (!hasExactSubjectWaiverConfiguration({ ticketId, ticket })) return ticket.steps;
-  // FE-02：waiver 初始校验 valid 时，仅 perf-pf02-representative 改为 historical
-  // no-sampling；其余三个 PF step 照常采样。
+  // FE-02：各 waiver 初始校验各自 valid 时，对应 step（perf-pf02-representative /
+  // perf-pf02-stress）各自改为 historical no-sampling；其余 PF step 照常采样。
   if (ticketId === 'FE-02') {
-    const binding = fe02SubjectWaiverBinding(subjectWaiverValidation);
-    if (binding === null) return ticket.steps;
-    return ticket.steps.map((step) =>
-      step.id === FE02_SUBJECT_WAIVER_STEP_ID
-        ? {
-            ...step,
-            executionMode: SUBJECT_WAIVER_EXECUTION_MODE,
-            samplingRun: false,
-            historicalRunId: binding.automaticResult.runId,
-            initialWaiverValidation: 'valid',
-          }
-        : step,
+    const configuredPaths = fe02SubjectWaiverPerformances(ticket).map(
+      (entry) => entry.subjectWaiverPath,
     );
+    return ticket.steps.map((step) => {
+      const spec = FE02_SUBJECT_WAIVER_SPECS.find((candidate) => candidate.stepId === step.id);
+      if (spec === undefined || !configuredPaths.includes(spec.waiverPath)) return step;
+      const binding = fe02SubjectWaiverBinding(spec, subjectWaiverValidations?.[spec.stepId]);
+      if (binding === null) return step;
+      return {
+        ...step,
+        executionMode: SUBJECT_WAIVER_EXECUTION_MODE,
+        samplingRun: false,
+        historicalRunId: binding.automaticResult.runId,
+        initialWaiverValidation: 'valid',
+      };
+    });
   }
   const binding = subjectWaiverBinding(subjectWaiverValidation);
   if (binding === null) return ticket.steps;
@@ -293,7 +338,7 @@ export function isAutomaticPassPerfStep(step) {
 
 export function isSubjectWaiverPerfStep(step) {
   return (
-    (step?.id === 'perf' || step?.id === FE02_SUBJECT_WAIVER_STEP_ID) &&
+    (step?.id === 'perf' || FE02_SUBJECT_WAIVER_STEP_IDS.includes(step?.id)) &&
     step.executionMode === SUBJECT_WAIVER_EXECUTION_MODE &&
     step.samplingRun === false
   );
@@ -347,28 +392,33 @@ export async function finalizeSubjectWaiverValidation({
   };
 }
 
-/** FE-02 版本：起止各跑一次 FE-02 validator，binding 漂移即 invalid。 */
-export async function finalizeFe02SubjectWaiverValidation({
-  initialSubjectWaiverValidation,
-  validateSubjectWaiver,
+/** FE-02 版本：两份 waiver 各自起止跑一次对应 validator，任一 binding 漂移即该 step invalid。 */
+export async function finalizeFe02SubjectWaiverValidations({
+  initialSubjectWaiverValidations,
+  validateSubjectWaivers,
 }) {
-  let finalSubjectWaiverValidation;
-  try {
-    finalSubjectWaiverValidation = await validateSubjectWaiver();
-  } catch {
-    finalSubjectWaiverValidation = undefined;
+  const perStep = {};
+  for (const spec of FE02_SUBJECT_WAIVER_SPECS) {
+    let finalSubjectWaiverValidation;
+    try {
+      finalSubjectWaiverValidation = await validateSubjectWaivers[spec.stepId]();
+    } catch {
+      finalSubjectWaiverValidation = undefined;
+    }
+    const initialBinding = fe02SubjectWaiverBinding(
+      spec,
+      initialSubjectWaiverValidations?.[spec.stepId],
+    );
+    const finalBinding = fe02SubjectWaiverBinding(spec, finalSubjectWaiverValidation);
+    const bindingStable =
+      initialBinding !== null && finalBinding !== null && sameJson(initialBinding, finalBinding);
+    perStep[spec.stepId] = {
+      finalSubjectWaiverValidation,
+      finalSubjectWaiverValidationStatus: bindingStable ? 'valid' : 'invalid',
+      bindingStable,
+    };
   }
-  const initialBinding = fe02SubjectWaiverBinding(initialSubjectWaiverValidation);
-  const finalBinding = fe02SubjectWaiverBinding(finalSubjectWaiverValidation);
-  return {
-    finalSubjectWaiverValidation,
-    finalSubjectWaiverValidationStatus:
-      initialBinding !== null && finalBinding !== null && sameJson(initialBinding, finalBinding)
-        ? 'valid'
-        : 'invalid',
-    bindingStable:
-      initialBinding !== null && finalBinding !== null && sameJson(initialBinding, finalBinding),
-  };
+  return { perStep };
 }
 
 /** historical automatic evidence 只有起止 exact binding 都成立时才可报告预算 pass。 */
@@ -455,32 +505,39 @@ export function subjectWaiverPf01BudgetState({ subjectWaiverCompletion }) {
   };
 }
 
-/** FE-02 版本：manual disposition 保留 PF-02 representative 的 historical automatic fail/1。 */
-export function subjectWaiverPf02BudgetState({ subjectWaiverCompletion }) {
-  const validation = subjectWaiverCompletion?.finalSubjectWaiverValidation;
-  const binding = fe02SubjectWaiverBinding(validation);
-  if (
-    subjectWaiverCompletion?.finalSubjectWaiverValidationStatus === 'valid' &&
-    subjectWaiverCompletion.bindingStable === true &&
-    binding !== null
-  ) {
+/** FE-02 版本：manual disposition 保留 PF-02 两个 profile 各自的 historical automatic fail/1。 */
+export function subjectWaiverPf02BudgetState({ subjectWaiverCompletions }) {
+  const perSpec = FE02_SUBJECT_WAIVER_SPECS.map((spec) => {
+    const completion = subjectWaiverCompletions?.perStep?.[spec.stepId];
+    return { spec, completion, binding: fe02SubjectWaiverBinding(spec, completion?.finalSubjectWaiverValidation) };
+  });
+  const allExact = perSpec.every(
+    ({ completion, binding }) =>
+      completion?.finalSubjectWaiverValidationStatus === 'valid' &&
+      completion.bindingStable === true &&
+      binding !== null,
+  );
+  if (allExact) {
     return {
       label: 'historical-subject-waiver-validation（immutable automatic fail/exit 1；未启动当前 PF sampling）',
       status: 'accepted-with-waiver',
       validation: { valid: true, violations: [] },
-      descriptorDigest: binding.measurementContract.descriptorDigest,
-      automaticResult: binding.automaticResult,
+      descriptorDigest: FE02_SUBJECT_WAIVER_SPECS[0].descriptorDigest,
+      automaticResults: perSpec.map(({ binding }) => binding.automaticResult),
       provenance: {
         kind: 'fe-02-pf-02-subject-waiver',
         mode: SUBJECT_WAIVER_EXECUTION_MODE,
-        record: { path: binding.waiverPath, sha256: binding.waiverSha256 },
-        budget: binding.budget,
-        baseline: binding.baseline,
-        subject: binding.subject,
-        measurementContract: binding.measurementContract,
-        artifacts: binding.artifacts,
+        records: perSpec.map(({ spec, binding }) => ({
+          stepId: spec.stepId,
+          record: { path: binding.waiverPath, sha256: binding.waiverSha256 },
+          budget: binding.budget,
+          baseline: binding.baseline,
+          subject: binding.subject,
+          measurementContract: binding.measurementContract,
+          artifacts: binding.artifacts,
+        })),
       },
-      performanceDebt: binding.performanceDebt,
+      performanceDebts: perSpec.map(({ binding }) => binding.performanceDebt),
     };
   }
   return {
@@ -489,7 +546,11 @@ export function subjectWaiverPf02BudgetState({ subjectWaiverCompletion }) {
     validation: {
       valid: false,
       violations: [
-        ...(Array.isArray(validation?.violations) ? validation.violations : []),
+        ...perSpec.flatMap(({ completion }) =>
+          Array.isArray(completion?.finalSubjectWaiverValidation?.violations)
+            ? completion.finalSubjectWaiverValidation.violations
+            : [],
+        ),
         'subject waiver 起止 exact binding 不精确或发生漂移',
       ],
     },

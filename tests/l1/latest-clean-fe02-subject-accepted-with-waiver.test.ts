@@ -26,6 +26,9 @@ import { ticketManifestExitCode } from '../../scripts/orchestrator/verify-ticket
 // @ts-expect-error runtime subject waiver module is a plain Node ESM module.
 import { validateFe02Pf02SubjectWaiver } from '../../scripts/orchestrator/fe02-pf02-subject-waiver.mjs';
 // prettier-ignore
+// @ts-expect-error runtime subject waiver module is a plain Node ESM module.
+import { validateFe02Pf02StressSubjectWaiver } from '../../scripts/orchestrator/fe02-pf02-stress-subject-waiver.mjs';
+// prettier-ignore
 // @ts-expect-error runtime lineage module is a plain Node ESM module.
 import { validateFe02SubjectClosureLineage } from '../../scripts/orchestrator/fe02-subject-lineage.mjs';
 // prettier-ignore
@@ -38,10 +41,13 @@ import { ticketConfig } from '../../scripts/orchestrator/ticket-registry.mjs';
 const roots: string[] = [];
 const SUBJECT_RUN_ID = '20260815T060139784Z-p84684-000';
 const SUBJECT_COMMIT = '7936cb91f54c94e836124b0d46337247776431d2';
+const STRESS_SUBJECT_RUN_ID = '20260815T094047023Z-p76378-000';
+const STRESS_SUBJECT_COMMIT = '222efc489f85a9efe9997f19badc350f23f50bb2';
 const WAIVER_PATH = 'performance/waivers/fe-02-pf-02-representative-scroll-render-stable.json';
+const STRESS_WAIVER_PATH = 'performance/waivers/fe-02-pf-02-stress-scroll-render-stable.json';
 const INDEX_PATH = '.artifacts/verification/FE-02/latest-clean-subject-accepted-with-waiver.json';
 const MANUAL_DISPOSITION_SOURCE =
-  '用户授权的 exact FE-02 subject PF-02 representative disposition；immutable subject artifact raw samples 与 frozen budget 重算，非本次 perf sampling。';
+  '用户授权的 exact FE-02 subject PF-02 representative+stress disposition；immutable subject artifact raw samples 与 frozen budget 重算，非本次 perf sampling。';
 
 type Fe02Step = {
   id: string;
@@ -49,6 +55,11 @@ type Fe02Step = {
   provenance: string;
   cmd: string;
   args: string[];
+};
+
+const HISTORICAL_STEPS: Record<string, { runId: string }> = {
+  'perf-pf02-representative': { runId: SUBJECT_RUN_ID },
+  'perf-pf02-stress': { runId: STRESS_SUBJECT_RUN_ID },
 };
 
 function headCommit(repoRoot: string) {
@@ -62,7 +73,7 @@ function sampledPerformanceResult(pfId: string, profile: string) {
     profile,
     step: { id: `perf-${descriptorId.replace('-', '')}-${profile}`, exitCode: 0, status: 'pass' },
     descriptor: {
-      path: `performance/descriptors/${descriptorId}.${profile === 'representative' ? 'source-large' : 'multifile-workbench'}.json`,
+      path: `performance/descriptors/${descriptorId}.multifile-workbench.json`,
       digest: 'd'.repeat(64),
     },
     fixtureDigest: 'e'.repeat(64),
@@ -77,6 +88,60 @@ function sampledPerformanceResult(pfId: string, profile: string) {
   };
 }
 
+function waiverPerformanceResult({
+  profile,
+  stepId,
+  runId,
+  commit,
+  waiverPath,
+  waiverSha256,
+  fixtureDigest,
+  violation,
+}: {
+  profile: string;
+  stepId: string;
+  runId: string;
+  commit: string;
+  waiverPath: string;
+  waiverSha256: string;
+  fixtureDigest: string;
+  violation: Record<string, unknown>;
+}) {
+  return {
+    pfId: 'PF-02',
+    profile,
+    step: { id: stepId, exitCode: 1, status: 'fail' },
+    descriptor: {
+      path: 'performance/descriptors/pf-02.source-large.json',
+      digest: '53df623aeb8538e1ad8e2821c287603241647de870dcd2c04c8816cb1beff86e',
+    },
+    fixtureDigest,
+    metrics: [],
+    summaryRelativePath: `performance/PF-02/${profile}/summary.json`,
+    budgetState:
+      'historical-subject-waiver-validation（immutable automatic fail/exit 1；未启动当前 PF sampling）',
+    validation: { valid: true },
+    budgetValidation: {
+      status: 'historical-subject-waiver-validation',
+      automaticResult: { status: 'fail', exitCode: 1 },
+    },
+    runner: {
+      node: 'v24.18.0',
+      npm: '11.16.0',
+      platform: 'darwin',
+      release: '25.6.0',
+      macosProductVersion: '26.6.1',
+      arch: 'arm64',
+    },
+    toolchain: {
+      cargo: 'cargo 1.97.1 (c980f4866 2026-06-30)',
+      rustc: 'rustc 1.97.1 (8bab26f4f 2026-07-14)',
+    },
+    measurementInputDigest: 'a1b474199c61bf46c769d83f22c6b7953be7f1053db0c1cbf3ed108e9259de45',
+    subjectWaiver: { waiverPath, waiverSha256, runId, commit, violation },
+  };
+}
+
 function setup() {
   const rootParent = mkdtempSync(join(tmpdir(), 'acm-fe02-latest-clean-subject-waiver-'));
   roots.push(rootParent);
@@ -85,9 +150,15 @@ function setup() {
   // waiver record 与 PF evidence 不被 git 跟踪；显式复制 immutable inputs。
   mkdirSync(dirname(join(root, WAIVER_PATH)), { recursive: true });
   copyFileSync(WAIVER_PATH, join(root, WAIVER_PATH));
+  copyFileSync(STRESS_WAIVER_PATH, join(root, STRESS_WAIVER_PATH));
   cpSync(
     `.artifacts/verification/FE-02/${SUBJECT_RUN_ID}/performance`,
     join(root, '.artifacts/verification/FE-02', SUBJECT_RUN_ID, 'performance'),
+    { recursive: true },
+  );
+  cpSync(
+    `.artifacts/verification/FE-02/${STRESS_SUBJECT_RUN_ID}/performance`,
+    join(root, '.artifacts/verification/FE-02', STRESS_SUBJECT_RUN_ID, 'performance'),
     { recursive: true },
   );
   cpSync('.artifacts/performance/PF-02', join(root, '.artifacts/performance/PF-02'), {
@@ -95,11 +166,14 @@ function setup() {
   });
 
   const commit = headCommit(root);
-  const waiver = validateFe02Pf02SubjectWaiver({ repoRoot: root });
+  const waivers = [
+    validateFe02Pf02SubjectWaiver({ repoRoot: root }),
+    validateFe02Pf02StressSubjectWaiver({ repoRoot: root }),
+  ];
   const lineage = validateFe02SubjectClosureLineage({ repoRoot: root, finalCommit: commit });
-  if (!waiver.valid || !lineage.valid) {
+  if (!waivers.every((waiver) => waiver.valid) || !lineage.valid) {
     throw new Error(
-      `test root immutable waiver/lineage unavailable: ${JSON.stringify({ waiver, lineage })}`,
+      `test root immutable waiver/lineage unavailable: ${JSON.stringify({ waivers, lineage })}`,
     );
   }
   const runId = '20260815T120000000Z-p1-000';
@@ -148,8 +222,8 @@ function setup() {
       layer: step.layer,
       provenance: step.provenance,
       command: [step.cmd, ...step.args],
-      exitCode: step.id === 'perf-pf02-representative' ? 1 : 0,
-      status: step.id === 'perf-pf02-representative' ? 'fail' : 'pass',
+      exitCode: HISTORICAL_STEPS[step.id] !== undefined ? 1 : 0,
+      status: HISTORICAL_STEPS[step.id] !== undefined ? 'fail' : 'pass',
       timedOut: false,
       durationMs: 0,
       logs: {
@@ -157,12 +231,12 @@ function setup() {
         stderr: `steps/${step.id}/stderr.log`,
         meta: `steps/${step.id}/meta.json`,
       },
-      ...(step.id === 'perf-pf02-representative'
+      ...(HISTORICAL_STEPS[step.id] !== undefined
         ? {
             execution: {
               mode: 'historical-subject-waiver-validation',
               samplingRun: false,
-              historicalRunId: SUBJECT_RUN_ID,
+              historicalRunId: HISTORICAL_STEPS[step.id]!.runId,
               initialWaiverValidation: 'valid',
               finalWaiverValidation: 'valid',
               bindingStable: true,
@@ -180,52 +254,38 @@ function setup() {
       production: 'N/A（FE-02 不产出生产 artifact）',
     },
     performanceResults: [
-      {
-        pfId: 'PF-02',
+      waiverPerformanceResult({
         profile: 'representative',
-        step: { id: 'perf-pf02-representative', exitCode: 1, status: 'fail' },
-        descriptor: {
-          path: 'performance/descriptors/pf-02.source-large.json',
-          digest: '53df623aeb8538e1ad8e2821c287603241647de870dcd2c04c8816cb1beff86e',
-        },
+        stepId: 'perf-pf02-representative',
+        runId: SUBJECT_RUN_ID,
+        commit: SUBJECT_COMMIT,
+        waiverPath: WAIVER_PATH,
+        waiverSha256: '60a6f7dbb89da3b6a2a4c955af796a41c7b5ec5d87dc765177056fc9c4e0eb8b',
         fixtureDigest: 'fc1100b4835e795128117099bc6c246497a26ef0d37bbbb941c3b87d41989e56',
-        metrics: [],
-        summaryRelativePath: 'performance/PF-02/representative/summary.json',
-        budgetState:
-          'historical-subject-waiver-validation（immutable automatic fail/exit 1；未启动当前 PF sampling）',
-        validation: { valid: true },
-        budgetValidation: {
-          status: 'historical-subject-waiver-validation',
-          automaticResult: { status: 'fail', exitCode: 1 },
+        violation: {
+          metric: 'pf02.source.scroll.render_stable',
+          statistic: 'p50',
+          observedMs: 12.95,
+          thresholdMs: 3.9375,
+          deltaMs: 9.0125,
         },
-        runner: {
-          node: 'v24.18.0',
-          npm: '11.16.0',
-          platform: 'darwin',
-          release: '25.6.0',
-          macosProductVersion: '26.6.1',
-          arch: 'arm64',
+      }),
+      waiverPerformanceResult({
+        profile: 'stress',
+        stepId: 'perf-pf02-stress',
+        runId: STRESS_SUBJECT_RUN_ID,
+        commit: STRESS_SUBJECT_COMMIT,
+        waiverPath: STRESS_WAIVER_PATH,
+        waiverSha256: '3765d5bf11a67136153894775ee60ca2f45be583ac4b5cd218782b193682f4d4',
+        fixtureDigest: '91c8c9502f06b4f6162bc107b248bb2451b27b3ecfd7c9e3fe338ab3408395f3',
+        violation: {
+          metric: 'pf02.source.scroll.render_stable',
+          statistic: 'p50',
+          observedMs: 12.25,
+          thresholdMs: 8.5,
+          deltaMs: 3.75,
         },
-        toolchain: {
-          cargo: 'cargo 1.97.1 (c980f4866 2026-06-30)',
-          rustc: 'rustc 1.97.1 (8bab26f4f 2026-07-14)',
-        },
-        measurementInputDigest: 'a1b474199c61bf46c769d83f22c6b7953be7f1053db0c1cbf3ed108e9259de45',
-        subjectWaiver: {
-          waiverPath: WAIVER_PATH,
-          waiverSha256: '60a6f7dbb89da3b6a2a4c955af796a41c7b5ec5d87dc765177056fc9c4e0eb8b',
-          runId: SUBJECT_RUN_ID,
-          commit: SUBJECT_COMMIT,
-          violation: {
-            metric: 'pf02.source.scroll.render_stable',
-            statistic: 'p50',
-            observedMs: 12.95,
-            thresholdMs: 3.9375,
-            deltaMs: 9.0125,
-          },
-        },
-      },
-      sampledPerformanceResult('PF-02', 'stress'),
+      }),
       sampledPerformanceResult('PF-03', 'representative'),
       sampledPerformanceResult('PF-03', 'stress'),
     ],
@@ -236,17 +296,33 @@ function setup() {
     uncoveredBoundaries: ticketConfig('FE-02').uncoveredBoundaries,
     subjectLineage: lineage,
     manualDisposition: {
-      status: waiver.manualDisposition,
+      status: 'accepted-with-waiver',
       waiverValidation: 'valid',
       initialWaiverValidation: 'valid',
       finalWaiverValidation: 'valid',
       bindingStable: true,
-      waiverPath: waiver.waiverPath,
-      waiverSha256: waiver.waiverSha256,
+      waivers: [
+        {
+          stepId: 'perf-pf02-representative',
+          initialWaiverValidation: 'valid',
+          finalWaiverValidation: 'valid',
+          bindingStable: true,
+          waiverPath: waivers[0].waiverPath,
+          waiverSha256: waivers[0].waiverSha256,
+        },
+        {
+          stepId: 'perf-pf02-stress',
+          initialWaiverValidation: 'valid',
+          finalWaiverValidation: 'valid',
+          bindingStable: true,
+          waiverPath: waivers[1].waiverPath,
+          waiverSha256: waivers[1].waiverSha256,
+        },
+      ],
       source: MANUAL_DISPOSITION_SOURCE,
     },
-    pfAutomaticResult: waiver.automaticResult,
-    performanceDebt: waiver.performanceDebt,
+    pfAutomaticResult: waivers.map((waiver) => waiver.automaticResult),
+    performanceDebt: waivers.map((waiver) => waiver.performanceDebt),
     physicalValidation: FE02_SUBJECT_PHYSICAL_VALIDATED,
   };
   return { root, evidenceRoot, manifest };
@@ -303,7 +379,10 @@ describe('FE-02 latest clean subject accepted-with-waiver index', () => {
       status: 'accepted-with-waiver',
       runId: manifest.runId,
       physicalValidation: manifest.physicalValidation,
-      pfAutomaticResult: { status: 'fail', exitCode: 1, runId: SUBJECT_RUN_ID },
+      pfAutomaticResult: [
+        { status: 'fail', exitCode: 1, runId: SUBJECT_RUN_ID },
+        { status: 'fail', exitCode: 1, runId: STRESS_SUBJECT_RUN_ID },
+      ],
     });
     expect(existsSync(join(root, '.artifacts/verification/FE-02/latest-clean-pass.json'))).toBe(
       false,
@@ -385,38 +464,51 @@ describe('FE-02 latest clean subject accepted-with-waiver index', () => {
     ).toBe(1);
   });
 
-  it('重新锚定实际 waiver record 与 subject artifact SHA，拒绝 drift 且不写 index', async () => {
+  it('重新锚定两份 waiver record 与 subject artifact SHA，拒绝 drift 且不写 index', async () => {
     const { root, evidenceRoot, manifest } = setup();
     writeCompleteManifest(evidenceRoot, manifest);
-    const record = join(root, WAIVER_PATH);
-    writeFileSync(record, `${readFileSync(record, 'utf8')}\n`);
-    await expect(
-      maybeWriteLatestCleanFe02SubjectAcceptedWithWaiver({
-        root,
-        evidenceRoot,
-        ticketId: 'FE-02',
-        manifest,
-      }),
-    ).resolves.toMatchObject({ eligible: false, validated: false, updated: false });
-    expect(existsSync(join(root, INDEX_PATH))).toBe(false);
+    for (const record of [join(root, WAIVER_PATH), join(root, STRESS_WAIVER_PATH)]) {
+      const original = readFileSync(record, 'utf8');
+      writeFileSync(record, `${original}\n`);
+      await expect(
+        maybeWriteLatestCleanFe02SubjectAcceptedWithWaiver({
+          root,
+          evidenceRoot,
+          ticketId: 'FE-02',
+          manifest,
+        }),
+      ).resolves.toMatchObject({ eligible: false, validated: false, updated: false });
+      expect(existsSync(join(root, INDEX_PATH))).toBe(false);
+      writeFileSync(record, original);
+    }
 
-    copyFileSync(WAIVER_PATH, record);
-    const samples = join(
-      root,
-      '.artifacts/verification/FE-02',
-      SUBJECT_RUN_ID,
-      'performance/PF-02/representative/samples.json',
-    );
-    writeFileSync(samples, `${readFileSync(samples, 'utf8')}\n`);
-    await expect(
-      maybeWriteLatestCleanFe02SubjectAcceptedWithWaiver({
+    for (const samples of [
+      join(
         root,
-        evidenceRoot,
-        ticketId: 'FE-02',
-        manifest,
-      }),
-    ).resolves.toMatchObject({ eligible: false, validated: false, updated: false });
-    expect(existsSync(join(root, INDEX_PATH))).toBe(false);
+        '.artifacts/verification/FE-02',
+        SUBJECT_RUN_ID,
+        'performance/PF-02/representative/samples.json',
+      ),
+      join(
+        root,
+        '.artifacts/verification/FE-02',
+        STRESS_SUBJECT_RUN_ID,
+        'performance/PF-02/stress/samples.json',
+      ),
+    ]) {
+      const original = readFileSync(samples, 'utf8');
+      writeFileSync(samples, `${original}\n`);
+      await expect(
+        maybeWriteLatestCleanFe02SubjectAcceptedWithWaiver({
+          root,
+          evidenceRoot,
+          ticketId: 'FE-02',
+          manifest,
+        }),
+      ).resolves.toMatchObject({ eligible: false, validated: false, updated: false });
+      expect(existsSync(join(root, INDEX_PATH))).toBe(false);
+      writeFileSync(samples, original);
+    }
   });
 
   it('拒绝硬门禁失败、自动 pass 伪装、dirty 或缺失 step physical evidence', async () => {
@@ -426,12 +518,28 @@ describe('FE-02 latest clean subject accepted-with-waiver index', () => {
       { ...manifest, worktreeDirty: true },
       {
         ...manifest,
-        pfAutomaticResult: { ...manifest.pfAutomaticResult, status: 'pass', exitCode: 0 },
+        pfAutomaticResult: manifest.pfAutomaticResult.map(
+          (result: Record<string, unknown>, index: number) =>
+            index === 0 ? { ...result, status: 'pass', exitCode: 0 } : result,
+        ),
+      },
+      {
+        ...manifest,
+        pfAutomaticResult: manifest.pfAutomaticResult.map(
+          (result: Record<string, unknown>, index: number) =>
+            index === 1 ? { ...result, status: 'pass', exitCode: 0 } : result,
+        ),
       },
       {
         ...manifest,
         steps: (manifest.steps as Array<Record<string, unknown>>).map((step) =>
           step.id === 'static' ? { ...step, status: 'fail', exitCode: 1 } : step,
+        ),
+      },
+      {
+        ...manifest,
+        steps: (manifest.steps as Array<Record<string, unknown>>).map((step) =>
+          step.id === 'perf-pf02-stress' ? { ...step, status: 'pass', exitCode: 0 } : step,
         ),
       },
     ];

@@ -505,8 +505,8 @@ function projectSubjectWaiverManifestResult({ performance, step, validation }) {
 /**
  * Reads and projects one manifest entry per registered PF profile. The helper
  * cannot elevate incomplete/tainted evidence; raw summary strings never leave
- * this boundary. Entries carrying a subjectWaiverPath are projected from the
- * exact waiver validation instead of current-run evidence.
+ * this boundary. Entries carrying a subjectWaiverPath are projected from their
+ * own exact waiver validation instead of current-run evidence.
  */
 export function collectReadPfManifestResults({
   performances,
@@ -514,7 +514,7 @@ export function collectReadPfManifestResults({
   evidenceRoot,
   expectedCommit,
   repoRoot = REPO_ROOT,
-  subjectWaiverValidation = undefined,
+  subjectWaiverValidations = undefined,
 }) {
   const performanceResults = [];
   let incomplete = false;
@@ -527,7 +527,7 @@ export function collectReadPfManifestResults({
           projectSubjectWaiverManifestResult({
             performance,
             step,
-            validation: subjectWaiverValidation,
+            validation: subjectWaiverValidations?.[perfStepId(performance)],
           }),
         );
         continue;

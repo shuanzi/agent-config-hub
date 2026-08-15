@@ -154,22 +154,31 @@ describe('FE-02 PF-02/PF-03 registry metadata', () => {
     });
   });
 
-  it('仅 PF-02 representative entry 绑定本次 exact subject waiver record', () => {
+  it('PF-02 两个 profile entry 各自绑定本次 exact subject waiver record', () => {
     const performances = TICKET_REGISTRY['FE-02'].performances as Array<Record<string, string>>;
     const withWaiver = performances.filter(
       (performance) => performance.subjectWaiverPath !== undefined,
     );
 
-    expect(withWaiver).toHaveLength(1);
+    expect(withWaiver).toHaveLength(2);
     expect(withWaiver[0]).toMatchObject({
       descriptorId: 'PF-02',
       profile: 'representative',
       subjectWaiverPath: 'performance/waivers/fe-02-pf-02-representative-scroll-render-stable.json',
     });
-    // record 的 recordDigest/文件 sha256 由 fe02-pf02-subject-waiver.test.ts 复算绑定。
+    expect(withWaiver[1]).toMatchObject({
+      descriptorId: 'PF-02',
+      profile: 'stress',
+      subjectWaiverPath: 'performance/waivers/fe-02-pf-02-stress-scroll-render-stable.json',
+    });
+    // record 的 recordDigest/文件 sha256 由 fe02-pf02-subject-waiver.test.ts 与
+    // fe02-pf02-stress-subject-waiver.test.ts 复算绑定。
     expect(
       existsSync('performance/waivers/fe-02-pf-02-representative-scroll-render-stable.json'),
     ).toBe(true);
+    expect(existsSync('performance/waivers/fe-02-pf-02-stress-scroll-render-stable.json')).toBe(
+      true,
+    );
   });
 
   it('multi-PF metadata 不取得 FE-01-only automatic-pass 或 waiver 的不采样特权', () => {
