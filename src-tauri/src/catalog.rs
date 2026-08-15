@@ -349,6 +349,14 @@ fn file_id_for(prefix: &str, relative_path: &str) -> String {
     format!("file-{prefix}-{slug}")
 }
 
+/// 多文件 Skill 的非主文件必须以原始相对路径的完整摘要区分。slug 仅供可读，
+/// 不能作为身份的唯一来源；摘要稳定且不泄漏可能被遮蔽的原生路径。
+fn secondary_skill_file_id_for(prefix: &str, relative_path: &str) -> String {
+    let digest = Sha256::digest(relative_path.as_bytes());
+    let suffix: String = digest.iter().map(|byte| format!("{byte:02x}")).collect();
+    format!("{}-{suffix}", file_id_for(prefix, relative_path))
+}
+
 fn is_text_bytes(bytes: &[u8]) -> bool {
     std::str::from_utf8(bytes).is_ok() && !bytes.contains(&0)
 }
@@ -358,6 +366,33 @@ fn is_regular_file(path: &Path) -> bool {
     fs::symlink_metadata(path)
         .map(|metadata| metadata.file_type().is_file())
         .unwrap_or(false)
+}
+
+/// 原子 no-follow 读取：open 与 read 绑定在同一文件描述符上，`O_NOFOLLOW`
+/// 使 leaf 为 symlink 时 open 直接失败（ELOOP），消除“先查类型、后按路径读取”
+/// 之间的 symlink swap TOCTOU 窗口。中间目录组件的 swap 不在本边界内。
+/// 非 Unix 平台没有 `O_NOFOLLOW`，退化为 metadata 检查 + 读取的 best-effort 边界。
+fn read_native_file(path: &Path) -> Option<Vec<u8>> {
+    #[cfg(unix)]
+    {
+        use std::io::Read;
+        use std::os::unix::fs::OpenOptionsExt;
+        let mut file = fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NOFOLLOW)
+            .open(path)
+            .ok()?;
+        let mut bytes = Vec::new();
+        file.read_to_end(&mut bytes).ok()?;
+        Some(bytes)
+    }
+    #[cfg(not(unix))]
+    {
+        if !is_regular_file(path) {
+            return None;
+        }
+        fs::read(path).ok()
+    }
 }
 
 fn file_kind_for(bytes: &[u8]) -> FileKind {
@@ -391,7 +426,7 @@ fn collect_native_files(root: &Path) -> Option<Vec<LoadedNativeFile>> {
                     .replace(std::path::MAIN_SEPARATOR, "/");
                 files.push(LoadedNativeFile {
                     relative_path,
-                    raw_bytes: fs::read(path).ok()?,
+                    raw_bytes: read_native_file(&path)?,
                 });
             }
         }
@@ -537,7 +572,11 @@ impl LoadedSkill {
     }
 
     fn file_id_for(&self, relative_path: &str) -> String {
-        file_id_for(&self.fixture_prefix, relative_path)
+        if relative_path == "SKILL.md" {
+            file_id_for(&self.fixture_prefix, relative_path)
+        } else {
+            secondary_skill_file_id_for(&self.fixture_prefix, relative_path)
+        }
     }
 
     fn primary(&self) -> Option<&LoadedNativeFile> {
@@ -698,7 +737,7 @@ impl Catalog {
                 let Some(name) = entry.file_name().to_str().map(str::to_string) else {
                     continue;
                 };
-                let Ok(raw_bytes) = fs::read(entry.path()) else {
+                let Some(raw_bytes) = read_native_file(&entry.path()) else {
                     continue;
                 };
                 let stem = name.strip_suffix(".md").unwrap_or(&name);
@@ -728,7 +767,7 @@ impl Catalog {
                 if !is_regular_file(&path) {
                     continue;
                 }
-                let Ok(raw_bytes) = fs::read(path) else {
+                let Some(raw_bytes) = read_native_file(&path) else {
                     continue;
                 };
                 assets.push(LoadedStaticAsset {
@@ -1333,5 +1372,34 @@ fn native_file_content(
                 reason: "此文件不是可安全展示的文本内容。".to_string(),
             })
         }
+    }
+}
+
+#[cfg(all(test, unix))]
+mod no_follow_read_tests {
+    use super::read_native_file;
+    use std::fs;
+    use std::os::unix::fs::symlink;
+
+    #[test]
+    fn read_native_file_reads_regular_file_and_refuses_leaf_symlink() {
+        let sandbox = tempfile::tempdir().expect("temporary no-follow fixture root");
+        let root = sandbox.path();
+        let regular = root.join("regular.md");
+        fs::write(&regular, "safe content\n").expect("regular fixture");
+        let outside = root.join("outside.md");
+        fs::write(&outside, "OUTSIDE-CONTENT").expect("outside fixture");
+        let leaf_link = root.join("leaf-link.md");
+        symlink(&outside, &leaf_link).expect("leaf symlink fixture");
+
+        assert_eq!(
+            read_native_file(&regular).as_deref(),
+            Some(b"safe content\n".as_slice()),
+            "regular file must remain readable through the no-follow boundary"
+        );
+        assert!(
+            read_native_file(&leaf_link).is_none(),
+            "leaf symlink must be refused atomically at open time, even though it resolves to a regular file"
+        );
     }
 }

@@ -9,6 +9,13 @@ use std::path::PathBuf;
 
 #[cfg(unix)]
 use std::os::unix::fs::symlink;
+#[cfg(unix)]
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc, Barrier,
+};
+#[cfg(unix)]
+use std::{thread, time::Duration};
 
 use agent_config_manager_lib::catalog::{Catalog, SENSITIVE_MASK};
 use agent_config_manager_lib::core::GatewayCore;
@@ -263,6 +270,100 @@ fn fx02_text_and_nontext_reads_preserve_read_only_fallbacks_and_masking() {
 }
 
 #[test]
+fn fx02_slug_colliding_secondary_paths_keep_distinct_file_ids_and_native_reads() {
+    let sandbox = tempfile::tempdir().expect("temporary file-id collision fixture root");
+    let root = sandbox.path().join("fx-file-id/native-root");
+    let skill_root = root.join("skills/collision-skill");
+    fs::create_dir_all(skill_root.join("references"))
+        .expect("multi-file Skill collision fixture directory");
+    fs::write(skill_root.join("SKILL.md"), "name: collision skill\n")
+        .expect("Skill primary fixture");
+    fs::write(
+        skill_root.join("references/a-b.md"),
+        "dash secondary body\n",
+    )
+    .expect("dash secondary fixture");
+    fs::write(
+        skill_root.join("references/a_b.md"),
+        "underscore secondary body\n",
+    )
+    .expect("underscore secondary fixture");
+    fs::write(
+        skill_root.join("references/café.md"),
+        "acute secondary body\n",
+    )
+    .expect("acute secondary fixture");
+    fs::write(
+        skill_root.join("references/cafö.md"),
+        "diaeresis secondary body\n",
+    )
+    .expect("diaeresis secondary fixture");
+    let core = GatewayCore::new(Catalog::new(Some(root)));
+
+    let asset = single_asset(&core, AssetType::Skill);
+    let ReadResult::Succeeded(Snapshot::AssetDetail(detail)) = core.read(&Query::AssetDetail(
+        agent_config_manager_lib::domain::AssetDetailQuery {
+            asset: asset.clone(),
+        },
+    )) else {
+        panic!("collision Skill detail must be readable through the public query seam");
+    };
+    let tree = detail
+        .detail
+        .file_tree_root
+        .as_ref()
+        .expect("multi-file collision Skill must expose public tree refs");
+    let mut files = Vec::new();
+    collect_files(tree, &mut files);
+    let dash = files
+        .iter()
+        .find(|file| file.relative_path == "references/a-b.md")
+        .expect("dash path must be selectable from the public tree");
+    let underscore = files
+        .iter()
+        .find(|file| file.relative_path == "references/a_b.md")
+        .expect("underscore path must be selectable from the public tree");
+    let acute = files
+        .iter()
+        .find(|file| file.relative_path == "references/café.md")
+        .expect("acute Unicode path must be selectable from the public tree");
+    let diaeresis = files
+        .iter()
+        .find(|file| file.relative_path == "references/cafö.md")
+        .expect("diaeresis Unicode path must be selectable from the public tree");
+    assert_ne!(
+        dash.file_id, underscore.file_id,
+        "distinct legal paths must not collapse to one public file identity"
+    );
+    assert_ne!(
+        acute.file_id, diaeresis.file_id,
+        "distinct Unicode paths that share a slug must not collapse to one public file identity"
+    );
+
+    for (file, expected_body) in [
+        (dash, "dash secondary body\n"),
+        (underscore, "underscore secondary body\n"),
+        (acute, "acute secondary body\n"),
+        (diaeresis, "diaeresis secondary body\n"),
+    ] {
+        let ReadResult::Succeeded(Snapshot::NativeFile(snapshot)) =
+            core.read(&Query::NativeFile(NativeFileQuery {
+                asset: asset.clone(),
+                file_id: file.file_id.clone(),
+            }))
+        else {
+            panic!("each tree fileId must round-trip through public native-file query");
+        };
+        assert_eq!(snapshot.file, *file);
+        let NativeFileContent::Source(content) = snapshot.content else {
+            panic!("collision fixture files must remain ordinary read-only text");
+        };
+        assert_eq!(content.masked_text, expected_body);
+        assert!(!snapshot.file.has_draft_changes);
+    }
+}
+
+#[test]
 fn fx02_long_term_instruction_and_subagent_use_actual_type_specific_read_surfaces() {
     let core = core();
     let instruction = single_asset(&core, AssetType::LongTermInstruction);
@@ -416,6 +517,131 @@ fn fx02_symlinked_primary_files_do_not_escape_or_enumerate_native_assets() {
         panic!("symlinked Subagent must not form a readable native file");
     };
     assert_eq!(subagent_failure.reason_code, ReasonCode::ReadFailed);
+}
+
+#[cfg(unix)]
+#[test]
+// 高概率 TOCTOU 探针：公开 read seam 没有可控调度点，故此有界并发交换不能单独
+// 作为安全性的充分证据；它只在观测到 root 外内容时提供明确的反例。
+fn fx02_leaf_symlink_swap_never_leaks_outside_content_through_public_reads() {
+    const ATTEMPTS: usize = 32;
+    let sandbox = tempfile::tempdir().expect("temporary TOCTOU fixture root");
+    let outside = tempfile::tempdir().expect("temporary outside target root");
+    let root = sandbox.path().join("fx-toctou/native-root");
+    let references = root.join("skills/toctou-skill/references");
+    fs::create_dir_all(&references).expect("TOCTOU multi-file Skill fixture directory");
+    fs::write(
+        root.join("skills/toctou-skill/SKILL.md"),
+        "safe Skill primary\n",
+    )
+    .expect("safe Skill primary");
+    for index in 0..16 {
+        fs::write(
+            references.join(format!("aaa-padding-{index:02}.md")),
+            vec![b'p'; 128 * 1024],
+        )
+        .expect("padding file that creates a bounded check/read window");
+    }
+    let victim = references.join("zzz-victim.md");
+    fs::write(&victim, "safe secondary content\n").expect("safe victim file");
+    let marker = "OUTSIDE-CONTENT";
+    let outside_file = outside.path().join("outside-content.md");
+    fs::write(&outside_file, marker).expect("outside marker content");
+
+    let core = GatewayCore::new(Catalog::new(Some(root)));
+    let asset = single_asset(&core, AssetType::Skill);
+    let ReadResult::Succeeded(Snapshot::AssetDetail(initial_detail)) = core.read(
+        &Query::AssetDetail(agent_config_manager_lib::domain::AssetDetailQuery {
+            asset: asset.clone(),
+        }),
+    ) else {
+        panic!("initial safe Skill detail must be readable");
+    };
+    let mut initial_files = Vec::new();
+    collect_files(
+        initial_detail
+            .detail
+            .file_tree_root
+            .as_ref()
+            .expect("initial multi-file Skill tree"),
+        &mut initial_files,
+    );
+    let victim_file_id = initial_files
+        .iter()
+        .find(|file| file.relative_path == "references/zzz-victim.md")
+        .expect("initial public tree must expose the safe victim")
+        .file_id
+        .clone();
+
+    let swap_link = references.join(".leaf-swap-link");
+    let parking = references.join(".leaf-swap-parking");
+    symlink(&outside_file, &swap_link).expect("outside leaf swap symlink");
+    let start = Arc::new(Barrier::new(2));
+    let stop = Arc::new(AtomicBool::new(false));
+    let attacker_start = Arc::clone(&start);
+    let attacker_stop = Arc::clone(&stop);
+    let attacker_victim = victim.clone();
+    let attacker_swap_link = swap_link.clone();
+    let attacker_parking = parking.clone();
+    let attacker = thread::spawn(move || {
+        attacker_start.wait();
+        while !attacker_stop.load(Ordering::Acquire) {
+            fs::rename(&attacker_victim, &attacker_parking)
+                .expect("park safe leaf before atomic symlink swap");
+            fs::rename(&attacker_swap_link, &attacker_victim)
+                .expect("atomically expose outside leaf symlink");
+            fs::rename(&attacker_parking, &attacker_swap_link)
+                .expect("retain safe leaf as next swap source");
+            thread::sleep(Duration::from_micros(100));
+            fs::rename(&attacker_victim, &attacker_parking)
+                .expect("park outside leaf symlink before restore");
+            fs::rename(&attacker_swap_link, &attacker_victim)
+                .expect("atomically restore safe leaf");
+            fs::rename(&attacker_parking, &attacker_swap_link)
+                .expect("retain outside symlink as next swap source");
+            thread::sleep(Duration::from_micros(100));
+        }
+    });
+
+    let list_query = Query::AssetList(AssetListQuery {
+        scope: AssetListScope::CurrentAssetType {
+            asset_type: AssetType::Skill,
+        },
+        search_text: None,
+        filters: None,
+    });
+    let detail_query = Query::AssetDetail(agent_config_manager_lib::domain::AssetDetailQuery {
+        asset: asset.clone(),
+    });
+    let native_file_query = Query::NativeFile(NativeFileQuery {
+        asset,
+        file_id: victim_file_id,
+    });
+    start.wait();
+    let mut leak = None;
+    'attempts: for attempt in 0..ATTEMPTS {
+        for (projection, query) in [
+            ("asset list", &list_query),
+            ("asset detail", &detail_query),
+            ("native file", &native_file_query),
+        ] {
+            let (_, serialized) = read_serialized(&core, query);
+            if serialized.contains(marker) {
+                leak = Some((attempt, projection));
+                break 'attempts;
+            }
+        }
+    }
+    stop.store(true, Ordering::Release);
+    attacker.join().expect("TOCTOU attacker thread must finish");
+    fs::remove_file(swap_link).expect("outside leaf swap symlink cleanup");
+
+    assert!(
+        leak.is_none(),
+        "outside marker leaked through public {} projection on bounded attempt {}",
+        leak.map_or("unknown", |(_, projection)| projection),
+        leak.map_or(ATTEMPTS, |(attempt, _)| attempt),
+    );
 }
 
 #[test]
