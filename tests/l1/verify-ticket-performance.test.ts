@@ -380,7 +380,13 @@ function createFrozenPf02ComparisonFixture() {
 describe('verify:ticket multi-PF manifest projection', () => {
   it('仅从四个隔离 profile evidence 投影脱敏 performanceResults[]，FE-01 legacy PF 保持 singular', () => {
     const evidenceRoot = mkdtempSync(join(tmpdir(), 'acm-pf-read-manifest-'));
-    const performances = TICKET_REGISTRY['FE-02'].performances as PerformanceConfig[];
+    const performances = (TICKET_REGISTRY['FE-02'].performances as PerformanceConfig[]).map(
+      (performance) => ({
+        ...performance,
+        // 该 lifecycle fixture 必须和已冻结的真实 registry budget 隔离。
+        budgetPath: `performance/budgets/test-no-budget-${performance.descriptorId.toLowerCase()}-${performance.profile}.json`,
+      }),
+    );
     const steps = stepResults(performances);
 
     try {

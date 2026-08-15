@@ -1,0 +1,55 @@
+{
+  "schemaVersion": 1,
+  "descriptorId": "PF-02",
+  "descriptorDigest": "53df623aeb8538e1ad8e2821c287603241647de870dcd2c04c8816cb1beff86e",
+  "profile": "representative",
+  "fixtureDigest": "fc1100b4835e795128117099bc6c246497a26ef0d37bbbb941c3b87d41989e56",
+  "measurementInputDigest": "a1b474199c61bf46c769d83f22c6b7953be7f1053db0c1cbf3ed108e9259de45",
+  "path": "performance/budgets/pf-02.representative.budgets.json",
+  "formula": {
+    "absoluteCeilingMs": "ceil(p95 * 1.5 / 10) * 10",
+    "regressionAllowance": "current p50 <= baseline p50 * 1.25"
+  },
+  "baselineProvenance": {
+    "run": ".artifacts/performance/PF-02/representative/20260814T153344617Z-p43084-000",
+    "commit": "9470f64e9b1edb4695092675fbfbd2043ac7b354",
+    "worktreeDirty": false,
+    "runner": {
+      "node": "v24.18.0",
+      "npm": "11.16.0",
+      "platform": "darwin",
+      "release": "25.6.0",
+      "macosProductVersion": "26.6.1",
+      "arch": "arm64"
+    },
+    "toolchain": {
+      "rustc": "rustc 1.97.1 (8bab26f4f 2026-07-14)",
+      "cargo": "cargo 1.97.1 (c980f4866 2026-06-30)"
+    },
+    "descriptorDigest": "53df623aeb8538e1ad8e2821c287603241647de870dcd2c04c8816cb1beff86e",
+    "fixtureDigest": "fc1100b4835e795128117099bc6c246497a26ef0d37bbbb941c3b87d41989e56",
+    "measurementInputDigest": "a1b474199c61bf46c769d83f22c6b7953be7f1053db0c1cbf3ed108e9259de45",
+    "artifacts": {
+      "samples.json": "4c69d018fc9b54e45ae7340b6716b8b1cdc352cf2e1d1d5f4a0730dd43e13aa4",
+      "summary.json": "373705bcb83f62ac8278521e69d1bc70804c6a70e87f14b97087f84e99c97e01",
+      "proposed-budgets.json": "10297e8e61e8d315ebc0f036593116e10df0c2b5b45ab1aa7261be9b5fd1b864"
+    }
+  },
+  "metrics": {
+    "pf02.source.open.content_visible": {
+      "baseline": { "p50": 21.9, "p95": 26.34, "n": 20 },
+      "absoluteCeilingMs": 40,
+      "regressionP50CeilingMs": 27.375
+    },
+    "pf02.source.scroll.render_stable": {
+      "baseline": { "p50": 3.15, "p95": 16.965, "n": 20 },
+      "absoluteCeilingMs": 30,
+      "regressionP50CeilingMs": 3.9375
+    },
+    "pf02.source.readonly_switch.content_visible": {
+      "baseline": { "p50": 21.35, "p95": 22.52, "n": 20 },
+      "absoluteCeilingMs": 40,
+      "regressionP50CeilingMs": 26.6875
+    }
+  }
+}

@@ -1,0 +1,55 @@
+{
+  "schemaVersion": 1,
+  "descriptorId": "PF-03",
+  "descriptorDigest": "53b42bf9e55672d994e4cd170a8cc3b950cbd2498368e6878bb3e8e0eea01258",
+  "profile": "stress",
+  "fixtureDigest": "2826168181bbba8aef9be53dfad8d2374183ef7925768b453b4b16a43e329556",
+  "measurementInputDigest": "24663f8d33a6e6089f6fefb381657985dee80bd2b1fa14da2eba13fcaf69330d",
+  "path": "performance/budgets/pf-03.stress.budgets.json",
+  "formula": {
+    "absoluteCeilingMs": "ceil(p95 * 1.5 / 10) * 10",
+    "regressionAllowance": "current p50 <= baseline p50 * 1.25"
+  },
+  "baselineProvenance": {
+    "run": ".artifacts/performance/PF-03/stress/20260814T153618182Z-p43652-000",
+    "commit": "9470f64e9b1edb4695092675fbfbd2043ac7b354",
+    "worktreeDirty": false,
+    "runner": {
+      "node": "v24.18.0",
+      "npm": "11.16.0",
+      "platform": "darwin",
+      "release": "25.6.0",
+      "macosProductVersion": "26.6.1",
+      "arch": "arm64"
+    },
+    "toolchain": {
+      "rustc": "rustc 1.97.1 (8bab26f4f 2026-07-14)",
+      "cargo": "cargo 1.97.1 (c980f4866 2026-06-30)"
+    },
+    "descriptorDigest": "53b42bf9e55672d994e4cd170a8cc3b950cbd2498368e6878bb3e8e0eea01258",
+    "fixtureDigest": "2826168181bbba8aef9be53dfad8d2374183ef7925768b453b4b16a43e329556",
+    "measurementInputDigest": "24663f8d33a6e6089f6fefb381657985dee80bd2b1fa14da2eba13fcaf69330d",
+    "artifacts": {
+      "samples.json": "ea254d6ac2ac6d3d9db1b8310ab15a4a67989fbec7becd12328cc9752ab12b0a",
+      "summary.json": "5145ce8ae625124da46900feaa0e5c0186ead41c294107dded97e375cc9efac8",
+      "proposed-budgets.json": "0010b9084431fcac45800df4cd739d3098a650c22323b78008736f46b0a56af4"
+    }
+  },
+  "metrics": {
+    "pf03.multifile.tree.visible": {
+      "baseline": { "p50": 18.8, "p95": 27.145, "n": 10 },
+      "absoluteCeilingMs": 50,
+      "regressionP50CeilingMs": 23.5
+    },
+    "pf03.multifile.text_switch.content_visible": {
+      "baseline": { "p50": 18.2, "p95": 19.255, "n": 10 },
+      "absoluteCeilingMs": 30,
+      "regressionP50CeilingMs": 22.75
+    },
+    "pf03.multifile.nontext_switch.metadata_visible": {
+      "baseline": { "p50": 18.3, "p95": 18.855, "n": 10 },
+      "absoluteCeilingMs": 30,
+      "regressionP50CeilingMs": 22.875
+    }
+  }
+}

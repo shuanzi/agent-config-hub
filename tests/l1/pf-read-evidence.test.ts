@@ -1,5 +1,6 @@
 import {
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -37,6 +38,53 @@ type Descriptor = {
   digest: { value: string };
   fixture: { profileDigests: Record<Profile, string> };
 };
+
+const APPROVED_LIVE_BUDGETS = [
+  {
+    id: 'PF-02',
+    profile: 'representative',
+    path: 'performance/budgets/pf-02.representative.budgets.json',
+    baselineRun: '.artifacts/performance/PF-02/representative/20260814T153344617Z-p43084-000',
+    ceilings: {
+      'pf02.source.open.content_visible': 40,
+      'pf02.source.scroll.render_stable': 30,
+      'pf02.source.readonly_switch.content_visible': 40,
+    },
+  },
+  {
+    id: 'PF-02',
+    profile: 'stress',
+    path: 'performance/budgets/pf-02.stress.budgets.json',
+    baselineRun: '.artifacts/performance/PF-02/stress/20260814T153438289Z-p43278-000',
+    ceilings: {
+      'pf02.source.open.content_visible': 120,
+      'pf02.source.scroll.render_stable': 30,
+      'pf02.source.readonly_switch.content_visible': 120,
+    },
+  },
+  {
+    id: 'PF-03',
+    profile: 'representative',
+    path: 'performance/budgets/pf-03.representative.budgets.json',
+    baselineRun: '.artifacts/performance/PF-03/representative/20260814T153509462Z-p43457-000',
+    ceilings: {
+      'pf03.multifile.tree.visible': 30,
+      'pf03.multifile.text_switch.content_visible': 30,
+      'pf03.multifile.nontext_switch.metadata_visible': 30,
+    },
+  },
+  {
+    id: 'PF-03',
+    profile: 'stress',
+    path: 'performance/budgets/pf-03.stress.budgets.json',
+    baselineRun: '.artifacts/performance/PF-03/stress/20260814T153618182Z-p43652-000',
+    ceilings: {
+      'pf03.multifile.tree.visible': 50,
+      'pf03.multifile.text_switch.content_visible': 30,
+      'pf03.multifile.nontext_switch.metadata_visible': 30,
+    },
+  },
+] as const;
 
 function descriptor(id: Descriptor['descriptorId']): Descriptor {
   return JSON.parse(
@@ -226,6 +274,102 @@ describe('PF-02/PF-03 pure read-only evidence dispatcher', () => {
       expect(JSON.stringify(result)).not.toMatch(/\bL3\b|\bRSS\b|SYNTHETIC-SECRET-|\/Users\//);
     },
   );
+
+  it('人工 freeze 后四份真实 versioned budget 必须精确绑定批准阈值与 baseline provenance', () => {
+    expect(
+      APPROVED_LIVE_BUDGETS.filter((config) => !existsSync(config.path)).map(
+        (config) => config.path,
+      ),
+    ).toEqual([]);
+
+    for (const config of APPROVED_LIVE_BUDGETS) {
+      const stat = lstatSync(config.path);
+      expect(stat.isFile()).toBe(true);
+      expect(stat.isSymbolicLink()).toBe(false);
+
+      const raw = readFileSync(config.path, 'utf8');
+      expect(raw).not.toMatch(/SYNTHETIC-SECRET-|\/Users\//);
+      const budget = JSON.parse(raw) as Record<string, unknown>;
+      const spec = descriptor(config.id);
+      const provenance = budget.baselineProvenance as Record<string, unknown>;
+      const metrics = budget.metrics as Record<
+        string,
+        {
+          baseline: { p50: number; p95: number; n: number };
+          absoluteCeilingMs: number;
+          regressionP50CeilingMs: number;
+        }
+      >;
+
+      expect(Object.keys(budget).sort()).toEqual([
+        'baselineProvenance',
+        'descriptorDigest',
+        'descriptorId',
+        'fixtureDigest',
+        'formula',
+        'measurementInputDigest',
+        'metrics',
+        'path',
+        'profile',
+        'schemaVersion',
+      ]);
+      expect(budget).toMatchObject({
+        schemaVersion: 1,
+        descriptorId: config.id,
+        descriptorDigest: spec.digest.value,
+        profile: config.profile,
+        fixtureDigest: spec.fixture.profileDigests[config.profile],
+        path: config.path,
+        formula: spec.budgetFormula,
+      });
+      expect(budget.measurementInputDigest).toMatch(/^[a-f0-9]{64}$/);
+      expect(Object.keys(provenance).sort()).toEqual([
+        'artifacts',
+        'commit',
+        'descriptorDigest',
+        'fixtureDigest',
+        'measurementInputDigest',
+        'run',
+        'runner',
+        'toolchain',
+        'worktreeDirty',
+      ]);
+      expect(provenance).toMatchObject({
+        run: config.baselineRun,
+        worktreeDirty: false,
+        descriptorDigest: spec.digest.value,
+        fixtureDigest: spec.fixture.profileDigests[config.profile],
+        measurementInputDigest: budget.measurementInputDigest,
+      });
+      expect(Object.keys(provenance.artifacts as Record<string, unknown>).sort()).toEqual([
+        'proposed-budgets.json',
+        'samples.json',
+        'summary.json',
+      ]);
+      for (const artifactDigest of Object.values(provenance.artifacts as Record<string, unknown>)) {
+        expect(artifactDigest).toMatch(/^[a-f0-9]{64}$/);
+      }
+      expect(Object.keys(metrics).sort()).toEqual(Object.keys(config.ceilings).sort());
+      for (const [metricId, approvedCeiling] of Object.entries(config.ceilings)) {
+        const metric = metrics[metricId];
+        expect(metric).toBeDefined();
+        expect(Object.keys(metric!).sort()).toEqual([
+          'absoluteCeilingMs',
+          'baseline',
+          'regressionP50CeilingMs',
+        ]);
+        expect(Object.keys(metric!.baseline).sort()).toEqual(['n', 'p50', 'p95']);
+        expect(metric!.baseline.n).toBe(
+          spec.metrics.find((candidate) => candidate.id === metricId)?.minSamplesByProfile[
+            config.profile
+          ],
+        );
+        expect(metric!.absoluteCeilingMs).toBe(approvedCeiling);
+        expect(metric!.absoluteCeilingMs).toBe(Math.ceil((metric!.baseline.p95 * 1.5) / 10) * 10);
+        expect(metric!.regressionP50CeilingMs).toBe(metric!.baseline.p50 * 1.25);
+      }
+    }
+  });
 
   it.each([
     [
