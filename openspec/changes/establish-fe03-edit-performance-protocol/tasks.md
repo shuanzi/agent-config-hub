@@ -1,7 +1,7 @@
 ## 1. Prerequisite planning gate
 
 - [x] 1.1 对本 change 的 proposal、delta spec、design 和 tasks 执行独立只读审查，逐项修复有效 finding，并记录审查不构成 FE-03 功能、PF 或 closure 证据。
-- [ ] 1.2 回主任务取得本 change planning artifacts 的用户显式验收/冻结；仅在该 freeze 后将本 change 合并，且不修改冻结的 FE-03 acceptance、`adopt-selected-b2-ui-baseline` checkbox、ticket 或 tracker。
+- [x] 1.2 回主任务取得本 change planning artifacts 的用户显式验收/冻结；仅在该 freeze 后将本 change 合并，且不修改冻结的 FE-03 acceptance、`adopt-selected-b2-ui-baseline` checkbox、ticket 或 tracker。
 - [ ] 1.3 若 1.1 或 1.2 未完成则记录 blocker 并停止，不恢复 FE-03；只有二者均完成后，才按原 change 的 3.19 重新核验 ARCH-GATE、正式 Ticket Status 和 FE-02 direct-blocker evidence。
 
 ## 2. FE-03 功能优先 gate
