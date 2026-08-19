@@ -33,12 +33,22 @@
 
 ### Requirement: 功能优先与报告语义分离
 
-未完成任务的计划 SHALL 依序完成功能契约与最小实现、L0/L1、必要 L2 和真实产品安全负例，才能在人工报告中记录 `functional complete`。performance、stress、platform hardening 和低概率对抗验证 MUST 在功能完成后作为统一优化阶段独立排期。`functional complete` 与 `hardening pending` 是人工报告语义，不是当前 verifier 的新状态；它们 MUST NOT 要求新增 verifier 状态机、命令或自动 enforcement。在未经授权修改 formal source 前，这些报告语义 MUST NOT 自动映射为 checkbox、frontier、`formal closure` 或 `release ready`，且后置测试未执行时不得冒充通过。
+未完成任务的计划 SHALL 依序完成功能契约与最小实现、L0/L1、必要 L2 和真实产品安全负例，才能在人工报告中记录 `functional complete`。performance、stress、platform hardening 和低概率对抗验证 MUST 在功能完成后作为统一优化阶段独立排期。`functional complete` 与 `hardening pending` 是人工报告语义，不是当前 verifier 的新状态；它们 MUST NOT 要求新增 verifier 状态机、命令或自动 enforcement。在未经授权修改 formal source 前，这些报告语义 MUST NOT 自动映射为 checkbox、frontier、`formal closure` 或 `release ready`，且后置测试未执行时不得冒充通过。上游 ticket 经独立功能复验并人工记录 `functional complete` 后，在其他仍有效的 architecture/产品安全前提满足时，治理计划 SHALL 允许其下游 ticket 的产品功能开发由人工排期；该资格 MUST NOT 改变任何 formal ticket status、DAG、frontier、done、closure 或 release gate。下游的 formal verification/closure MUST 继续等待当前 formal direct blockers=done 且具 evidence。
 
 #### Scenario: 功能测试完成但性能尚未执行
 
 - **WHEN** 一个 ticket 已完成其最小功能 acceptance、L0/L1、必要 L2 和真实产品安全负例，但其性能工作尚未开始
 - **THEN** 人工报告可记录 functional complete 与 hardening pending，但不得自动更新 checkbox、frontier、formal closure 或 release ready
+
+#### Scenario: 上游功能完成后的下游产品功能排期
+
+- **WHEN** 上游 ticket 已经独立功能复验并人工记录 functional complete，且下游的其他 architecture/产品安全前提仍满足
+- **THEN** 人工编排可开始下游的产品功能开发，但不得将其报告为 ready、done 或 closure，也不得改变 formal DAG/frontier；其 formal verification/closure 仍等待当前 formal direct blockers=done 且具 evidence
+
+#### Scenario: 本次受限 apply 不产生 FE-03 实施资格
+
+- **WHEN** 本次 change 仅迁移治理/任务编排文档
+- **THEN** 它 MUST NOT 记录 FE-03 functional complete、授予 FE-03→FE-04 implementation eligibility，或推进 FE-04/FE-10
 
 ### Requirement: Acceptance 与 verifier capability 的单向依赖
 
