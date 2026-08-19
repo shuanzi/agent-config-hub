@@ -1,6 +1,6 @@
 ## Context
 
-参见 [proposal.md](proposal.md) 的动机。本设计只为 planning artifact 定义今后如何重排未完成工作；它不改变产品、验证实现或任何 formal source。当前两个 active changes 仍分别有 51 项和 26 项 unchecked task。clean baseline 只有 FE-01、FE-02、FE-07R 的 registry entry，且没有 `.artifacts/`；因此文档中的 stable pointer 只能被记录为历史指针，不能在本轮重新证明其物理 provenance。
+参见 [proposal.md](proposal.md) 的动机。planning phase 仅以本 change 的 planning artifact 定义今后如何重排未完成工作；本次已授权 apply 仅迁移本 change 的治理/验收文档，以及两个 active change 中未勾选未来任务的执行编排文字，不改变两个 active change 的 checkbox、frozen acceptance、formal ticket status/DAG/frontier、release gate、产品、验证实现或其他 formal source。当前两个 active changes 仍分别有 51 项和 26 项 unchecked task。clean baseline 只有 FE-01、FE-02、FE-07R 的 registry entry，且没有 `.artifacts/`；因此文档中的 stable pointer 只能被记录为历史指针，不能在本轮重新证明其物理 provenance。
 
 formal sources 还存在必须保留而不可在本 change 裁决的差异：
 
@@ -16,16 +16,16 @@ formal sources 还存在必须保留而不可在本 change 裁决的差异：
 **Goals:**
 
 - 用一个受信任 local/CI runner 的明确威胁模型，将产品安全、验证基础设施防误用和理论 hardening 分层。
-- 让每项 pending task 都有可追溯的最小 acceptance、分层验证、disposition、provenance 与 residual risk，而不修改原 task。
+- 让每项 pending task 都有可追溯的最小 acceptance、分层验证、disposition、provenance 与 residual risk；本次只迁移两个 active change 的未勾选未来任务编排，不改其 checkbox、frozen acceptance、formal status 或 gate。
 - 将未来执行固定为功能契约和最小实现、L0/L1、必要 L2、真实产品安全负例、`functional complete`、统一后置 hardening、release 前综合 gate 的有向序列。
 - 让共享 runner、manifest、registry、preflight 和 verifier work 在未来只承担一次公共职责，避免每个 ticket 重复证明同一验证基础设施事实。
 
 **Non-Goals:**
 
-- 不运行 `openspec-apply-change`，不实现或删除任何产品、测试、verifier、registry、budget、collector、descriptor、fixture、evidence 或 gate。
+- 本次受限 apply 不实现或删除任何产品、测试、verifier、registry、budget、collector、descriptor、fixture、evidence 或 gate。
 - 不修改 frozen product acceptance、现有 release gate、ticket/tracker/DAG 或真实产品安全边界；这些都需要用户显式决定及后续独立 apply。
 - 不把 trusted-runner 假设延伸至外部项目输入、真实业务数据、授权或写入边界。
-- 不判断 FE-03 dirty WIP 应被保留或放弃，也不写入 `/Users/xiquandai/.codex/worktrees/6e5c/agent_config_hub`。
+- 本次只记录 FE-03 dirty WIP 的最小化后续范围，不写入、恢复、整理、stash、clean 或 cherry-pick `/Users/xiquandai/.codex/worktrees/6e5c/agent_config_hub`。
 
 ## Decisions
 
@@ -71,24 +71,26 @@ formal sources 还存在必须保留而不可在本 change 裁决的差异：
   -> release ready
 ```
 
-`functional complete` 和 `hardening pending` 是人工报告语义，不是当前 verifier 的新状态机、命令或自动 enforcement。前者只表明该 ticket 的最小产品 acceptance、所需 L0/L1/L2 与真实产品安全负例已完成；它不代表 performance/stress/platform hardening 已通过。未经授权修改 formal source 时，两者不可自动映射为 checkbox、frontier、formal closure 或 release ready；`hardening pending` 也不可伪装为通过、给 release credit 或借用别票 evidence。`formal closure` 和 `release ready` 继续受其各自当前 formal gate 约束，直到用户明确决定要如何调整 frozen acceptance 或 release requirement。
+`functional complete` 和 `hardening pending` 是人工报告语义，不是当前 verifier 的新状态机、命令或自动 enforcement。前者只表明该 ticket 的最小产品 acceptance、所需 L0/L1/L2 与真实产品安全负例已完成；它不代表 performance/stress/platform hardening 已通过。经独立功能复验并由人工记录 `functional complete` 后，在其他仍有效的 architecture/产品安全前提满足时，可使其直接下游 ticket 的**产品功能开发**获得人工排期资格，即使上游仍为 `hardening pending`、未 done 或未 formal closure；这不自动改变任何 formal ticket status、DAG、frontier、done、release gate，也不得把下游开发开工报告为 ready、done 或 closure。下游的 formal ticket 验证和 closure 仍以当前 formal direct blockers=done 且具 evidence 为前置。`hardening pending` 不可伪装为通过、给 release credit 或借用别票 evidence；上游自身的 applicable PF/hardening 必须完成并通过后才能进入其 formal closure。`formal closure` 和 `release ready` 继续受其各自当前 formal gate 约束，直到用户明确决定要如何调整 frozen acceptance 或 release requirement。
 
 ### D6：FE-03 的安全最小化和 WIP disposition
 
-FE-03 的先决建议是先将 formal runner 威胁模型收窄到 D2，然后再决定 WIP 的最小化方式。proposal 确认前，native helper、formal comparison、PF、`verify:ticket` 和 closure 继续暂停。未来的功能阶段保留 draft、dirty guard、unknown preservation、grant invalidation/re-masking、L0/L1 与必要 L2；不取得 L3、actual Tauri IPC、真实 authorization 或磁盘写入 credit。
+用户已选择“最小化”。本次 apply 只根据已完成的只读比较记录后续受限范围：保留仍需独立功能复验的 draft、dirty guard、unknown preservation、真实 grant invalidation/re-masking、L0/L1 与必要 L2；停止 native helper、复杂 module/graph/physical provenance 与同权限目录交换对抗的过度部分。PF、formal comparison、`verify:ticket`、budget/freeze/history 与 closure 仍是后置工作，本次不执行。
 
-现有 dirty WIP 没有在此设计中被裁决。用户确认之后，未来 apply 只能在不改历史 evidence 的前提下选择并记录以下一种明确 disposition：保留与最小目标一致的部分、最小化为受信任 runner 所需控制，或放弃并从 clean target 重建。任何选择都必须单独检查 6e5c 的 dirty diff，且本 change 不执行该检查或写入。
+这项最小化不取得 L3、actual Tauri IPC、真实 authorization 或磁盘写入 credit，也不把 FE-03 标为 `functional complete`、done 或 closed，且不在本轮启动或推进 FE-04/FE-10。只有未来 FE-03 经独立功能复验并人工记录 `functional complete` 后，FE-04 的产品功能开发才可获得人工排期资格；FE-03 仍等待自身 applicable PF/hardening 通过及 formal closure，FE-04 的 formal ticket 验证和 closure 仍受其当前 formal direct blocker 约束。
 
-### D7：需要用户显式决定的边界
+### D7：用户确认的方案 A 与仍需独立授权的边界
 
-下列事项不能由此 planning change 自动改变：
+用户已确认本次仅作受限文档 apply，并逐项确认：
 
-- 是否改变任何 frozen product acceptance、FE-03 PF 作为 formal closure 前置条件的语义，或 ticket/checkbox/frontier 状态；
-- 是否改变 release gate、release command 或 release-ready 门槛；
-- 是否把性能/PF 从当前 formal closure 前置移动为后置 hardening，及其对票据完成语义的影响；
-- 是否采纳 FE-03 dirty WIP 的保留、最小化或放弃 disposition；
-- 是否为同权限对抗或 compromised runner/toolchain 建立额外 hardening 项目；
-- 任何会弱化真实产品安全边界的建议（本 design 不提出此类建议）。
+- frozen product acceptance、formal ticket status、checkbox、DAG、frontier、done 语义与 release gate 一律不改；
+- `functional complete`/`hardening pending` 仅为人工报告与编排语义。经独立功能复验的上游 `functional complete` 可使下游**产品功能开发**获得人工排期资格，但不使下游变为 ready/done/closed，不启动 formal 验证或 closure，也不改变 formal DAG/frontier；
+- PF/performance/stress/platform/低概率对抗 hardening 后置但不删除、不冒充通过、不借其他 ticket evidence。上游自身 applicable PF/hardening 的 fail/inconclusive 继续阻止其 formal closure，release gate 不降低；
+- FE-03 WIP 采用 D6 的最小化 disposition：后续保留功能和真实 grant 安全部分，停止过度 provenance/native-helper；仍需独立最小化与功能复验。本次不标记 FE-03 `functional complete`/done/closed，也不推进或启动 FE-04/FE-10；
+- 同权限目录交换、compromised runner/toolchain、跨平台 secure filesystem、复杂 binary provenance 仅记录为 residual risk，暂不立项；
+- 历史 evidence、completed tasks、FE-02 failure/waiver 与每个 ticket 的 provenance 不改写、删除或互借。
+
+未来任何触及 frozen acceptance、formal status/DAG/frontier、release gate、真实产品安全边界或新的 hardening 项目的工作，仍须取得独立授权；本次 document completion 不构成该授权。
 
 ## Risks / Trade-offs
 
@@ -96,10 +98,10 @@ FE-03 的先决建议是先将 formal runner 威胁模型收窄到 D2，然后�
 - [受信任 runner 被攻陷或被同权限对抗者操纵] → 明确作为不在本模型内的 residual risk；如业务风险改变，再以单独 threat-model change 处理。
 - [共享基础设施可能重新耦合各 ticket] → 仅共享无状态公共能力；ticket identity、产品 acceptance、run identity、层级与 closure credit 始终独立。
 - [formal source 冲突导致错误推进] → 矩阵并列记录冲突并把状态改动留给用户确认后的 future apply，不从文档或 mock 推断 ready/done。
-- [FE-03 旧 WIP 被误当成可复用 closure 输入] → proposal 确认前维持暂停；即使以后保留，也只能是待重新核验的实现输入，不能改写或替代历史 lineage。
+- [FE-03 旧 WIP 被误当成可复用 closure 输入] → 已选择最小化，但后续仍须独立功能复验；保留部分只能是待核验的实现输入，不能改写或替代历史 lineage。
 
 ## Migration Plan
 
-本 planning change 没有部署、数据迁移或运行时 rollback。其唯一可提交内容是本 change 目录中的 OpenSpec 文档；撤回即不合并该 planning change，现有 product code、evidence、tracker、gate 和 WIP 均保持不变。
+本受限 apply 没有部署、数据迁移或运行时 rollback。其唯一可提交内容是本 change 的治理文档与两个 active change 的未来任务编排文字；撤回即不合并该 planning change，现有 product code、evidence、tracker、gate 和 WIP 均保持不变。
 
-在用户审查并明确确认后，future apply 的最小迁移顺序是：先把审计矩阵中的公共 preflight/verification 责任与产品 acceptance 逐项映射到正式 change；再先交付每个产品 slice 的功能和真实产品安全负例；随后集中排期 performance/stress/platform hardening；最后仅按仍有效的 formal ticket/release gate 执行 closure/release 验证。任何会触及 D7 的项目先停止并回主任务请求显式决定。
+在 D7 的确认范围内，future apply 的最小迁移顺序是：先把审计矩阵中的公共 preflight/verification 责任与产品 acceptance 逐项映射到正式 change；再先交付每个产品 slice 的功能和真实产品安全负例，并在独立复验后人工报告 `functional complete`；该报告可用于下游产品功能开发的人工排期，但不改变 formal gate。随后集中排期 performance/stress/platform hardening；最后仅按仍有效的 formal ticket/release gate 执行 closure/release 验证。任何会触及 D7 之外的项目先停止并回主任务请求独立授权。
