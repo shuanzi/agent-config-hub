@@ -6,7 +6,7 @@
  * verify:static 在临时目录重新生成并逐字节比对，任何手工编辑都会造成漂移失败。
  */
 
-export const GATEWAY_WIRE_VERSION = 4 as const;
+export const GATEWAY_WIRE_VERSION = 5 as const;
 
 export type AssetTypeWire = "skill" | "longTermInstruction" | "subagent" | "hook";
 export type AgentIdWire = "claude-code" | "codex" | "gemini-cli" | "opencode";
@@ -22,7 +22,7 @@ export type ReasonCodeWire = "UNKNOWN_AGENT_VERSION" | "INCOMPATIBLE_STRUCTURE" 
 export type IndexStatusWire = "fresh" | "stale" | "rebuilding" | "failed";
 export type CompatibilityStatusWire = "verifiedWritable" | "recognizedReadOnly" | "incompatibleBlocked";
 export type SensitiveDisplayStateWire = "masked" | "temporarilyRevealed" | "changedMasked";
-export type SensitiveAccessScopeWire = "modify";
+export type SensitiveAccessScopeWire = "view" | "modify";
 export type SensitiveWorkbenchSurfaceWire = "source";
 export type AnomalyKindWire = "readOnly" | "incompatible" | "conflict" | "drift";
 export type AssetStatusFilterWire = "editable" | "readOnly" | "incompatible" | "normal" | "overridden" | "conflict" | "drift";

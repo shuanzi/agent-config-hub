@@ -23,6 +23,7 @@
  * - getCallLog()：返回全部 read 调用（含 query），供“只有 read、无 prepare/apply”断言。
  */
 import fixture from '../../fixtures/fx-01/fixture.json';
+import fx12Fixture from '../../fixtures/fx-12/fixture.json';
 import skillMdRaw from '../../fixtures/fx-01/native-root/skills/demo-skill/SKILL.md?raw';
 import fx02InstructionRaw from '../../fixtures/fx-02/native-root/long-term-instructions/release-notes.md?raw';
 import fx02SkillRaw from '../../fixtures/fx-02/native-root/skills/multifile-skill-mixed/SKILL.md?raw';
@@ -290,6 +291,8 @@ export class ScriptedMockGateway implements FrontendGateway {
   private fe02ReadSurfaces = false;
   /** FE-03 frontend-local draft L2 的隔离安全三类型 fixture。 */
   private fe03Drafts = false;
+  /** FX-12 的只读 sensitive-view 场景；与 FE-03 modify fixture 保持独立。 */
+  private fx12SensitiveView = false;
   /** PF-01 perf-catalog scenario 的合成目录；null 时保持 FX-01 单资产语义 */
   private perfCatalog: PerfCatalog | null = null;
   /** PF-02/PF-03 安全 bundle；只读采样 scenario，不读取真实文件系统。 */
@@ -311,6 +314,9 @@ export class ScriptedMockGateway implements FrontendGateway {
     }
     if (this.perfReadSurface !== null) {
       return this.readFromPerfReadSurface(query) as ReadResult<SnapshotFor<Q>>;
+    }
+    if (this.fx12SensitiveView) {
+      return this.readFromFx12SensitiveView(query) as ReadResult<SnapshotFor<Q>>;
     }
     if (this.fe03Drafts) {
       return this.readFromFe03Drafts(query) as ReadResult<SnapshotFor<Q>>;
@@ -497,6 +503,13 @@ export class ScriptedMockGateway implements FrontendGateway {
         break;
       case 'fe03-drafts':
         this.fe03Drafts = true;
+        break;
+      case 'fx12-sensitive-view':
+        this.fx12SensitiveView = true;
+        break;
+      case 'fx12-sensitive-view-failed':
+        this.fx12SensitiveView = true;
+        this.failNext('sensitiveReveal', 'READ_FAILED');
         break;
       default:
         break;
@@ -1060,6 +1073,464 @@ export class ScriptedMockGateway implements FrontendGateway {
         };
         return this.readSucceeded(snapshot);
       }
+    }
+  }
+
+  /**
+   * FX-12 是单独的只读功能输入：没有 FE-03 draft、modify grant 或可编辑
+   * capability。fixture 只携带遮蔽 metadata；临时内容只在下面的 read response
+   * 中出现，既不写入 fixture、call log、缓存或 workspace event。
+   */
+  private fx12SensitiveViewRecords(): SyntheticReadRecord[] {
+    const readonly = { kind: 'disabled' as const, reasonCode: 'READ_ONLY_POLICY' as const };
+    const allowed = { kind: 'allowed' as const };
+    const revision =
+      this.externalChangeCount === 0
+        ? fx12Fixture.revision
+        : `${fx12Fixture.revision}+external-${this.externalChangeCount}`;
+    const primaryFile: NativeFileRef = {
+      fileId: fx12Fixture.file.fileId,
+      name: fx12Fixture.file.name,
+      relativePath: fx12Fixture.file.relativePath,
+      fileKind: 'text',
+      isPrimary: true,
+      canPreview: allowed,
+      canEdit: readonly,
+      hasDraftChanges: false,
+    };
+    const alternateFile: NativeFileRef = {
+      fileId: fx12Fixture.alternateFile.fileId,
+      name: fx12Fixture.alternateFile.name,
+      relativePath: fx12Fixture.alternateFile.relativePath,
+      fileKind: 'text',
+      isPrimary: false,
+      canPreview: allowed,
+      canEdit: readonly,
+      hasDraftChanges: false,
+    };
+    const alternateDestinationFile: NativeFileRef = {
+      fileId: fx12Fixture.alternateDestination.file.fileId,
+      name: fx12Fixture.alternateDestination.file.name,
+      relativePath: fx12Fixture.alternateDestination.file.relativePath,
+      fileKind: 'text',
+      isPrimary: true,
+      canPreview: allowed,
+      canEdit: readonly,
+      hasDraftChanges: false,
+    };
+    const ordinaryFile: NativeFileRef = {
+      fileId: fx12Fixture.ordinaryFile.fileId,
+      name: fx12Fixture.ordinaryFile.name,
+      relativePath: fx12Fixture.ordinaryFile.relativePath,
+      fileKind: 'text',
+      isPrimary: true,
+      canPreview: allowed,
+      canEdit: readonly,
+      hasDraftChanges: false,
+    };
+    const asset: AssetSummary = {
+      asset: {
+        assetId: fx12Fixture.asset.assetId,
+        assetType: 'longTermInstruction',
+        nativeUnitRef: fx12Fixture.asset.nativeUnitRef,
+        adapterIdentity: 'fx12-synthetic@local',
+        nativeOwnership: { kind: 'global' },
+      },
+      displayName: fx12Fixture.asset.displayName,
+      anomalies: [],
+      agents: ['codex'],
+      scope: 'global',
+      contextHint: { kind: 'path', pathHint: 'FX-12 masked-only fixture' },
+      sourceTier: { id: 'source-fx12-sensitive-view', label: 'FX-12 masked-only fixture' },
+      availability: readonly,
+    };
+    const detail: AssetDetail = {
+      asset: asset.asset,
+      displayName: asset.displayName,
+      nativeUnitKind: 'singleFile',
+      revision,
+      compatibility: 'recognizedReadOnly',
+      capabilities: { edit: readonly, convert: readonly, export: readonly, delete: readonly },
+      effectiveContexts: [
+        {
+          agent: 'codex',
+          scope: 'global',
+          sourceTierLabel: 'FX-12 masked-only fixture',
+          precedence: 0,
+        },
+      ],
+      primaryFile,
+      fileTreeRoot: {
+        name: 'fx12-sensitive-view',
+        children: [
+          { name: primaryFile.name, file: primaryFile },
+          { name: alternateFile.name, file: alternateFile },
+        ],
+      },
+      readSurface: { kind: 'longTermInstruction', markdownFile: primaryFile },
+    };
+    const inspector: InspectorData = {
+      agents: asset.agents,
+      scope: 'global',
+      effectiveContexts: detail.effectiveContexts,
+      sourceAnchor: { kind: 'globalRoot', label: 'FX-12 masked-only fixture' },
+      pathDisplay: 'FX-12 masked-only fixture',
+      compatibility: 'recognizedReadOnly',
+      overrides: [],
+    };
+    const alternateDestinationAsset: AssetSummary = {
+      asset: {
+        assetId: fx12Fixture.asset.assetId,
+        assetType: 'longTermInstruction',
+        nativeUnitRef: fx12Fixture.alternateDestination.nativeUnitRef,
+        adapterIdentity: 'fx12-synthetic@local',
+        nativeOwnership: {
+          kind: 'project',
+          projectId: fx12Fixture.alternateDestination.projectId,
+        },
+      },
+      displayName: fx12Fixture.alternateDestination.displayName,
+      anomalies: [],
+      agents: ['codex'],
+      scope: 'project',
+      contextHint: {
+        kind: 'project',
+        projectName: fx12Fixture.alternateDestination.projectId,
+      },
+      sourceTier: {
+        id: 'source-fx12-sensitive-view-project',
+        label: 'FX-12 project masked-only fixture',
+      },
+      availability: readonly,
+    };
+    const alternateDestinationDetail: AssetDetail = {
+      asset: alternateDestinationAsset.asset,
+      displayName: alternateDestinationAsset.displayName,
+      nativeUnitKind: 'singleFile',
+      revision,
+      compatibility: 'recognizedReadOnly',
+      capabilities: { edit: readonly, convert: readonly, export: readonly, delete: readonly },
+      effectiveContexts: [
+        {
+          agent: 'codex',
+          scope: 'project',
+          sourceTierLabel: 'FX-12 project masked-only fixture',
+          precedence: 0,
+        },
+      ],
+      primaryFile: alternateDestinationFile,
+      fileTreeRoot: {
+        name: 'fx12-sensitive-view-project',
+        children: [{ name: alternateDestinationFile.name, file: alternateDestinationFile }],
+      },
+      readSurface: { kind: 'longTermInstruction', markdownFile: alternateDestinationFile },
+    };
+    const alternateDestinationInspector: InspectorData = {
+      agents: alternateDestinationAsset.agents,
+      scope: 'project',
+      effectiveContexts: alternateDestinationDetail.effectiveContexts,
+      sourceAnchor: {
+        kind: 'project',
+        projectName: fx12Fixture.alternateDestination.projectId,
+      },
+      pathDisplay: 'FX-12 project masked-only fixture',
+      compatibility: 'recognizedReadOnly',
+      overrides: [],
+    };
+    const ordinaryAsset: AssetSummary = {
+      asset: {
+        assetId: fx12Fixture.ordinaryAsset.assetId,
+        assetType: 'longTermInstruction',
+        nativeUnitRef: fx12Fixture.ordinaryAsset.nativeUnitRef,
+        adapterIdentity: 'fx12-synthetic@local',
+        nativeOwnership: { kind: 'global' },
+      },
+      displayName: fx12Fixture.ordinaryAsset.displayName,
+      anomalies: [],
+      agents: ['codex'],
+      scope: 'global',
+      contextHint: { kind: 'path', pathHint: 'FX-12 masked-only fixture' },
+      sourceTier: { id: 'source-fx12-ordinary-readonly', label: 'FX-12 masked-only fixture' },
+      availability: readonly,
+    };
+    const ordinaryDetail: AssetDetail = {
+      asset: ordinaryAsset.asset,
+      displayName: ordinaryAsset.displayName,
+      nativeUnitKind: 'singleFile',
+      revision: 'rev-fx12-ordinary-readonly-0001',
+      compatibility: 'recognizedReadOnly',
+      capabilities: { edit: readonly, convert: readonly, export: readonly, delete: readonly },
+      effectiveContexts: detail.effectiveContexts,
+      primaryFile: ordinaryFile,
+      readSurface: { kind: 'longTermInstruction', markdownFile: ordinaryFile },
+    };
+    const ordinaryInspector: InspectorData = {
+      ...inspector,
+      agents: ordinaryAsset.agents,
+      effectiveContexts: ordinaryDetail.effectiveContexts,
+    };
+    const paginationRecords: SyntheticReadRecord[] = Array.from(
+      { length: fx12Fixture.pagination.additionalReadOnlyRows },
+      (_, index) => {
+        const displayName = `Z FX-12 pagination ${String(index + 1).padStart(2, '0')}`;
+        const paginationAsset: AssetSummary = {
+          ...ordinaryAsset,
+          asset: {
+            ...ordinaryAsset.asset,
+            assetId: `asset-fx12-pagination-${index + 1}`,
+            nativeUnitRef: `nunit-fx12-pagination-${index + 1}`,
+          },
+          displayName,
+        };
+        const paginationDetail: AssetDetail = {
+          ...ordinaryDetail,
+          asset: paginationAsset.asset,
+          displayName,
+          revision: `rev-fx12-pagination-${index + 1}`,
+        };
+        return {
+          summary: paginationAsset,
+          detail: paginationDetail,
+          inspector: ordinaryInspector,
+          files: [
+            {
+              file: ordinaryFile,
+              source: '# FX-12 pagination read-only\n\nMasked-only fixture metadata.\n',
+            },
+          ],
+        };
+      },
+    );
+    return [
+      {
+        summary: asset,
+        detail,
+        inspector,
+        files: [
+          {
+            file: primaryFile,
+            source: `${fx12Fixture.maskedSource.prefix}${fx12Fixture.maskedSource.placeholder}${fx12Fixture.maskedSource.suffix}`,
+            maskedParts: [
+              { kind: 'text', text: fx12Fixture.maskedSource.prefix },
+              { kind: 'sensitivePlaceholder', segmentId: fx12Fixture.segment.segmentId },
+              { kind: 'text', text: fx12Fixture.maskedSource.suffix },
+            ],
+            sensitiveSegments: [
+              {
+                segmentId: fx12Fixture.segment.segmentId,
+                fileId: primaryFile.fileId,
+                revision,
+                displayState: 'masked',
+              },
+            ],
+          },
+          {
+            file: alternateFile,
+            source: '# FX-12 view context\n\nMasked-only fixture metadata.\n',
+          },
+        ],
+      },
+      {
+        summary: alternateDestinationAsset,
+        detail: alternateDestinationDetail,
+        inspector: alternateDestinationInspector,
+        files: [
+          {
+            file: alternateDestinationFile,
+            source: '# FX-12 project read-only\n\nMasked-only fixture metadata.\n',
+          },
+        ],
+      },
+      {
+        summary: ordinaryAsset,
+        detail: ordinaryDetail,
+        inspector: ordinaryInspector,
+        files: [
+          {
+            file: ordinaryFile,
+            source: '# FX-12 ordinary read-only\n\nMasked-only fixture metadata.\n',
+          },
+        ],
+      },
+      ...paginationRecords,
+    ];
+  }
+
+  private readFromFx12SensitiveView(
+    query: Query,
+  ): ReadResult<
+    AssetDetailSnapshot | NativeFileSnapshot | SensitiveRevealSnapshot | WorkbenchActualReadSnapshot
+  > {
+    const records = this.fx12SensitiveViewRecords();
+    const maskedRecord = records.find(
+      (record) => record.summary.asset.assetId === fx12Fixture.asset.assetId,
+    );
+    if (maskedRecord === undefined) return this.readFailed('READ_FAILED');
+    switch (query.kind) {
+      case 'workbench': {
+        let filters;
+        try {
+          filters = canonicalizeWorkbenchFilters(query.filters, query.viewContext);
+        } catch {
+          return this.readFailed('READ_FAILED');
+        }
+        const eligibleRecords =
+          query.assetType !== 'longTermInstruction'
+            ? []
+            : records.filter(
+                (record) =>
+                  (filters?.agents === undefined || filters.agents.includes('codex')) &&
+                  (filters?.sourceIds === undefined ||
+                    filters.sourceIds.includes(record.summary.sourceTier.id)) &&
+                  (filters?.statuses === undefined || filters.statuses.includes('readOnly')),
+              );
+        const rowsFor = (segmentRecords: SyntheticReadRecord[]): ReadOnlyRow[] =>
+          segmentRecords.map((record, authoritativeInputOrder) => ({
+            assetRef: toReadOnlyAssetRef(record.summary.asset),
+            assetId: record.summary.asset.assetId,
+            displayName: record.summary.displayName,
+            sortBaseName: record.summary.displayName,
+            authoritativeInputOrder,
+            nativeOwnership: record.summary.asset.nativeOwnership,
+            agents: record.summary.agents,
+            sourceTierId: record.summary.sourceTier.id,
+            sourceTierLabel: record.summary.sourceTier.label,
+            redactedSummary: 'FX-12 masked-only fixture',
+            ownershipHint:
+              record.summary.asset.nativeOwnership.kind === 'global'
+                ? 'FX-12 masked-only fixture'
+                : record.summary.asset.nativeOwnership.projectId,
+            statuses: ['readOnly'],
+          }));
+        const globalRows = rowsFor(
+          eligibleRecords.filter(
+            (record) => record.summary.asset.nativeOwnership.kind === 'global',
+          ),
+        );
+        const projectSegments = [
+          ...new Set(
+            eligibleRecords.flatMap((record) =>
+              record.summary.asset.nativeOwnership.kind === 'project'
+                ? [record.summary.asset.nativeOwnership.projectId]
+                : [],
+            ),
+          ),
+        ]
+          .sort((left, right) => left.localeCompare(right, 'zh-CN'))
+          .map((projectId) => ({
+            id: `segment-fx12-project-${projectId}`,
+            source: 'projectNative' as const,
+            displayLabel: projectId,
+            projectId,
+            rows: rowsFor(
+              eligibleRecords.filter(
+                (record) =>
+                  record.summary.asset.nativeOwnership.kind === 'project' &&
+                  record.summary.asset.nativeOwnership.projectId === projectId,
+              ),
+            ),
+          }));
+        const globalSegment = {
+          id: 'segment-fx12-sensitive-view',
+          source: 'globalApplicable' as const,
+          displayLabel: 'Global',
+          rows: globalRows,
+        };
+        const selectedProjectId =
+          query.viewContext.kind === 'project' ? query.viewContext.projectId : null;
+        const segments =
+          query.viewContext.kind === 'global'
+            ? globalRows.length === 0
+              ? []
+              : [globalSegment]
+            : query.viewContext.kind === 'project'
+              ? projectSegments.filter((segment) => segment.projectId === selectedProjectId)
+              : [...(globalRows.length === 0 ? [] : [globalSegment]), ...projectSegments];
+        return this.readSucceeded({
+          kind: 'workbench',
+          query: { ...query, ...(filters === undefined ? {} : { filters }) },
+          authoritativeReadRevision: maskedRecord.detail.revision,
+          segments,
+          effectiveContexts: [],
+          findings: [],
+          aggregateTotal: segments.reduce((total, segment) => total + segment.rows.length, 0),
+          indexStatus: 'fresh',
+          readAt: new Date().toISOString(),
+        });
+      }
+      case 'assetDetail': {
+        const record = records.find((candidate) =>
+          sameAssetRef(candidate.summary.asset, query.asset),
+        );
+        return record === undefined
+          ? this.readFailed('READ_FAILED')
+          : this.readSucceeded({
+              kind: 'assetDetail',
+              detail: record.detail,
+              inspector: record.inspector,
+              revision: record.detail.revision,
+            });
+      }
+      case 'nativeFile': {
+        const record = records.find((candidate) =>
+          sameAssetRef(candidate.summary.asset, query.asset),
+        );
+        if (record === undefined) return this.readFailed('READ_FAILED');
+        const entry = record.files.find((candidate) => candidate.file.fileId === query.fileId);
+        if (entry === undefined) return this.readFailed('READ_FAILED');
+        return this.readSucceeded({
+          kind: 'nativeFile',
+          file: entry.file,
+          revision: record.detail.revision,
+          assetRevision: record.detail.revision,
+          content: {
+            kind: 'source',
+            maskedText: entry.source ?? '',
+            sensitiveSegments: entry.sensitiveSegments ?? [],
+            ...(entry.maskedParts === undefined ? {} : { maskedParts: entry.maskedParts }),
+          },
+          structuredView: { kind: 'disabled', reasonCode: 'READ_ONLY_POLICY' },
+        });
+      }
+      case 'sensitiveReveal': {
+        const entry = maskedRecord.files.find(
+          (candidate) => candidate.file.fileId === query.fileId,
+        );
+        const segment = entry?.sensitiveSegments?.find(
+          (candidate) => candidate.segmentId === query.segmentId,
+        );
+        if (
+          !sameAssetRef(maskedRecord.summary.asset, query.asset) ||
+          entry === undefined ||
+          segment === undefined ||
+          segment.fileId !== entry.file.fileId ||
+          segment.revision !== maskedRecord.detail.revision ||
+          query.fileRevision !== maskedRecord.detail.revision ||
+          query.assetRevision !== maskedRecord.detail.revision ||
+          query.scope !== 'view' ||
+          query.surface !== 'source'
+        )
+          return this.readFailed('READ_FAILED');
+        return this.readSucceeded({
+          kind: 'sensitiveReveal',
+          plaintext: String.fromCodePoint(101, 112, 104, 101, 109, 101, 114, 97, 108),
+          grant: {
+            grantId: globalThis.crypto.randomUUID(),
+            asset: maskedRecord.summary.asset,
+            fileId: entry.file.fileId,
+            segmentId: segment.segmentId,
+            fileRevision: maskedRecord.detail.revision,
+            assetRevision: maskedRecord.detail.revision,
+            scope: 'view',
+            surface: 'source',
+            expiresAt: new Date(Date.now() + fx12Fixture.view.ttlMs).toISOString(),
+          },
+        });
+      }
+      case 'assetList':
+      case 'globalLocator':
+      case 'projectApplicability':
+        return this.readFailed('UNSUPPORTED_CAPABILITY');
     }
   }
 

@@ -29,3 +29,11 @@
 **计划证据分层：** 只运行 L0（静态/类型/生成一致性）、L1（列表状态、焦点、locator、四 Agent 语义、`view` grant 失效/重新遮蔽、reduced-motion、对比度与控件名称）与 L2（宽/中/窄只读 `FX-12` browser journey，覆盖同一 grant/a11y 状态）。**无 L3、无 PF。**
 
 **计划通过与 provenance 边界：** 未来 L2 必须证明真实 browser event 下的只读 focus/return、列表 reset、搜索遮蔽和 type-specific surface；mock PASS 不取得 IPC、磁盘、Keychain、Tauri lifecycle、写入、真实 Adapter、production artifact 或 L4 credit。尚未运行前所有层级均为 `planned / unverified`。
+
+## 2026-08-20 task-only functional completion record
+
+本记录只确认已完成 OpenSpec `3.13`–`3.16` 的 FE-10 功能切片：独立 L0/L1/L2 复验覆盖只读宽／中／窄、列表与 locator 焦点旅程、四 Agent cells、reduced-motion、frontend-local disclosure、以及独立的短生命周期 sensitive `view` grant 与重新遮蔽。该 grant 不复用 FE-03 `modify` scope、waiver、evidence 或 closure credit。
+
+这是 **task-only、non-closure** 的 `functional complete` 记录：不改变本票据的 `Ticket Status: ready-for-agent`、Frozen acceptance、DAG、frontier、`done`、release gate 或 formal verification/closure。`3.17`、`3.18`、L3、PF 和 `npm run verify:ticket -- FE-10` 均未运行；未创建 `.artifacts`，也不取得 IPC、磁盘、真实 Adapter 或 production artifact credit。
+
+本次 wire vectors 中仍有一条既有的 FX-01 `assetDetail` historical golden mismatch（revision/readSurface）；它未改写、未被当作 FE-10 通过或 closure evidence。其余适用 FE-10 wire/drift、L1 与 browser-mode scripted mock L2 检查已独立复验。

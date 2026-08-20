@@ -334,9 +334,10 @@ pub struct NativeFileQuery {
     pub file_id: String,
 }
 
-/// FE-03 当前只开放敏感段的 `modify` read；`view` 仍属于后续 FE-10 范围。
+/// 敏感段查看与修改使用同一 revision-bound read DTO，但 scope 必须显式区分。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SensitiveAccessScope {
+    View,
     Modify,
 }
 

@@ -61,6 +61,7 @@ declare global {
     __fx01?: {
       getCalls: () => RecordedReadCall[];
       getObserveCallCount: () => number;
+      failNextWorkbenchRead: () => void;
       emitWorkspaceInvalidation: () => void;
       getLocator: () => ReadOnlyWorkbenchState['locator'];
       setAllProjectFilter: (projectId: string) => void;
@@ -194,6 +195,7 @@ function mount(session: ReadOnlyWorkbenchSession): void {
 window.__fx01 = {
   getCalls: () => mock.getCallLog(),
   getObserveCallCount: () => mock.getObserveCallCount(),
+  failNextWorkbenchRead: () => mock.failNext('workbench', 'READ_FAILED'),
   emitWorkspaceInvalidation: () => {
     mock.simulateExternalChange();
     mock.emitEvent({ kind: 'assetsInvalidated', assetType: 'skill' });

@@ -1296,10 +1296,10 @@ impl Catalog {
         })
     }
 
-    /// 在当前一次 catalog read 中重新解析且只返回所请求的合成敏感片段。
+    /// FE-03 modify：在当前一次 catalog read 中重新解析且只返回所请求的合成敏感片段。
     /// 所有 opaque identity 和 revision 都必须与当前权威文件事实精确一致；任何
     /// 不一致、非文本或不可编辑内容一律失败，不以旧 snapshot 或路径推测补全。
-    pub fn sensitive_reveal(
+    pub fn sensitive_modify_reveal(
         &self,
         asset: &AssetRef,
         file_id: &str,
@@ -1335,6 +1335,56 @@ impl Catalog {
             .find(|candidate| candidate.segment_id == segment_id)?;
         Some(raw[token.start..token.end].to_string())
     }
+
+    /// FE-10 view：独立于 modify 的只读敏感读取。它不检查 `can_edit`，但仍以
+    /// asset/file/segment/revision 的当前权威 binding 为唯一准入条件。
+    pub fn sensitive_view_reveal(
+        &self,
+        asset: &AssetRef,
+        file_id: &str,
+        segment_id: &str,
+        file_revision: &str,
+        asset_revision: &str,
+    ) -> Option<String> {
+        if asset.asset_type == AssetType::Hook {
+            return None;
+        }
+        if asset.asset_type == AssetType::Skill {
+            let skill = self.load_by_asset_id(&asset.asset_id)?;
+            let current_asset = skill.asset_ref();
+            let loaded_file = skill
+                .files
+                .iter()
+                .find(|candidate| skill.file_id_for(&candidate.relative_path) == file_id)?;
+            let file = skill.file_ref(loaded_file);
+            let current_file_revision = revision_of(&loaded_file.raw_bytes);
+            if &current_asset != asset
+                || file.file_kind != FileKind::Text
+                || current_file_revision != file_revision
+                || skill.revision != asset_revision
+            {
+                return None;
+            }
+            return sensitive_token_plaintext(
+                &loaded_file.raw_bytes,
+                &skill.fixture_prefix,
+                segment_id,
+            );
+        }
+
+        let loaded = self.static_asset_by_id(&asset.asset_id)?;
+        let file = loaded.file_ref();
+        let revision = loaded.revision();
+        if &loaded.asset_ref() != asset
+            || file.file_id != file_id
+            || file.file_kind != FileKind::Text
+            || revision != file_revision
+            || revision != asset_revision
+        {
+            return None;
+        }
+        sensitive_token_plaintext(&loaded.raw_bytes, &loaded.fixture_prefix, segment_id)
+    }
 }
 
 fn read_only_capabilities() -> AssetCapabilities {
@@ -1354,6 +1404,20 @@ struct ParsedSensitiveToken {
     start: usize,
     end: usize,
     segment_id: String,
+}
+
+/// 仅在已完成 scope-specific binding 校验后，按 opaque segment identity 取片段。
+/// 这个解析 helper 不了解 grant、scope、draft 或 UI 状态。
+fn sensitive_token_plaintext(
+    raw_bytes: &[u8],
+    fixture_prefix: &str,
+    segment_id: &str,
+) -> Option<String> {
+    let raw = std::str::from_utf8(raw_bytes).ok()?;
+    let token = parse_sensitive_tokens(raw, fixture_prefix)
+        .into_iter()
+        .find(|candidate| candidate.segment_id == segment_id)?;
+    Some(raw[token.start..token.end].to_string())
 }
 
 /// 唯一的 sensitive token 解析：range 和 opaque segment identity 同时确定，供

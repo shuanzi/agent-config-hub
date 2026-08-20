@@ -1,0 +1,63 @@
+{
+  "fixtureId": "FX-12",
+  "name": "sensitive-view-readonly",
+  "description": "只读 sensitive view grant 的隔离功能输入；仅含遮蔽元数据，不含敏感明文。",
+  "safety": {
+    "syntheticOnly": true,
+    "executeContent": false,
+    "sensitiveValuesMaskedAtReadBoundary": true,
+    "containsPlaintext": false
+  },
+  "asset": {
+    "assetId": "asset-fx12-sensitive-view",
+    "nativeUnitRef": "nunit-fx12-sensitive-view",
+    "displayName": "Masked local instruction"
+  },
+  "alternateDestination": {
+    "nativeUnitRef": "nunit-fx12-sensitive-view-project",
+    "projectId": "project-fx12-sensitive-view",
+    "displayName": "Masked local instruction (project)",
+    "file": {
+      "fileId": "file-fx12-sensitive-view-project",
+      "name": "project-view.md",
+      "relativePath": "project-view.md"
+    }
+  },
+  "ordinaryAsset": {
+    "assetId": "asset-fx12-ordinary-readonly",
+    "nativeUnitRef": "nunit-fx12-ordinary-readonly",
+    "displayName": "FX-12 ordinary read-only instruction"
+  },
+  "file": {
+    "fileId": "file-fx12-sensitive-view",
+    "name": "view.md",
+    "relativePath": "view.md"
+  },
+  "alternateFile": {
+    "fileId": "file-fx12-view-context",
+    "name": "view-context.md",
+    "relativePath": "view-context.md"
+  },
+  "ordinaryFile": {
+    "fileId": "file-fx12-ordinary-readonly",
+    "name": "ordinary.md",
+    "relativePath": "ordinary.md"
+  },
+  "segment": {
+    "segmentId": "seg-fx12-sensitive-view"
+  },
+  "revision": "rev-fx12-sensitive-view-0001",
+  "maskedSource": {
+    "prefix": "# FX-12 read-only view\n\nSetting: ",
+    "placeholder": "••••••••",
+    "suffix": "\n"
+  },
+  "view": {
+    "scope": "view",
+    "surface": "source",
+    "ttlMs": 2000
+  },
+  "pagination": {
+    "additionalReadOnlyRows": 20
+  }
+}

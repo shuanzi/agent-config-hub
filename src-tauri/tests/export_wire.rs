@@ -19,7 +19,8 @@ fn export_wire_is_byte_deterministic() {
 
     let text = String::from_utf8(a).unwrap();
     assert!(text.contains("DO NOT EDIT"));
-    assert!(text.contains("export const GATEWAY_WIRE_VERSION = 4 as const;"));
+    assert!(text.contains("export const GATEWAY_WIRE_VERSION = 5 as const;"));
+    assert!(text.contains("export type SensitiveAccessScopeWire = \"view\" | \"modify\";"));
     assert!(text.contains("ReadRequestEnvelope"));
     assert!(text.contains("WorkspaceEventEnvelope"));
 }

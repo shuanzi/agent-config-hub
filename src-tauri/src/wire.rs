@@ -17,7 +17,7 @@ use ts_rs::TS;
 use crate::domain;
 
 /// 当前唯一支持的 wire 版本；不匹配在 ingress 封闭失败，不做协商或 fallback。
-pub const GATEWAY_WIRE_VERSION: u32 = 4;
+pub const GATEWAY_WIRE_VERSION: u32 = 5;
 
 // ---------------------------------------------------------------------------
 // 字符串枚举 DTO
@@ -120,7 +120,7 @@ wire_string_enum!(
     TemporarilyRevealed,
     ChangedMasked
 );
-wire_string_enum!(SensitiveAccessScopeWire, "camelCase", Modify);
+wire_string_enum!(SensitiveAccessScopeWire, "camelCase", View, Modify);
 wire_string_enum!(SensitiveWorkbenchSurfaceWire, "camelCase", Source);
 wire_string_enum!(
     AnomalyKindWire,
@@ -1371,6 +1371,7 @@ enum_convert_both!(
 enum_convert_both!(
     SensitiveAccessScopeWire,
     SensitiveAccessScope,
+    (View, View),
     (Modify, Modify)
 );
 enum_convert_both!(

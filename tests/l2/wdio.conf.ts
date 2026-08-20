@@ -8,6 +8,7 @@ import { createServer, type ViteDevServer } from 'vite';
 import type {} from 'webdriverio';
 
 let viteServer: ViteDevServer | null = null;
+const forceReducedMotion = process.env.FE10_REDUCED_MOTION === 'reduce';
 
 // 注：@wdio/types 9.30 的 Options.Testrunner 漏声明 `capabilities`（运行时仍读取），
 // 故此处用类型断言补齐，不改依赖。
@@ -25,6 +26,7 @@ export const config = {
           '--no-sandbox',
           '--disable-dev-shm-usage',
           '--window-size=1440,900',
+          ...(forceReducedMotion ? ['--force-prefers-reduced-motion=reduce'] : []),
         ],
       },
     },

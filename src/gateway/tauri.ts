@@ -81,6 +81,7 @@ const INDEX_STATUSES = ['fresh', 'stale', 'rebuilding', 'failed'] as const;
 const APPLICABILITY = ['resolved', 'unknown', 'blocked', 'stale'] as const;
 const PRESENCE = ['absent', 'present', 'unknown', 'blocked', 'stale'] as const;
 const ACTIVATION = ['notApplicable', 'enabled', 'disabled', 'unknown', 'blocked', 'stale'] as const;
+const SENSITIVE_ACCESS_SCOPES = ['view', 'modify'] as const;
 const LOCATOR_MATCH_FIELDS = [
   'displayName',
   'assetType',
@@ -247,7 +248,7 @@ function sensitiveRevealQueryFromWire(value: unknown): SensitiveRevealQuery | nu
     !maskedDisplayString(value.segmentId) ||
     !maskedDisplayString(value.fileRevision) ||
     !maskedDisplayString(value.assetRevision) ||
-    value.scope !== 'modify' ||
+    !isOneOf(value.scope, SENSITIVE_ACCESS_SCOPES) ||
     value.surface !== 'source'
   ) {
     return null;
@@ -262,7 +263,7 @@ function sensitiveRevealQueryFromWire(value: unknown): SensitiveRevealQuery | nu
         segmentId: value.segmentId,
         fileRevision: value.fileRevision,
         assetRevision: value.assetRevision,
-        scope: 'modify',
+        scope: value.scope,
         surface: 'source',
       };
 }
@@ -300,7 +301,7 @@ function sensitiveRevealSnapshotFromWire(
     !maskedDisplayString(grant.segmentId) ||
     !maskedDisplayString(grant.fileRevision) ||
     !maskedDisplayString(grant.assetRevision) ||
-    grant.scope !== 'modify' ||
+    !isOneOf(grant.scope, SENSITIVE_ACCESS_SCOPES) ||
     grant.surface !== 'source' ||
     !canonicalUtcTimestamp(grant.expiresAt) ||
     new Date(grant.expiresAt).getTime() <= Date.now() ||
@@ -341,7 +342,7 @@ function sensitiveRevealSnapshotFromWire(
     segmentId: grant.segmentId,
     fileRevision: grant.fileRevision,
     assetRevision: grant.assetRevision,
-    scope: 'modify',
+    scope: grant.scope,
     surface: 'source',
     expiresAt: grant.expiresAt,
   };
