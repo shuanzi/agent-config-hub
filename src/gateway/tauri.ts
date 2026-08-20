@@ -29,12 +29,16 @@ import type {
   EffectiveContext,
   FileTreeNode,
   InspectorData,
+  MaskedSourcePart,
   NativeFileContent,
   NativeFileRef,
   NativeFileSnapshot,
   OverrideRelation,
   Query,
   ReadResult,
+  SensitiveAccessGrant,
+  SensitiveRevealQuery,
+  SensitiveRevealSnapshot,
   SensitiveSegmentRef,
   SnapshotFor,
   Subscription,
@@ -222,6 +226,128 @@ function sameAssetRef(left: AssetRef, right: AssetRef): boolean {
   );
 }
 
+function sensitiveRevealQueryFromWire(value: unknown): SensitiveRevealQuery | null {
+  if (
+    !isRecord(value) ||
+    value.kind !== 'sensitiveReveal' ||
+    !Object.keys(value).every((key) =>
+      [
+        'kind',
+        'asset',
+        'fileId',
+        'segmentId',
+        'fileRevision',
+        'assetRevision',
+        'scope',
+        'surface',
+      ].includes(key),
+    ) ||
+    Object.keys(value).length !== 8 ||
+    !maskedDisplayString(value.fileId) ||
+    !maskedDisplayString(value.segmentId) ||
+    !maskedDisplayString(value.fileRevision) ||
+    !maskedDisplayString(value.assetRevision) ||
+    value.scope !== 'modify' ||
+    value.surface !== 'source'
+  ) {
+    return null;
+  }
+  const asset = assetRefFromResponseWire(value.asset);
+  return asset === null
+    ? null
+    : {
+        kind: 'sensitiveReveal',
+        asset,
+        fileId: value.fileId,
+        segmentId: value.segmentId,
+        fileRevision: value.fileRevision,
+        assetRevision: value.assetRevision,
+        scope: 'modify',
+        surface: 'source',
+      };
+}
+
+function canonicalUtcTimestamp(value: unknown): value is string {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value)) {
+    return false;
+  }
+  const instant = new Date(value);
+  return !Number.isNaN(instant.getTime()) && instant.toISOString() === value;
+}
+
+/**
+ * `sensitiveReveal` response 在进入 session/buffer 前必须完整复验 Rust DTO
+ * 的封闭形状和 query binding。任何拒绝都由外层归一化，不读取或记录明文/grant。
+ */
+function sensitiveRevealSnapshotFromWire(
+  value: unknown,
+  request: SensitiveRevealQuery,
+): SensitiveRevealSnapshot | null {
+  if (
+    !isRecord(value) ||
+    value.kind !== 'sensitiveReveal' ||
+    typeof value.plaintext !== 'string' ||
+    !isRecord(value.grant) ||
+    Object.keys(value).length !== 3 ||
+    !Object.keys(value).every((key) => ['kind', 'plaintext', 'grant'].includes(key))
+  ) {
+    return null;
+  }
+  const grant = value.grant;
+  if (
+    !maskedDisplayString(grant.grantId) ||
+    !maskedDisplayString(grant.fileId) ||
+    !maskedDisplayString(grant.segmentId) ||
+    !maskedDisplayString(grant.fileRevision) ||
+    !maskedDisplayString(grant.assetRevision) ||
+    grant.scope !== 'modify' ||
+    grant.surface !== 'source' ||
+    !canonicalUtcTimestamp(grant.expiresAt) ||
+    new Date(grant.expiresAt).getTime() <= Date.now() ||
+    Object.keys(grant).length !== 9 ||
+    !Object.keys(grant).every((key) =>
+      [
+        'grantId',
+        'asset',
+        'fileId',
+        'segmentId',
+        'fileRevision',
+        'assetRevision',
+        'scope',
+        'surface',
+        'expiresAt',
+      ].includes(key),
+    )
+  ) {
+    return null;
+  }
+  const asset = assetRefFromResponseWire(grant.asset);
+  if (
+    asset === null ||
+    !sameAssetRef(asset, request.asset) ||
+    grant.fileId !== request.fileId ||
+    grant.segmentId !== request.segmentId ||
+    grant.fileRevision !== request.fileRevision ||
+    grant.assetRevision !== request.assetRevision ||
+    grant.scope !== request.scope ||
+    grant.surface !== request.surface
+  ) {
+    return null;
+  }
+  const decodedGrant: SensitiveAccessGrant = {
+    grantId: grant.grantId,
+    asset,
+    fileId: grant.fileId,
+    segmentId: grant.segmentId,
+    fileRevision: grant.fileRevision,
+    assetRevision: grant.assetRevision,
+    scope: 'modify',
+    surface: 'source',
+    expiresAt: grant.expiresAt,
+  };
+  return { kind: 'sensitiveReveal', plaintext: value.plaintext, grant: decodedGrant };
+}
+
 function nativeFileRefFromWire(value: unknown): NativeFileRef | null {
   if (
     !isRecord(value) ||
@@ -294,6 +420,55 @@ function allDecoded<T>(values: readonly (T | null)[]): values is T[] {
   return values.every((value): value is T => value !== null);
 }
 
+/**
+ * `maskedParts` 只有 Rust authority 可构造。缺失/null 仍兼容旧 nativeFile
+ * read；若出现则闭合验证每个 part，并与现有 sensitive segment 一一绑定。
+ */
+function maskedSourcePartsFromWire(
+  value: unknown,
+  sensitiveSegments: readonly SensitiveSegmentRef[],
+  maskedText: string,
+): MaskedSourcePart[] | undefined | null {
+  if (value === undefined || value === null) return undefined;
+  if (!Array.isArray(value)) return null;
+  const parts: MaskedSourcePart[] = [];
+  const placeholderIds = new Set<string>();
+  for (const part of value) {
+    if (!isRecord(part)) return null;
+    if (
+      part.kind === 'text' &&
+      maskedDisplayString(part.text) &&
+      Object.keys(part).length === 2 &&
+      Object.keys(part).every((key) => ['kind', 'text'].includes(key))
+    ) {
+      parts.push({ kind: 'text', text: part.text });
+      continue;
+    }
+    if (
+      part.kind === 'sensitivePlaceholder' &&
+      maskedDisplayString(part.segmentId) &&
+      Object.keys(part).length === 2 &&
+      Object.keys(part).every((key) => ['kind', 'segmentId'].includes(key)) &&
+      !placeholderIds.has(part.segmentId)
+    ) {
+      placeholderIds.add(part.segmentId);
+      parts.push({ kind: 'sensitivePlaceholder', segmentId: part.segmentId });
+      continue;
+    }
+    return null;
+  }
+  const segmentIds = new Set(sensitiveSegments.map((segment) => segment.segmentId));
+  if (
+    segmentIds.size !== sensitiveSegments.length ||
+    placeholderIds.size !== segmentIds.size ||
+    [...segmentIds].some((segmentId) => !placeholderIds.has(segmentId)) ||
+    parts.map((part) => (part.kind === 'text' ? part.text : '••••••••')).join('') !== maskedText
+  ) {
+    return null;
+  }
+  return parts;
+}
+
 function nativeFileSnapshotFromWire(
   value: unknown,
   requestAsset: AssetRef,
@@ -321,9 +496,8 @@ function nativeFileSnapshotFromWire(
     wireContent.kind === 'source' &&
     maskedDisplayString(wireContent.maskedText) &&
     Array.isArray(wireContent.sensitiveSegments) &&
-    Object.keys(wireContent).length === 3 &&
     Object.keys(wireContent).every((key) =>
-      ['kind', 'maskedText', 'sensitiveSegments'].includes(key),
+      ['kind', 'maskedText', 'sensitiveSegments', 'maskedParts'].includes(key),
     ) &&
     file.fileKind === 'text'
   ) {
@@ -341,7 +515,10 @@ function nativeFileSnapshotFromWire(
           'temporarilyRevealed',
           'changedMasked',
         ] as const) ||
-        Object.keys(segment).length !== 4
+        Object.keys(segment).length !== 4 ||
+        !Object.keys(segment).every((key) =>
+          ['segmentId', 'fileId', 'revision', 'displayState'].includes(key),
+        )
       ) {
         return null;
       }
@@ -352,10 +529,17 @@ function nativeFileSnapshotFromWire(
         displayState: segment.displayState,
       });
     }
+    const maskedParts = maskedSourcePartsFromWire(
+      wireContent.maskedParts,
+      sensitiveSegments,
+      wireContent.maskedText,
+    );
+    if (maskedParts === null) return null;
     content = {
       kind: 'source',
       maskedText: wireContent.maskedText,
       sensitiveSegments,
+      ...(maskedParts === undefined ? {} : { maskedParts }),
     };
   } else if (
     wireContent.kind === 'nonTextMetadata' &&
@@ -1347,7 +1531,12 @@ function normalizeResponse<Q extends Query>(
   requestId: string,
   request: Q,
 ): ReadResult<SnapshotFor<Q>> | null {
-  if (!isRecord(raw)) {
+  if (
+    !isRecord(raw) ||
+    (request.kind === 'sensitiveReveal' &&
+      (Object.keys(raw).length !== 3 ||
+        !Object.keys(raw).every((key) => ['wireVersion', 'requestId', 'payload'].includes(key))))
+  ) {
     return null;
   }
   if (raw.wireVersion !== GATEWAY_WIRE_VERSION || raw.requestId !== requestId) {
@@ -1359,7 +1548,13 @@ function normalizeResponse<Q extends Query>(
   }
   if (payload.kind === 'readSucceeded') {
     const snapshot = payload.snapshot;
-    if (!isRecord(snapshot) || snapshot.kind !== request.kind) {
+    if (
+      !isRecord(snapshot) ||
+      snapshot.kind !== request.kind ||
+      (request.kind === 'sensitiveReveal' &&
+        (Object.keys(payload).length !== 2 ||
+          !Object.keys(payload).every((key) => ['kind', 'snapshot'].includes(key))))
+    ) {
       return null;
     }
     if (request.kind === 'workbench') {
@@ -1386,9 +1581,20 @@ function normalizeResponse<Q extends Query>(
         ? null
         : ({ kind: 'readSucceeded', snapshot: normalized } as ReadResult<SnapshotFor<Q>>);
     }
+    if (request.kind === 'sensitiveReveal') {
+      const normalized = sensitiveRevealSnapshotFromWire(snapshot, request);
+      return normalized === null
+        ? null
+        : ({ kind: 'readSucceeded', snapshot: normalized } as ReadResult<SnapshotFor<Q>>);
+    }
     return { kind: 'readSucceeded', snapshot: snapshot as unknown as SnapshotFor<Q> };
   }
   if (payload.kind === 'readFailed') {
+    if (request.kind === 'sensitiveReveal') {
+      // 敏感 read 的 transport failure 不透传任何不可信 message，以免 grant 或
+      // 明文经错误分支进入 session、日志或诊断面。
+      return gatewayUnavailable() as ReadResult<SnapshotFor<Q>>;
+    }
     if (!isOneOf(payload.reasonCode, REASON_CODES) || typeof payload.message !== 'string') {
       return null;
     }
@@ -1453,7 +1659,12 @@ export function createTauriGateway(options: TauriGatewayOptions = {}): FrontendG
     async read<Q extends Query>(query: Q): Promise<ReadResult<SnapshotFor<Q>>> {
       const requestId = crypto.randomUUID();
       try {
-        const request = query.kind === 'workbench' ? workbenchQueryFromWire(query, true) : query;
+        const request =
+          query.kind === 'workbench'
+            ? workbenchQueryFromWire(query, true)
+            : query.kind === 'sensitiveReveal'
+              ? sensitiveRevealQueryFromWire(query)
+              : query;
         if (request === null) return gatewayUnavailable();
         // contract Query 与 wire ReadRequestPayload 结构一一对应（同一封闭
         // tag 集合由 Rust wire DTO 事实源保证）。

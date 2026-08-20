@@ -16,9 +16,9 @@ export type {
  * FrontendGateway 语言无关契约类型的 TypeScript 表达（FE-01 封闭子集）。
  *
  * 事实来源：`docs/frontend/Agent_Config_Manager_前端契约_v0.1.md` §4–§7。
- * 本文件只覆盖 FE-01（只读浏览）所需的 Query / Snapshot / Event 类型；
- * prepare / apply / SensitiveRevealQuery / ManagementQuery / OperationProgressQuery
- * 由对应后续票据扩展，本票据不提前声明。
+ * 本文件覆盖 FE-01（只读浏览）与 FE-03 sensitive reveal read 所需的 Query /
+ * Snapshot / Event 类型；prepare / apply / ManagementQuery / OperationProgressQuery
+ * 仍由对应后续票据扩展，本票据不提前声明。
  *
  * 不透明值约定：assetId / fileId / nativeUnitRef / adapterIdentity / revision /
  * segmentId 均为不透明字符串；路径只用于显示，不能充当身份。
@@ -185,6 +185,18 @@ export interface NativeFileQuery {
   fileId: string;
 }
 
+/** FE-03 仅允许通过既有 read seam 请求一个敏感片段的短生命周期 modify grant。 */
+export interface SensitiveRevealQuery {
+  kind: 'sensitiveReveal';
+  asset: AssetRef;
+  fileId: string;
+  segmentId: string;
+  fileRevision: string;
+  assetRevision: string;
+  scope: 'modify';
+  surface: 'source';
+}
+
 /** FE-07R 的只读 project applicability projection query。 */
 export type ProjectApplicabilityView =
   { kind: 'all' } | { kind: 'global' } | { kind: 'project'; projectId: string };
@@ -199,6 +211,7 @@ export type Query =
   | ProjectApplicabilityQuery
   | AssetDetailQuery
   | NativeFileQuery
+  | SensitiveRevealQuery
   | WorkbenchQuery
   | GlobalLocatorQuery;
 
@@ -406,11 +419,17 @@ export interface SensitiveSegmentRef {
   displayState: SensitiveDisplayState;
 }
 
+/** Rust 权威 source 的有序安全投影；占位符只携带 opaque segment identity。 */
+export type MaskedSourcePart =
+  { kind: 'text'; text: string } | { kind: 'sensitivePlaceholder'; segmentId: string };
+
 /** 源码内容：gateway 返回的文本已完成默认遮蔽，sensitiveSegments 仅为元数据 */
 export interface MaskedSourceContent {
   kind: 'source';
   maskedText: string;
   sensitiveSegments: SensitiveSegmentRef[];
+  /** 加性字段；legacy Rust read 可省略，存在时必须与 sensitiveSegments 精确绑定。 */
+  maskedParts?: MaskedSourcePart[];
 }
 
 /** 非文本只读元数据（契约 §7.5：类型、大小、原生路径与不可预览原因） */
@@ -436,6 +455,26 @@ export interface NativeFileSnapshot {
   structuredView: ActionAvailability;
 }
 
+/** Rust 权威边界签发的 opaque modify grant；前端只消费，不构造或延展。 */
+export interface SensitiveAccessGrant {
+  grantId: string;
+  asset: AssetRef;
+  fileId: string;
+  segmentId: string;
+  fileRevision: string;
+  assetRevision: string;
+  scope: 'modify';
+  surface: 'source';
+  expiresAt: string;
+}
+
+/** 单次 sensitive reveal read 的临时结果；session consumer 必须转入非序列化 buffer。 */
+export interface SensitiveRevealSnapshot {
+  kind: 'sensitiveReveal';
+  plaintext: string;
+  grant: SensitiveAccessGrant;
+}
+
 // ---------------------------------------------------------------------------
 // Snapshot 封闭映射（契约 §6.2：Query 与 Snapshot 一一封闭对应）
 // ---------------------------------------------------------------------------
@@ -448,11 +487,13 @@ export type SnapshotFor<Q extends Query> = Q extends AssetListQuery
       ? AssetDetailSnapshot
       : Q extends NativeFileQuery
         ? NativeFileSnapshot
-        : Q extends WorkbenchQuery
-          ? WorkbenchActualReadSnapshot
-          : Q extends GlobalLocatorQuery
-            ? GlobalLocatorSnapshot
-            : never;
+        : Q extends SensitiveRevealQuery
+          ? SensitiveRevealSnapshot
+          : Q extends WorkbenchQuery
+            ? WorkbenchActualReadSnapshot
+            : Q extends GlobalLocatorQuery
+              ? GlobalLocatorSnapshot
+              : never;
 
 // ---------------------------------------------------------------------------
 // observe（FE-01 封闭子集：WorkspaceSubscription + 失效类事件）

@@ -17,7 +17,7 @@ use ts_rs::TS;
 use crate::domain;
 
 /// 当前唯一支持的 wire 版本；不匹配在 ingress 封闭失败，不做协商或 fallback。
-pub const GATEWAY_WIRE_VERSION: u32 = 3;
+pub const GATEWAY_WIRE_VERSION: u32 = 4;
 
 // ---------------------------------------------------------------------------
 // 字符串枚举 DTO
@@ -120,6 +120,8 @@ wire_string_enum!(
     TemporarilyRevealed,
     ChangedMasked
 );
+wire_string_enum!(SensitiveAccessScopeWire, "camelCase", Modify);
+wire_string_enum!(SensitiveWorkbenchSurfaceWire, "camelCase", Source);
 wire_string_enum!(
     AnomalyKindWire,
     "camelCase",
@@ -471,6 +473,18 @@ pub struct NativeFileQueryWire {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SensitiveRevealQueryWire {
+    pub asset: AssetRefWire,
+    pub file_id: String,
+    pub segment_id: String,
+    pub file_revision: String,
+    pub asset_revision: String,
+    pub scope: SensitiveAccessScopeWire,
+    pub surface: SensitiveWorkbenchSurfaceWire,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(deny_unknown_fields)]
 pub struct AllProjectApplicabilityViewWire {}
 
@@ -579,6 +593,7 @@ pub enum ReadRequestPayload {
     ProjectApplicability(ProjectApplicabilityQueryWire),
     AssetDetail(AssetDetailQueryWire),
     NativeFile(NativeFileQueryWire),
+    SensitiveReveal(SensitiveRevealQueryWire),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -1047,10 +1062,25 @@ pub struct SensitiveSegmentRefWire {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+#[serde(deny_unknown_fields)]
+pub enum MaskedSourcePartWire {
+    Text { text: String },
+    SensitivePlaceholder { segment_id: String },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct SourceContentWire {
     pub masked_text: String,
     pub sensitive_segments: Vec<SensitiveSegmentRefWire>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub masked_parts: Option<Vec<MaskedSourcePartWire>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -1088,6 +1118,27 @@ pub struct NativeFileSnapshotWire {
     pub structured_view: ActionAvailabilityWire,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SensitiveAccessGrantWire {
+    pub grant_id: String,
+    pub asset: AssetRefWire,
+    pub file_id: String,
+    pub segment_id: String,
+    pub file_revision: String,
+    pub asset_revision: String,
+    pub scope: SensitiveAccessScopeWire,
+    pub surface: SensitiveWorkbenchSurfaceWire,
+    pub expires_at: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SensitiveRevealSnapshotWire {
+    pub plaintext: String,
+    pub grant: SensitiveAccessGrantWire,
+}
+
 /// 成功 snapshot 封闭 union；tag 与 request payload 一一对应。
 // wire DTO 每次请求只序列化/反序列化一次，不为 variant 大小差异引入装箱。
 #[allow(clippy::large_enum_variant)]
@@ -1105,6 +1156,7 @@ pub enum SnapshotWire {
     ProjectApplicability(ProjectApplicabilitySnapshotWire),
     AssetDetail(AssetDetailSnapshotWire),
     NativeFile(NativeFileSnapshotWire),
+    SensitiveReveal(SensitiveRevealSnapshotWire),
 }
 
 // ---------------------------------------------------------------------------
@@ -1315,6 +1367,16 @@ enum_convert_both!(
     (Masked, Masked),
     (TemporarilyRevealed, TemporarilyRevealed),
     (ChangedMasked, ChangedMasked)
+);
+enum_convert_both!(
+    SensitiveAccessScopeWire,
+    SensitiveAccessScope,
+    (Modify, Modify)
+);
+enum_convert_both!(
+    SensitiveWorkbenchSurfaceWire,
+    SensitiveWorkbenchSurface,
+    (Source, Source)
 );
 enum_convert_both!(
     AnomalyKindWire,
@@ -1676,6 +1738,17 @@ impl From<ReadRequestPayload> for domain::Query {
                 domain::Query::NativeFile(domain::NativeFileQuery {
                     asset: query.asset.into(),
                     file_id: query.file_id,
+                })
+            }
+            ReadRequestPayload::SensitiveReveal(query) => {
+                domain::Query::SensitiveReveal(domain::SensitiveRevealQuery {
+                    asset: query.asset.into(),
+                    file_id: query.file_id,
+                    segment_id: query.segment_id,
+                    file_revision: query.file_revision,
+                    asset_revision: query.asset_revision,
+                    scope: query.scope.into(),
+                    surface: query.surface.into(),
                 })
             }
         }
@@ -2171,6 +2244,17 @@ impl From<domain::SensitiveSegmentRef> for SensitiveSegmentRefWire {
     }
 }
 
+impl From<domain::MaskedSourcePart> for MaskedSourcePartWire {
+    fn from(value: domain::MaskedSourcePart) -> Self {
+        match value {
+            domain::MaskedSourcePart::Text { text } => Self::Text { text },
+            domain::MaskedSourcePart::SensitivePlaceholder { segment_id } => {
+                Self::SensitivePlaceholder { segment_id }
+            }
+        }
+    }
+}
+
 impl From<domain::NativeFileContent> for NativeFileContentWire {
     fn from(value: domain::NativeFileContent) -> Self {
         match value {
@@ -2182,6 +2266,9 @@ impl From<domain::NativeFileContent> for NativeFileContentWire {
                         .into_iter()
                         .map(Into::into)
                         .collect(),
+                    masked_parts: content
+                        .masked_parts
+                        .map(|parts| parts.into_iter().map(Into::into).collect()),
                 })
             }
             domain::NativeFileContent::NonTextMetadata(meta) => {
@@ -2209,6 +2296,31 @@ impl From<domain::NativeFileSnapshot> for NativeFileSnapshotWire {
     }
 }
 
+impl From<domain::SensitiveAccessGrant> for SensitiveAccessGrantWire {
+    fn from(value: domain::SensitiveAccessGrant) -> Self {
+        SensitiveAccessGrantWire {
+            grant_id: value.grant_id,
+            asset: value.asset.into(),
+            file_id: value.file_id,
+            segment_id: value.segment_id,
+            file_revision: value.file_revision,
+            asset_revision: value.asset_revision,
+            scope: value.scope.into(),
+            surface: value.surface.into(),
+            expires_at: value.expires_at,
+        }
+    }
+}
+
+impl From<domain::SensitiveRevealSnapshot> for SensitiveRevealSnapshotWire {
+    fn from(value: domain::SensitiveRevealSnapshot) -> Self {
+        SensitiveRevealSnapshotWire {
+            plaintext: value.plaintext,
+            grant: value.grant.into(),
+        }
+    }
+}
+
 impl From<domain::Snapshot> for SnapshotWire {
     fn from(value: domain::Snapshot) -> Self {
         match value {
@@ -2222,6 +2334,9 @@ impl From<domain::Snapshot> for SnapshotWire {
             }
             domain::Snapshot::AssetDetail(snapshot) => SnapshotWire::AssetDetail(snapshot.into()),
             domain::Snapshot::NativeFile(snapshot) => SnapshotWire::NativeFile(snapshot.into()),
+            domain::Snapshot::SensitiveReveal(snapshot) => {
+                SnapshotWire::SensitiveReveal(snapshot.into())
+            }
         }
     }
 }

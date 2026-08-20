@@ -2,7 +2,9 @@
 
 **Acceptance state:** `Frozen (2026-08-10; planning acceptance only)`
 
-**Ticket Status:** `ready-for-agent`（不是 `done`；本票据尚未开始实现或产生自身 closure evidence）
+**Ticket Status:** `ready-for-agent`（不是 `done`；本票据尚未产生自身 closure evidence）
+
+**Functional slice record:** `functional complete`（2026-08-20；仅 task-only、`non-closure`）。本轮独立复验仅覆盖 FE-03 的 L0／L1 草稿、保真、dirty guard、grant invalidation／re-masking 与 mock `FrontendGateway` L2 journey；无 L3、actual Tauri IPC、磁盘写入、真实授权、真实 write credit、PF、formal comparison 或 closure credit。该记录只赋予未来 FE-04 产品功能开发的人工排期资格，不改变 FE-03／FE-04 formal status、DAG／frontier、closure 或 release gate，且本轮未启动 FE-04。
 
 **Direct blocker evidence:** FE-02 已 `done`；其 final run `20260815T130239344Z-p33436-000` 的 accepted-with-waiver 记录见 `.artifacts/verification/FE-02/latest-clean-subject-accepted-with-waiver.json`。
 

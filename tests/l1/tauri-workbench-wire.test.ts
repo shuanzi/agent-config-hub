@@ -232,10 +232,10 @@ describe('Tauri workbench wire decode', () => {
     expect(result).toMatchObject({ kind: 'readFailed', reasonCode: 'GATEWAY_UNAVAILABLE' });
   });
 
-  it('breaking wire V3 ingress 明确拒绝前一版 V2 response envelope', async () => {
+  it('breaking wire V4 ingress 明确拒绝前一版 V3 response envelope', async () => {
     invokeMock.mockImplementation(
       async (_command: string, args: { request: { requestId: string } }) => ({
-        wireVersion: 2,
+        wireVersion: 3,
         requestId: args.request.requestId,
         payload: { kind: 'readSucceeded', snapshot: snapshot() },
       }),

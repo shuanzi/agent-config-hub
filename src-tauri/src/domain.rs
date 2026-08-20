@@ -334,6 +334,31 @@ pub struct NativeFileQuery {
     pub file_id: String,
 }
 
+/// FE-03 当前只开放敏感段的 `modify` read；`view` 仍属于后续 FE-10 范围。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SensitiveAccessScope {
+    Modify,
+}
+
+/// FE-03 当前只允许 source 编辑表面消费短生命周期的敏感段结果。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SensitiveWorkbenchSurface {
+    Source,
+}
+
+/// 敏感段访问仍是既有 `read` verb 的封闭 query。调用方必须带回刚读取到的
+/// asset/file/segment/revision 事实；core 不从路径或前端状态推断任何绑定。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SensitiveRevealQuery {
+    pub asset: AssetRef,
+    pub file_id: String,
+    pub segment_id: String,
+    pub file_revision: String,
+    pub asset_revision: String,
+    pub scope: SensitiveAccessScope,
+    pub surface: SensitiveWorkbenchSurface,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Query {
     AssetList(AssetListQuery),
@@ -341,6 +366,7 @@ pub enum Query {
     GlobalLocator(GlobalLocatorQuery),
     AssetDetail(AssetDetailQuery),
     NativeFile(NativeFileQuery),
+    SensitiveReveal(SensitiveRevealQuery),
     ProjectApplicability(ProjectApplicabilityQuery),
 }
 
@@ -810,10 +836,19 @@ pub struct SensitiveSegmentRef {
     pub display_state: SensitiveDisplayState,
 }
 
+/// 已遮蔽 source 的有序安全投影；敏感内容只以当前 read 的 opaque segment identity 表示。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MaskedSourcePart {
+    Text { text: String },
+    SensitivePlaceholder { segment_id: String },
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MaskedSourceContent {
     pub masked_text: String,
     pub sensitive_segments: Vec<SensitiveSegmentRef>,
+    /// 加性字段：无敏感文件保持 None，以兼容只消费 legacy masked_text 的 read consumer。
+    pub masked_parts: Option<Vec<MaskedSourcePart>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -840,6 +875,30 @@ pub struct NativeFileSnapshot {
     pub structured_view: ActionAvailability,
 }
 
+/// 仅供当前 read response 消费的 opaque grant metadata。它不携带可重放操作、
+/// 草稿或写入内容；未来的权威 write consumer 必须复验全部 binding 与 expiry。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SensitiveAccessGrant {
+    pub grant_id: String,
+    pub asset: AssetRef,
+    pub file_id: String,
+    pub segment_id: String,
+    pub file_revision: String,
+    pub asset_revision: String,
+    pub scope: SensitiveAccessScope,
+    pub surface: SensitiveWorkbenchSurface,
+    /// ISO 8601 UTC；由 Rust authority 签发，前端不得自行延展。
+    pub expires_at: String,
+}
+
+/// 只存在于一次 `SensitiveRevealQuery` response 的短生命周期结果。前端后续
+/// 只能转入私有 ephemeral sensitive buffer，绝不可放进 session snapshot 或 draft。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SensitiveRevealSnapshot {
+    pub plaintext: String,
+    pub grant: SensitiveAccessGrant,
+}
+
 // ---------------------------------------------------------------------------
 // Snapshot 封闭 union 与 WorkspaceEvent（FE-01 子集）
 // ---------------------------------------------------------------------------
@@ -854,6 +913,7 @@ pub enum Snapshot {
     ProjectApplicability(ProjectApplicabilitySnapshot),
     AssetDetail(AssetDetailSnapshot),
     NativeFile(NativeFileSnapshot),
+    SensitiveReveal(SensitiveRevealSnapshot),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

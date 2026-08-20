@@ -1,4 +1,4 @@
-import { useEffect, useRef, useSyncExternalStore, type RefObject } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore, type RefObject } from 'react';
 
 import type { AssetDetailSnapshot, FileTreeNode, NativeFileSnapshot } from '../contract/types';
 import type {
@@ -19,6 +19,28 @@ const typeLabel: Record<MvpAssetType, string> = {
   longTermInstruction: '长期指令',
   subagent: 'Subagents',
 };
+
+const SOURCE_CONTEXT_SECTION_ID = 'detail-source-context';
+const HISTORY_RECOVERY_SECTION_ID = 'detail-history-recovery';
+
+function detailEditBinding(
+  detail: AssetDetailSnapshot,
+  file: NativeFileSnapshot,
+  view: ReadOnlyWorkbenchState['detailView'],
+): string {
+  const asset = detail.detail.asset;
+  const ownership = asset.nativeOwnership;
+  return [
+    asset.assetId,
+    asset.assetType,
+    asset.nativeUnitRef,
+    asset.adapterIdentity,
+    ownership.kind,
+    ownership.kind === 'project' ? ownership.projectId : '',
+    file.file.fileId,
+    view,
+  ].join('\u0000');
+}
 
 function stateLabel(state: ReadOnlyWorkbenchState): string {
   if (state.loadState.kind === 'failed') return `读取失败：${state.loadState.reasonCode}`;
@@ -250,6 +272,27 @@ function NativeFileSurface({ file }: { file: NativeFileSnapshot }) {
   );
 }
 
+function isEditableAuthority(detail: AssetDetailSnapshot): boolean {
+  return (
+    detail.detail.compatibility === 'verifiedWritable' &&
+    detail.detail.capabilities.edit.kind === 'allowed'
+  );
+}
+
+function isEditableTextSource(
+  detail: AssetDetailSnapshot,
+  file: NativeFileSnapshot | undefined,
+): file is NativeFileSnapshot & { content: { kind: 'source'; maskedText: string } } {
+  return (
+    file !== undefined &&
+    isEditableAuthority(detail) &&
+    file.file.fileKind === 'text' &&
+    file.file.canEdit.kind === 'allowed' &&
+    file.content.kind === 'source' &&
+    file.content.sensitiveSegments.length === 0
+  );
+}
+
 function sourceAnchorLabel(anchor: AssetDetailSnapshot['inspector']['sourceAnchor']): string {
   if (anchor.kind === 'globalRoot') return anchor.label;
   if (anchor.kind === 'project') return anchor.projectName;
@@ -265,6 +308,17 @@ function ReadOnlyDetail({
   state: ReadOnlyWorkbenchState;
   headingRef: RefObject<HTMLHeadingElement>;
 }) {
+  const [subagentEditBinding, setSubagentEditBinding] = useState<string | null>(null);
+  const currentDetailBinding =
+    state.detail.kind === 'ready' && state.detail.file !== undefined
+      ? detailEditBinding(state.detail.detail, state.detail.file, state.detailView)
+      : null;
+  useEffect(() => {
+    if (subagentEditBinding !== null && subagentEditBinding !== currentDetailBinding) {
+      setSubagentEditBinding(null);
+    }
+  }, [currentDetailBinding, subagentEditBinding]);
+
   if (state.detail.kind === 'idle') return <p>在列表中选择资产以查看只读状态。</p>;
   if (state.detail.kind === 'loading') {
     return (
@@ -291,6 +345,74 @@ function ReadOnlyDetail({
   const { detail, file } = state.detail;
   const surface = detail.detail.readSurface;
   const fileTree = detail.detail.fileTreeRoot;
+  const draft =
+    state.draft !== null && state.draft.assetRef.assetId === detail.detail.asset.assetId
+      ? state.draft
+      : null;
+  const editableTextSource = isEditableTextSource(detail, file);
+  const editableSourceSurface =
+    editableTextSource &&
+    ((surface.kind === 'longTermInstruction' && surface.markdownFile.fileId === file.file.fileId) ||
+      (surface.kind === 'skill' && surface.sourceReadAvailability.kind === 'allowed'));
+  const directInstructionEditor = editableSourceSurface && surface.kind === 'longTermInstruction';
+  const skillSourceEditor =
+    editableSourceSurface && surface.kind === 'skill' && state.detailView === 'source';
+  const editableSource = directInstructionEditor || skillSourceEditor;
+  const authorityMaskedParts =
+    file?.content.kind === 'source' && file.content.maskedParts !== undefined
+      ? file.content.maskedParts
+      : undefined;
+  const editableMaskedSourceSurface =
+    file !== undefined &&
+    authorityMaskedParts !== undefined &&
+    isEditableAuthority(detail) &&
+    file.file.fileKind === 'text' &&
+    file.file.canEdit.kind === 'allowed' &&
+    file.content.kind === 'source' &&
+    file.content.sensitiveSegments.length > 0 &&
+    ((surface.kind === 'longTermInstruction' && surface.markdownFile.fileId === file.file.fileId) ||
+      (surface.kind === 'skill' && surface.sourceReadAvailability.kind === 'allowed'));
+  const directInstructionMaskedEditor =
+    editableMaskedSourceSurface && surface.kind === 'longTermInstruction';
+  const skillMaskedSourceEditor =
+    editableMaskedSourceSurface && surface.kind === 'skill' && state.detailView === 'source';
+  const editableMaskedSource = directInstructionMaskedEditor || skillMaskedSourceEditor;
+  const editableSubagentSurface =
+    editableTextSource &&
+    surface.kind === 'subagent' &&
+    surface.bodyFile.fileId === file.file.fileId &&
+    file.structuredView.kind === 'allowed';
+  const editableSubagent =
+    editableSubagentSurface &&
+    state.detailView === 'structured' &&
+    subagentEditBinding === currentDetailBinding;
+  const canChooseDetailView =
+    (surface.kind === 'skill' && (editableSourceSurface || editableMaskedSourceSurface)) ||
+    editableMaskedSourceSurface ||
+    editableSubagentSurface;
+  const sourceText =
+    editableTextSource && file.content.kind === 'source'
+      ? (draft?.fileProjections.find((projection) => projection.fileId === file.file.fileId)
+          ?.sourceText ?? file.content.maskedText)
+      : '';
+  const subagentModel =
+    surface.kind === 'subagent' ? (draft?.structuredFieldEdits?.model ?? surface.model ?? '') : '';
+  const maskedParts =
+    editableMaskedSource && authorityMaskedParts !== undefined
+      ? (draft?.fileProjections.find((projection) => projection.fileId === file.file.fileId)
+          ?.maskedParts ?? authorityMaskedParts)
+      : undefined;
+  const activeSensitivePart = maskedParts?.find(
+    (part): part is { kind: 'sensitivePlaceholder'; segmentId: string } =>
+      part.kind === 'sensitivePlaceholder' &&
+      state.sensitiveEditorStatus[part.segmentId] !== undefined,
+  );
+  const activeSensitiveSegmentId =
+    state.detailView === 'source' ? activeSensitivePart?.segmentId : undefined;
+  const sensitiveEditorValue =
+    activeSensitiveSegmentId === undefined
+      ? undefined
+      : session.getSensitiveEditorValue(activeSensitiveSegmentId);
   const finding =
     surface.kind === 'skill'
       ? surface.unknownContentReason
@@ -353,9 +475,140 @@ function ReadOnlyDetail({
       {file === undefined ? (
         <p data-testid="native-file-not-opened">选择“查看源码”以加载只读文件内容。</p>
       ) : (
-        <NativeFileSurface file={file} />
+        <>
+          {canChooseDetailView && (
+            <section aria-label="本地草稿编辑">
+              <button
+                type="button"
+                data-testid="fe03-detail-view-source"
+                aria-pressed={state.detailView === 'source'}
+                onClick={() => session.dispatch({ kind: 'setDetailView', view: 'source' })}
+              >
+                源码视图
+              </button>
+              <button
+                type="button"
+                data-testid="fe03-detail-view-structured"
+                aria-pressed={state.detailView === 'structured'}
+                onClick={() => session.dispatch({ kind: 'setDetailView', view: 'structured' })}
+              >
+                结构化视图
+              </button>
+            </section>
+          )}
+          {editableSource && (
+            <textarea
+              data-testid="fe03-draft-textarea"
+              aria-label="本地草稿文本"
+              value={sourceText}
+              onFocus={() => session.dispatch({ kind: 'focusEditSurface', surface: 'source' })}
+              onChange={(event) =>
+                session.dispatch({ kind: 'replaceDraftText', text: event.target.value })
+              }
+            />
+          )}
+          {editableMaskedSource && maskedParts !== undefined && (
+            <section aria-label="本地掩码草稿编辑">
+              {maskedParts.map((part, index) =>
+                part.kind === 'text' ? (
+                  <input
+                    key={`text-${index}`}
+                    data-testid={`fe03-masked-text-part-${index}`}
+                    aria-label={`掩码文本片段 ${index + 1}`}
+                    value={part.text}
+                    onFocus={() =>
+                      session.dispatch({ kind: 'focusEditSurface', surface: 'source' })
+                    }
+                    onChange={(event) =>
+                      session.dispatch({
+                        kind: 'replaceDraftTextPart',
+                        partIndex: index,
+                        text: event.target.value,
+                      })
+                    }
+                  />
+                ) : (
+                  <span key={`masked-${index}`} data-testid="fe03-masked-placeholder">
+                    ••••••••
+                  </span>
+                ),
+              )}
+              {maskedParts.map((part, index) =>
+                part.kind !== 'sensitivePlaceholder' ? null : (
+                  <button
+                    key={`modify-${index}`}
+                    type="button"
+                    data-testid="fe03-sensitive-modify"
+                    onClick={() => {
+                      session.dispatch({ kind: 'focusEditSurface', surface: 'source' });
+                      session.dispatch({ kind: 'beginSensitiveModify', segmentId: part.segmentId });
+                    }}
+                  >
+                    修改敏感字段
+                  </button>
+                ),
+              )}
+              {activeSensitiveSegmentId !== undefined && sensitiveEditorValue !== undefined && (
+                <input
+                  data-testid="fe03-sensitive-editor"
+                  aria-label="敏感字段本地编辑"
+                  value={sensitiveEditorValue}
+                  onChange={(event) =>
+                    session.dispatch({
+                      kind: 'replaceSensitiveDraftSegment',
+                      segmentId: activeSensitiveSegmentId,
+                      value: event.target.value,
+                    })
+                  }
+                />
+              )}
+            </section>
+          )}
+          {editableSubagent && (
+            <input
+              data-testid="fe03-subagent-model"
+              aria-label="Subagent 模型"
+              value={subagentModel}
+              onFocus={() => session.dispatch({ kind: 'focusEditSurface', surface: 'structured' })}
+              onChange={(event) =>
+                session.dispatch({
+                  kind: 'replaceDraftField',
+                  field: 'model',
+                  value: event.target.value,
+                })
+              }
+            />
+          )}
+          {editableSubagentSurface && (
+            <button
+              type="button"
+              data-testid="fe03-subagent-edit"
+              aria-pressed={editableSubagent}
+              onClick={() => {
+                setSubagentEditBinding(detailEditBinding(detail, file, 'structured'));
+                session.dispatch({ kind: 'setDetailView', view: 'structured' });
+              }}
+            >
+              编辑模型
+            </button>
+          )}
+          {!editableSource && !editableMaskedSource && !editableSubagent && (
+            <NativeFileSurface file={file} />
+          )}
+        </>
       )}
-      <details>
+      <details
+        id={SOURCE_CONTEXT_SECTION_ID}
+        open={draft?.expandedSectionIds.includes(SOURCE_CONTEXT_SECTION_ID) === true}
+        onToggle={(event) => {
+          if (draft === null) return;
+          session.dispatch({
+            kind: 'setDraftSectionExpanded',
+            sectionId: SOURCE_CONTEXT_SECTION_ID,
+            expanded: event.currentTarget.open,
+          });
+        }}
+      >
         <summary>来源与上下文</summary>
         <p>来源路径：{detail.inspector.pathDisplay}</p>
         <p>来源锚点：{sourceAnchorLabel(detail.inspector.sourceAnchor)}</p>
@@ -375,7 +628,18 @@ function ReadOnlyDetail({
           ))
         )}
       </details>
-      <details>
+      <details
+        id={HISTORY_RECOVERY_SECTION_ID}
+        open={draft?.expandedSectionIds.includes(HISTORY_RECOVERY_SECTION_ID) === true}
+        onToggle={(event) => {
+          if (draft === null) return;
+          session.dispatch({
+            kind: 'setDraftSectionExpanded',
+            sectionId: HISTORY_RECOVERY_SECTION_ID,
+            expanded: event.currentTarget.open,
+          });
+        }}
+      >
         <summary>历史与恢复</summary>
         <p>当前版本：{detail.revision}</p>
         <p>漂移：当前详情 snapshot 未提供权威事实</p>
@@ -690,6 +954,33 @@ export function ReadOnlyWorkbench({ session }: { session: ReadOnlyWorkbenchSessi
           )}
         </aside>
       </div>
+      {state.dirtyGuard.kind === 'pending' && (
+        <section data-testid="fe03-dirty-guard" aria-label="本地草稿切换提示">
+          <button
+            type="button"
+            data-testid="fe03-dirty-guard-continue"
+            onClick={() => session.dispatch({ kind: 'continueEditing' })}
+          >
+            继续编辑
+          </button>
+          <button
+            type="button"
+            data-testid="fe03-dirty-guard-discard"
+            onClick={() => session.dispatch({ kind: 'discardDraft' })}
+          >
+            丢弃并切换
+          </button>
+        </section>
+      )}
+      {state.draft !== null && state.dirtyGuard.kind === 'idle' && (
+        <button
+          type="button"
+          data-testid="fe03-draft-discard"
+          onClick={() => session.dispatch({ kind: 'discardDraft' })}
+        >
+          丢弃本地草稿
+        </button>
+      )}
       <Locator
         session={session}
         state={state}

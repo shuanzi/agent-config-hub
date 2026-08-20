@@ -10,6 +10,8 @@ import { describe, it } from 'mocha';
 import { browser, expect } from '@wdio/globals';
 import type {} from 'webdriverio';
 
+import { GATEWAY_WIRE_VERSION } from '../../src/gateway/wire/gateway-wire';
+
 interface AssetRef {
   assetId: string;
   assetType: string;
@@ -41,25 +43,30 @@ interface ReadResponse {
 
 async function actualRead(payload: Record<string, unknown>): Promise<ReadResponse> {
   const executeWithArgs = browser.execute as unknown as (
-    script: (requestPayload: Record<string, unknown>) => Promise<unknown>,
+    script: (requestPayload: Record<string, unknown>, wireVersion: number) => Promise<unknown>,
     requestPayload: Record<string, unknown>,
+    wireVersion: number,
   ) => Promise<unknown>;
-  return executeWithArgs((requestPayload) => {
-    const invoke = window.__TAURI__?.core?.invoke as unknown as
-      ((command: string, arguments_: unknown) => Promise<unknown>) | undefined;
-    if (invoke === undefined) throw new Error('test harness 未暴露 Tauri invoke');
-    return invoke('frontend_gateway_read', {
-      request: {
-        wireVersion: 3,
-        requestId: `fx02-l3-${crypto.randomUUID()}`,
-        payload: requestPayload,
-      },
-    });
-  }, payload) as unknown as Promise<ReadResponse>;
+  return executeWithArgs(
+    (requestPayload, wireVersion) => {
+      const invoke = window.__TAURI__?.core?.invoke as unknown as
+        ((command: string, arguments_: unknown) => Promise<unknown>) | undefined;
+      if (invoke === undefined) throw new Error('test harness 未暴露 Tauri invoke');
+      return invoke('frontend_gateway_read', {
+        request: {
+          wireVersion,
+          requestId: `fx02-l3-${crypto.randomUUID()}`,
+          payload: requestPayload,
+        },
+      });
+    },
+    payload,
+    GATEWAY_WIRE_VERSION,
+  ) as unknown as Promise<ReadResponse>;
 }
 
 function succeeded(response: ReadResponse): Record<string, unknown> {
-  expect(response.wireVersion).toBe(3);
+  expect(response.wireVersion).toBe(GATEWAY_WIRE_VERSION);
   expect(response.payload.kind).toBe('readSucceeded');
   if (response.payload.kind !== 'readSucceeded') {
     throw new Error(`actual read failed: ${response.payload.reasonCode}`);

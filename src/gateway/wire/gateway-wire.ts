@@ -6,7 +6,7 @@
  * verify:static 在临时目录重新生成并逐字节比对，任何手工编辑都会造成漂移失败。
  */
 
-export const GATEWAY_WIRE_VERSION = 3 as const;
+export const GATEWAY_WIRE_VERSION = 4 as const;
 
 export type AssetTypeWire = "skill" | "longTermInstruction" | "subagent" | "hook";
 export type AgentIdWire = "claude-code" | "codex" | "gemini-cli" | "opencode";
@@ -22,6 +22,8 @@ export type ReasonCodeWire = "UNKNOWN_AGENT_VERSION" | "INCOMPATIBLE_STRUCTURE" 
 export type IndexStatusWire = "fresh" | "stale" | "rebuilding" | "failed";
 export type CompatibilityStatusWire = "verifiedWritable" | "recognizedReadOnly" | "incompatibleBlocked";
 export type SensitiveDisplayStateWire = "masked" | "temporarilyRevealed" | "changedMasked";
+export type SensitiveAccessScopeWire = "modify";
+export type SensitiveWorkbenchSurfaceWire = "source";
 export type AnomalyKindWire = "readOnly" | "incompatible" | "conflict" | "drift";
 export type AssetStatusFilterWire = "editable" | "readOnly" | "incompatible" | "normal" | "overridden" | "conflict" | "drift";
 export type AssetGroupByWire = "none" | "agent" | "project" | "scope" | "source" | "status";
@@ -46,6 +48,7 @@ export type AssetListFiltersWire = { agents?: Array<AgentIdWire>, projects?: Arr
 export type AssetListQueryWire = { scope: AssetListScopeWire, searchText?: string, filters?: AssetListFiltersWire, };
 export type AssetDetailQueryWire = { asset: AssetRefWire, };
 export type NativeFileQueryWire = { asset: AssetRefWire, fileId: string, };
+export type SensitiveRevealQueryWire = { asset: AssetRefWire, fileId: string, segmentId: string, fileRevision: string, assetRevision: string, scope: SensitiveAccessScopeWire, surface: SensitiveWorkbenchSurfaceWire, };
 export type AllProjectApplicabilityViewWire = Record<string, never>;
 export type GlobalProjectApplicabilityViewWire = Record<string, never>;
 export type ProjectProjectApplicabilityViewWire = { projectId: string, };
@@ -58,7 +61,7 @@ export type ViewContextWire = { "kind": "all" } & AllViewContextWire | { "kind":
 export type WorkbenchFiltersWire = { agents?: Array<AgentIdWire>, sourceIds?: Array<string>, statuses?: Array<AssetStatusFilterWire>, projectIds?: Array<string>, };
 export type WorkbenchQueryWire = { assetType: MvpAssetTypeWire, viewContext: ViewContextWire, filters?: WorkbenchFiltersWire, };
 export type GlobalLocatorQueryWire = { searchText: string, assetTypes: Array<MvpAssetTypeWire>, };
-export type ReadRequestPayload = { "kind": "assetList" } & AssetListQueryWire | { "kind": "workbench" } & WorkbenchQueryWire | { "kind": "globalLocator" } & GlobalLocatorQueryWire | { "kind": "projectApplicability" } & ProjectApplicabilityQueryWire | { "kind": "assetDetail" } & AssetDetailQueryWire | { "kind": "nativeFile" } & NativeFileQueryWire;
+export type ReadRequestPayload = { "kind": "assetList" } & AssetListQueryWire | { "kind": "workbench" } & WorkbenchQueryWire | { "kind": "globalLocator" } & GlobalLocatorQueryWire | { "kind": "projectApplicability" } & ProjectApplicabilityQueryWire | { "kind": "assetDetail" } & AssetDetailQueryWire | { "kind": "nativeFile" } & NativeFileQueryWire | { "kind": "sensitiveReveal" } & SensitiveRevealQueryWire;
 export type ReadRequestEnvelope = { wireVersion: number, requestId: string, payload: ReadRequestPayload, };
 export type AssetSummaryWire = { asset: AssetRefWire, displayName: string, anomalies: Array<AnomalyWire>, agents: Array<AgentIdWire>, scope: AssetScopeWire, contextHint: AssetContextHintWire, sourceTier: SourceTierWire, availability: ActionAvailabilityWire, };
 export type AssetListSnapshotWire = { assets: Array<AssetSummaryWire>, indexStatus: IndexStatusWire, scope: AssetListScopeWire, 
@@ -108,7 +111,8 @@ export type SourceAnchorWire = { "kind": "project" } & ProjectSourceAnchorWire |
 export type InspectorDataWire = { agents: Array<AgentIdWire>, scope: AssetScopeWire, effectiveContexts: Array<EffectiveContextWire>, sourceAnchor: SourceAnchorWire, pathDisplay: string, compatibility: CompatibilityStatusWire, overrides: Array<OverrideRelationWire>, };
 export type AssetDetailSnapshotWire = { detail: AssetDetailWire, inspector: InspectorDataWire, revision: string, };
 export type SensitiveSegmentRefWire = { segmentId: string, fileId: string, revision: string, displayState: SensitiveDisplayStateWire, };
-export type SourceContentWire = { maskedText: string, sensitiveSegments: Array<SensitiveSegmentRefWire>, };
+export type MaskedSourcePartWire = { "kind": "text", text: string, } | { "kind": "sensitivePlaceholder", segmentId: string, };
+export type SourceContentWire = { maskedText: string, sensitiveSegments: Array<SensitiveSegmentRefWire>, maskedParts?: Array<MaskedSourcePartWire>, };
 export type NonTextMetadataContentWire = { fileKindLabel: string, 
 /**
  * 受 JS safe-integer 约束；FE-01 fixture 文件远小于该上限。
@@ -117,7 +121,9 @@ export type NonTextMetadataContentWire = { fileKindLabel: string,
 sizeBytes: number, pathDisplay: string, reasonCode: ReasonCodeWire, reason: string, };
 export type NativeFileContentWire = { "kind": "source" } & SourceContentWire | { "kind": "nonTextMetadata" } & NonTextMetadataContentWire;
 export type NativeFileSnapshotWire = { file: NativeFileRefWire, revision: string, assetRevision: string, content: NativeFileContentWire, structuredView: ActionAvailabilityWire, };
-export type SnapshotWire = { "kind": "assetList" } & AssetListSnapshotWire | { "kind": "workbench" } & WorkbenchActualReadSnapshotWire | { "kind": "globalLocator" } & GlobalLocatorSnapshotWire | { "kind": "projectApplicability" } & ProjectApplicabilitySnapshotWire | { "kind": "assetDetail" } & AssetDetailSnapshotWire | { "kind": "nativeFile" } & NativeFileSnapshotWire;
+export type SensitiveAccessGrantWire = { grantId: string, asset: AssetRefWire, fileId: string, segmentId: string, fileRevision: string, assetRevision: string, scope: SensitiveAccessScopeWire, surface: SensitiveWorkbenchSurfaceWire, expiresAt: string, };
+export type SensitiveRevealSnapshotWire = { plaintext: string, grant: SensitiveAccessGrantWire, };
+export type SnapshotWire = { "kind": "assetList" } & AssetListSnapshotWire | { "kind": "workbench" } & WorkbenchActualReadSnapshotWire | { "kind": "globalLocator" } & GlobalLocatorSnapshotWire | { "kind": "projectApplicability" } & ProjectApplicabilitySnapshotWire | { "kind": "assetDetail" } & AssetDetailSnapshotWire | { "kind": "nativeFile" } & NativeFileSnapshotWire | { "kind": "sensitiveReveal" } & SensitiveRevealSnapshotWire;
 export type ReadSucceededWire = { snapshot: SnapshotWire, };
 export type ReadFailedWire = { reasonCode: ReasonCodeWire, message: string, recoveryAction?: RecoveryActionWire, };
 export type ReadResponsePayload = { "kind": "readSucceeded" } & ReadSucceededWire | { "kind": "readFailed" } & ReadFailedWire;

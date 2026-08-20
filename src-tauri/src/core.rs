@@ -3,13 +3,17 @@
 //! 不实现 prepare/apply，也不预留 stub command（FE-01 硬边界）。
 //! core 只使用 domain 类型，不知道 Tauri、wire DTO 或 IPC 细节。
 
-use crate::catalog::{locator_match_field, mask_synthetic_secrets, Catalog, LocatorDisplayFields};
+use crate::catalog::{
+    locator_match_field, mask_synthetic_secrets, now_plus_seconds_iso8601, Catalog,
+    LocatorDisplayFields,
+};
 use crate::domain::{
     derive_workbench_status_memberships, AgentId, ApplicabilityResolution, AssetStatusFilter,
     AssetType, GlobalLocatorQuery, GlobalLocatorSnapshot, LocatorDestination, LocatorGroup,
     LocatorMatchedField, LocatorResult, MvpAssetType, ProjectApplicabilityQuery,
     ProjectApplicabilitySegmentKind, ProjectApplicabilitySnapshot, ProjectApplicabilityView, Query,
-    ReadFailure, ReadResult, ReasonCode, RecoveryAction, SegmentSource, SkillActivation,
+    ReadFailure, ReadResult, ReasonCode, RecoveryAction, SegmentSource, SensitiveAccessGrant,
+    SensitiveRevealQuery, SensitiveRevealSnapshot, SensitiveWorkbenchSurface, SkillActivation,
     SkillPresence, SkillTargetState, Snapshot, WorkbenchActualReadSnapshot, WorkbenchFinding,
     WorkbenchQuery, WorkbenchRow, WorkbenchSegment, WorkbenchStatusFacts,
 };
@@ -73,6 +77,7 @@ impl GatewayCore {
                     None => Self::read_failed("文件不存在或当前不可读，请重读。"),
                 }
             }
+            Query::SensitiveReveal(query) => self.read_sensitive_reveal(query),
         }
     }
 
@@ -92,6 +97,73 @@ impl GatewayCore {
             recovery_action: Some(RecoveryAction::RetryRead),
         })
     }
+
+    /// FE-03 sensitive `modify` 仍沿唯一 read verb。请求必须引用当前 core
+    /// 读取到的 asset/file/segment/revision；失败统一为不含敏感值的稳定拒绝。
+    fn read_sensitive_reveal(&self, query: &SensitiveRevealQuery) -> ReadResult<Snapshot> {
+        // 当前 FE-03 的封闭表面只有 `modify` + `source`。未来若扩展 enum，编译器
+        // 会强制这里显式审查，而不会将新 scope/surface 静默授权。
+        match (query.scope, query.surface) {
+            (crate::domain::SensitiveAccessScope::Modify, SensitiveWorkbenchSurface::Source) => {}
+        }
+
+        let Some(plaintext) = self.catalog.sensitive_reveal(
+            &query.asset,
+            &query.file_id,
+            &query.segment_id,
+            &query.file_revision,
+            &query.asset_revision,
+        ) else {
+            return Self::sensitive_reveal_denied();
+        };
+        let Some(grant_id) = opaque_grant_id() else {
+            return Self::sensitive_reveal_denied();
+        };
+
+        ReadResult::Succeeded(Snapshot::SensitiveReveal(SensitiveRevealSnapshot {
+            plaintext,
+            grant: SensitiveAccessGrant {
+                grant_id,
+                asset: query.asset.clone(),
+                file_id: query.file_id.clone(),
+                segment_id: query.segment_id.clone(),
+                file_revision: query.file_revision.clone(),
+                asset_revision: query.asset_revision.clone(),
+                scope: query.scope,
+                surface: query.surface,
+                expires_at: now_plus_seconds_iso8601(30),
+            },
+        }))
+    }
+
+    /// 这是后续 stale/mismatch/expired grant 行为的稳定 failure 边界：不区分
+    /// 哪一个 binding 失败，也不回显 segment、revision、grant 或任何明文。
+    fn sensitive_reveal_denied() -> ReadResult<Snapshot> {
+        ReadResult::Failed(ReadFailure {
+            reason_code: ReasonCode::PermissionDenied,
+            message: "敏感片段当前不可用于修改，请重新读取并显式授权。".to_string(),
+            recovery_action: Some(RecoveryAction::RetryRead),
+        })
+    }
+}
+
+/// 从 OS entropy 取得仅用于 Rust authority 的 opaque identifier。不保留输入、
+/// 不派生可重放 payload；无法取得 entropy 时以稳定失败关闭 sensitive reveal。
+#[cfg(unix)]
+fn opaque_grant_id() -> Option<String> {
+    use std::io::Read;
+
+    let mut bytes = [0_u8; 32];
+    std::fs::File::open("/dev/urandom")
+        .ok()?
+        .read_exact(&mut bytes)
+        .ok()?;
+    Some(bytes.iter().map(|byte| format!("{byte:02x}")).collect())
+}
+
+#[cfg(not(unix))]
+fn opaque_grant_id() -> Option<String> {
+    None
 }
 
 impl GatewayCore {
