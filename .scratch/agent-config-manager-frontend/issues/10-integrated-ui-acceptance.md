@@ -2,7 +2,7 @@
 
 **Acceptance state:** `Frozen (2026-08-10; planning acceptance only)`
 
-**Ticket Status:** `ready-for-agent`（不是 `done`；本票据尚未开始实现或产生自身 closure evidence）
+**Ticket Status:** `ready-for-agent`（不是 `done`；已完成 task-only、non-closure functional slice，但尚未产生自身 formal closure evidence）
 
 **Direct blocker evidence:** FE-02 已 `done`；其 final run `20260815T130239344Z-p33436-000` 的 accepted-with-waiver 记录见 `.artifacts/verification/FE-02/latest-clean-subject-accepted-with-waiver.json`。
 
@@ -22,13 +22,13 @@
 
 ## 验证命令契约
 
-**状态：** `planned / unverified`；不得在本 planning slice 运行 closure。计划统一入口为 `npm run verify:ticket -- FE-10`，未来失败证据路径为 `.artifacts/verification/FE-10/<run-id>/`。
+**Formal verification/closure 状态：** `planned / unverified`；不得在本 planning slice 运行 closure。计划统一入口为 `npm run verify:ticket -- FE-10`，未来失败证据路径为 `.artifacts/verification/FE-10/<run-id>/`。
 
 **计划前置条件：** FE-02 已 `done` 且有其自身证据；bootstrap、`FX-12` fixture 和 browser-mode scripted mock `FrontendGateway` 可用，不启动 Tauri 测试构建。
 
 **计划证据分层：** 只运行 L0（静态/类型/生成一致性）、L1（列表状态、焦点、locator、四 Agent 语义、`view` grant 失效/重新遮蔽、reduced-motion、对比度与控件名称）与 L2（宽/中/窄只读 `FX-12` browser journey，覆盖同一 grant/a11y 状态）。**无 L3、无 PF。**
 
-**计划通过与 provenance 边界：** 未来 L2 必须证明真实 browser event 下的只读 focus/return、列表 reset、搜索遮蔽和 type-specific surface；mock PASS 不取得 IPC、磁盘、Keychain、Tauri lifecycle、写入、真实 Adapter、production artifact 或 L4 credit。尚未运行前所有层级均为 `planned / unverified`。
+**计划通过与 provenance 边界：** 未来 L2 必须证明真实 browser event 下的只读 focus/return、列表 reset、搜索遮蔽和 type-specific surface；mock PASS 不取得 IPC、磁盘、Keychain、Tauri lifecycle、写入、真实 Adapter、production artifact 或 L4 credit。Formal verification/closure 尚未运行，相关 formal 层级仍为 `planned / unverified`；这不否认下方单独记录的 task-only、non-closure L0/L1/L2 functional completion。
 
 ## 2026-08-20 task-only functional completion record
 
