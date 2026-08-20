@@ -19,7 +19,7 @@
 ## 4. 后置 hardening 与 FE-03 路径
 
 - [x] 4.1 已将 performance、stress、platform 和低概率对抗验证编排为功能完成后的统一优化阶段；每个 ticket 使用自身输入、run identity、层级和 provenance，禁止跨票据借用 closure credit。
-- [ ] 4.2 对 FE-03，后续先按已记录的最小化范围独立复验功能和真实 grant 安全边界；本 apply 不恢复 WIP。evidence-only native helper 是方案 A 的排除/停止项，未来仅在独立 threat-model 与授权后才可立项；edit-PF、formal comparison、`verify:ticket` 与 closure 才是后置受限工作。未来 `functional complete` 只能人工赋予 FE-04 产品功能开发的排期资格，不推进 FE-03/FE-04 formal 状态。
+- [x] 4.2 对 FE-03，后续先按已记录的最小化范围独立复验功能和真实 grant 安全边界；本 apply 不恢复 WIP。evidence-only native helper 是方案 A 的排除/停止项，未来仅在独立 threat-model 与授权后才可立项；edit-PF、formal comparison、`verify:ticket` 与 closure 才是后置受限工作。未来 `functional complete` 只能人工赋予 FE-04 产品功能开发的排期资格，不推进 FE-03/FE-04 formal 状态。
 - [ ] 4.3 若用户决定保留 FE-03 edit-PF formal closure，按已确认的最小 trusted-runner 控制建立独立 edit identity 与代表性 read/edit 隔离负例；不得复用或改写 FE-02 的 read evidence、budget、waiver 或历史 lineage。
 - [ ] 4.4 只在用户逐项批准 exact budget/freeze 输入后，执行 FE-03 的 budget/comparison/closure 工作；未批准或结果 fail/inconclusive 时保持 non-closure，不推进 frontier。
 

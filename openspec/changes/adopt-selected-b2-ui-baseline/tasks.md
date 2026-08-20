@@ -39,9 +39,9 @@
 
 **方案 A 对当前未勾选 ticket 的人工编排。** 每个 ticket 先完成最小功能实现、L0/L1、必要 L2 与真实产品安全负例；经独立功能复验后，才可人工报告 `functional complete`。该报告不是新 verifier 状态、命令或 enforcement，不改变任何 formal ticket status、DAG、frontier、done、release gate 或 closure。
 
-在其他仍有效的 architecture/产品安全前提满足时，上游 ticket 的人工 `functional complete` 可使直接下游的**产品功能开发**获得人工排期资格，即使上游仍 hardening pending、未 done 或未 formal closure；下游的 formal ticket verification/closure 仍以当前 formal direct blocker=done 且具 evidence 为前置，开发开工不得报告为 ready/done/closure。随后再完成每票既有且适用的 PF/performance/stress/platform/低概率 hardening；它们不删除、不冒充通过，任何 fail/inconclusive 仍阻止该票 formal closure。本次不报告 FE-03 `functional complete`，不授予 FE-03→FE-04 的资格，也不启动或推进 FE-04/FE-10。
+在其他仍有效的 architecture/产品安全前提满足时，上游 ticket 的人工 `functional complete` 可使直接下游的**产品功能开发**获得人工排期资格，即使上游仍 hardening pending、未 done 或未 formal closure；下游的 formal ticket verification/closure 仍以当前 formal direct blocker=done 且具 evidence 为前置，开发开工不得报告为 ready/done/closure。随后再完成每票既有且适用的 PF/performance/stress/platform/低概率 hardening；它们不删除、不冒充通过，任何 fail/inconclusive 仍阻止该票 formal closure。本轮仅记录 FE-03 task-only、non-closure 的 `functional complete`，并据此授予未来 FE-04 产品功能开发的人工排期资格；不启动或推进 FE-04/FE-10。
 
-对 sections 3–4 的当前未勾选任务，这一 manual implementation eligibility 仅构成“产品功能开发能否开工”对 1.23 的窄例外；1.23 对 formal ticket、verification 与 closure 的 stop 条件仍完整有效。它不修改 1.23、本轮也不授予 FE-03→FE-04 eligibility。
+对 sections 3–4 的当前未勾选任务，这一 manual implementation eligibility 仅构成“产品功能开发能否开工”对 1.23 的窄例外；1.23 对 formal ticket、verification 与 closure 的 stop 条件仍完整有效。它不修改 1.23；本轮仅按上述边界授予 FE-03→FE-04 的产品功能开发人工排期资格。
 
 ### FE-01：只读工作台与 FE-07R snapshot 消费
 
@@ -72,16 +72,16 @@
 
 ### FE-03：三类编辑草稿与 dirty guard
 
-- [ ] 3.19 重新读取并验证 ARCH-GATE、FE-03 正式 Ticket Status 与 direct blocker FE-02=done/evidence；它们仍是 FE-03 formal ticket verification/closure 的前置。若 FE-02 已经独立功能复验并人工记录 `functional complete`，只能按本节人工排期 FE-03 产品功能开发，不得把它记为 FE-03 ready/done/closure；本次不据此启动或推进 FE-03。任一所需 formal 条件不满足时，记录相应 blocker 并停止 formal 活动。
-- [ ] 3.20 在 FE-03 内完成三类 `editAsset` 草稿、长期指令首次实际变更建草稿、dirty guard、未知内容保真／只读的最小 contract／domain／Rust-first wire delta；不纳入 apply 或 L3。
-- [ ] 3.21 在 FE-03 内生成或复验 TypeScript wire、vectors 与 drift，并实现共享草稿状态与类型特定编辑表面。
-- [ ] 3.22 在 FE-03 内只执行 L0／L1 草稿／保真／dirty guard 与 L2 编辑 journey；明确无 L3，且不得取得 actual Tauri IPC／磁盘写入 credit。上述功能检查经独立复验后，才可人工记录为 non-closure 的 task-only `functional complete`，可按本节成为 FE-04 产品功能开发的人工排期输入，但不得标记 FE-03 done、更新 frontier 或替代正式 gate/direct-blocker evidence。
+- [x] 3.19 重新读取并验证 ARCH-GATE、FE-03 正式 Ticket Status 与 direct blocker FE-02=done/evidence；它们仍是 FE-03 formal ticket verification/closure 的前置。若 FE-02 已经独立功能复验并人工记录 `functional complete`，只能按本节人工排期 FE-03 产品功能开发，不得把它记为 FE-03 ready/done/closure；本次不据此启动或推进 FE-03。任一所需 formal 条件不满足时，记录相应 blocker 并停止 formal 活动。
+- [x] 3.20 在 FE-03 内完成三类 `editAsset` 草稿、长期指令首次实际变更建草稿、dirty guard、未知内容保真／只读的最小 contract／domain／Rust-first wire delta；不纳入 apply 或 L3。
+- [x] 3.21 在 FE-03 内生成或复验 TypeScript wire、vectors 与 drift，并实现共享草稿状态与类型特定编辑表面。
+- [x] 3.22 在 FE-03 内只执行 L0／L1 草稿／保真／dirty guard 与 L2 编辑 journey；明确无 L3，且不得取得 actual Tauri IPC／磁盘写入 credit。上述功能检查经独立复验后，才可人工记录为 non-closure 的 task-only `functional complete`，可按本节成为 FE-04 产品功能开发的人工排期输入，但不得标记 FE-03 done、更新 frontier 或替代正式 gate/direct-blocker evidence。
 - [ ] 3.23 仅在 FE-03 自身授权建立的 registry entry 已存在、3.22 已人工记录 `functional complete` 且当前 formal direct blockers 仍满足后，先在后置阶段运行 PF-02／PF-03 edit evidence 和其他适用 hardening，再运行 `npm run verify:ticket -- FE-03`；保留命令、层级、运行标识和未覆盖边界。PF/hardening fail／inconclusive 或正式 closure 失败均阻止 FE-03 done。
 - [ ] 3.24 对 FE-03 进行独立只读复审；任何功能、PF 或正式 closure 失败／inconclusive 均停止本 slice 尚未开始的后续实现、PF、closure，仍须进入本复审并独立记录 finding；复审本身不是 closure，不得标记 done 或更新 frontier；只有全部证据满足 acceptance，才可标记 FE-03 done 并更新 frontier。
 
 ### FE-04：共享安全写入与项目投影原生写回
 
-- [ ] 3.25 重新读取并验证 ARCH-GATE、FE-04 正式 Ticket Status 与 direct blocker FE-03=done/evidence；它们仍是 FE-04 formal ticket verification/closure 的前置。只有未来 FE-03 独立功能复验并人工记录 `functional complete` 后，FE-04 产品功能开发才可按本节人工排期，即使 FE-03 hardening pending、未 done 或未 formal closure；这不使 FE-04 ready/done/closed，本次不授予该资格或启动/推进 FE-04。任一所需 formal 条件不满足时，记录相应 blocker 并停止 formal 活动。
+- [ ] 3.25 重新读取并验证 ARCH-GATE、FE-04 正式 Ticket Status 与 direct blocker FE-03=done/evidence；它们仍是 FE-04 formal ticket verification/closure 的前置。FE-03 已经独立功能复验并人工记录 task-only、non-closure 的 `functional complete`，因此 FE-04 产品功能开发可按本节获得人工排期资格，即使 FE-03 hardening pending、未 done 或未 formal closure；这不使 FE-04 ready/done/closed，本轮未启动或推进 FE-04。任一所需 formal 条件不满足时，记录相应 blocker 并停止 formal 活动。
 - [ ] 3.26 在 FE-04 内完成 prepare／review／confirm／apply、target 参数变更失效并重新 prepare／review、项目视图全局 `AssetRef` 原生写回、受影响 contexts、无项目副本和 native disable `editAsset`／disabled 的最小 contract／domain／Rust-first wire delta；不得把 delete 归入 FE-04 或回落为 delete。
 - [ ] 3.27 在 FE-04 内生成 TypeScript wire、vectors 与 drift，并实现共享事务、revalidation、全局原生写回和 native disable 解析。
 - [ ] 3.28 在 FE-04 内只执行 L0／L1 事务／重验、L2 review-confirm journey、L3 isolated temp prepare／apply／conflict／recovery；actual runtime credit 仅来自该隔离输入穿过真实 WebView／Core／IPC 边界，不证明真实用户项目、配置或生产 artifact。上述功能检查经独立复验后，才可人工记录为 non-closure 的 task-only `functional complete`，可按本节成为下游产品功能开发的人工排期输入，但不得标记 FE-04 done、更新 frontier 或替代正式 gate/direct-blocker evidence。

@@ -15,7 +15,7 @@
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use sha2::{Digest, Sha256};
 use unicode_casefold::{Locale, UnicodeCaseFold, Variant};
@@ -27,9 +27,9 @@ use crate::domain::{
     AssetListQuery, AssetListScope, AssetListSnapshot, AssetReadSurface, AssetRef, AssetScope,
     AssetStatusFilter, AssetSummary, AssetType, CompatibilityStatus, EffectiveContext, FileKind,
     FileTreeNode, GlobalLocatorQuery, GlobalLocatorSnapshot, IndexStatus, InspectorData,
-    LocatorGroup, LocatorMatchedField, LocatorResult, MaskedSourceContent, MvpAssetType,
-    NativeFileContent, NativeFileRef, NativeFileSnapshot, NativeOwnership, NativeUnitKind,
-    ReadFailure, ReasonCode, RecoveryAction, SegmentSource, SensitiveDisplayState,
+    LocatorGroup, LocatorMatchedField, LocatorResult, MaskedSourceContent, MaskedSourcePart,
+    MvpAssetType, NativeFileContent, NativeFileRef, NativeFileSnapshot, NativeOwnership,
+    NativeUnitKind, ReadFailure, ReasonCode, RecoveryAction, SegmentSource, SensitiveDisplayState,
     SensitiveSegmentRef, SkillActivation, SkillCellAvailability, SkillPresence, SkillTargetState,
     SourceAnchor, SourceTier, ViewContext, WorkbenchActualReadSnapshot, WorkbenchQuery,
     WorkbenchRow, WorkbenchSegment, WorkbenchStatusFacts,
@@ -278,9 +278,25 @@ pub fn mask_synthetic_secrets(raw: &str) -> String {
 /// 当前 UTC 时间，ISO 8601（与 `Date.prototype.toISOString()` 同形：毫秒 + Z）。
 /// 只用 std::time 手工换算，不引入 time/chrono 依赖。
 pub fn now_iso8601() -> String {
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default();
+    iso8601_at(
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default(),
+    )
+}
+
+/// 为 Rust 权威、短生命周期 metadata 生成过期时刻；该 helper 只产生时间文本，
+/// 不保存 grant 或敏感值。
+pub fn now_plus_seconds_iso8601(seconds: u64) -> String {
+    iso8601_at(
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .saturating_add(Duration::from_secs(seconds)),
+    )
+}
+
+fn iso8601_at(now: Duration) -> String {
     let secs = now.as_secs() as i64;
     let millis = now.subsec_millis();
     let days = secs.div_euclid(86_400);
@@ -1250,11 +1266,7 @@ impl Catalog {
                 .iter()
                 .find(|file| skill.file_id_for(&file.relative_path) == file_id)?;
             let file_ref = skill.file_ref(file);
-            let content = native_file_content(
-                &file_ref,
-                &file.raw_bytes,
-                sensitive_segments_for(&file_ref, &file.raw_bytes, &skill.fixture_prefix),
-            );
+            let content = native_file_content(&file_ref, &file.raw_bytes, &skill.fixture_prefix);
             return Some(NativeFileSnapshot {
                 file: file_ref,
                 revision: revision_of(&file.raw_bytes),
@@ -1275,17 +1287,53 @@ impl Catalog {
             content: native_file_content(
                 &loaded.file_ref(),
                 &loaded.raw_bytes,
-                sensitive_segments_for(
-                    &loaded.file_ref(),
-                    &loaded.raw_bytes,
-                    &loaded.fixture_prefix,
-                ),
+                &loaded.fixture_prefix,
             ),
             structured_view: ActionAvailability::Disabled {
                 reason_code: ReasonCode::ReadOnlyPolicy,
                 recovery_action: None,
             },
         })
+    }
+
+    /// 在当前一次 catalog read 中重新解析且只返回所请求的合成敏感片段。
+    /// 所有 opaque identity 和 revision 都必须与当前权威文件事实精确一致；任何
+    /// 不一致、非文本或不可编辑内容一律失败，不以旧 snapshot 或路径推测补全。
+    pub fn sensitive_reveal(
+        &self,
+        asset: &AssetRef,
+        file_id: &str,
+        segment_id: &str,
+        file_revision: &str,
+        asset_revision: &str,
+    ) -> Option<String> {
+        if asset.asset_type != AssetType::Skill {
+            return None;
+        }
+
+        let skill = self.load_by_asset_id(&asset.asset_id)?;
+        let current_asset = skill.asset_ref();
+        let loaded_file = skill
+            .files
+            .iter()
+            .find(|candidate| skill.file_id_for(&candidate.relative_path) == file_id)?;
+        let file = skill.file_ref(loaded_file);
+        let current_file_revision = revision_of(&loaded_file.raw_bytes);
+
+        if &current_asset != asset
+            || file.file_kind != FileKind::Text
+            || !matches!(file.can_edit, ActionAvailability::Allowed)
+            || current_file_revision != file_revision
+            || skill.revision != asset_revision
+        {
+            return None;
+        }
+
+        let raw = std::str::from_utf8(&loaded_file.raw_bytes).ok()?;
+        let token = parse_sensitive_tokens(raw, &skill.fixture_prefix)
+            .into_iter()
+            .find(|candidate| candidate.segment_id == segment_id)?;
+        Some(raw[token.start..token.end].to_string())
     }
 }
 
@@ -1302,29 +1350,39 @@ fn read_only_capabilities() -> AssetCapabilities {
     }
 }
 
-/// 扫描任意只读文本文件中的合成敏感占位值。片段只含 opaque metadata，
-/// 严格绑定当前文件及其 revision，绝不携带原值或成为执行输入。
-fn sensitive_segments_for(
-    file: &NativeFileRef,
-    raw_bytes: &[u8],
-    fixture_prefix: &str,
-) -> Vec<SensitiveSegmentRef> {
-    if file.file_kind != FileKind::Text {
-        return Vec::new();
-    }
-    let raw = String::from_utf8_lossy(raw_bytes);
-    let revision = revision_of(raw_bytes);
-    let mut segments = Vec::new();
-    let mut offset = 0;
-    while let Some(found) = raw[offset..].find(SYNTHETIC_SECRET_PREFIX) {
-        let start = offset + found;
+struct ParsedSensitiveToken {
+    start: usize,
+    end: usize,
+    segment_id: String,
+}
+
+/// 唯一的 sensitive token 解析：range 和 opaque segment identity 同时确定，供
+/// maskedText、maskedParts、sensitiveSegments 与 reveal 校验使用。
+fn parse_sensitive_tokens(raw: &str, fixture_prefix: &str) -> Vec<ParsedSensitiveToken> {
+    let mut tokens = Vec::new();
+    let mut search = 0;
+    while let Some(found) = raw[search..].find(SYNTHETIC_SECRET_PREFIX) {
+        let start = search + found;
         let suffix_start = start + SYNTHETIC_SECRET_PREFIX.len();
         let suffix = &raw[suffix_start..];
-        let mut chars = suffix.chars();
-        if !matches!(chars.next(), Some(c) if c.is_ascii_alphanumeric()) {
-            offset = suffix_start;
-            continue;
-        }
+        let mut chars = suffix.char_indices();
+        let end = match chars.next() {
+            Some((_, first)) if first.is_ascii_alphanumeric() => {
+                let mut last = first.len_utf8();
+                for (index, character) in chars {
+                    if character.is_ascii_alphanumeric() || character == '-' {
+                        last = index + character.len_utf8();
+                    } else {
+                        break;
+                    }
+                }
+                suffix_start + last
+            }
+            _ => {
+                search = start + 1;
+                continue;
+            }
+        };
         let line_start = raw[..start].rfind('\n').map(|index| index + 1).unwrap_or(0);
         let line_prefix = &raw[line_start..start];
         let segment_id = match line_prefix.strip_suffix('=') {
@@ -1340,29 +1398,75 @@ fn sensitive_segments_for(
                     key.to_ascii_lowercase().replace('_', "-")
                 )
             }
-            _ => format!("seg-{fixture_prefix}-{:03}", segments.len() + 1),
+            _ => format!("seg-{fixture_prefix}-{:03}", tokens.len() + 1),
         };
-        segments.push(SensitiveSegmentRef {
+        tokens.push(ParsedSensitiveToken {
+            start,
+            end,
             segment_id,
+        });
+        search = end;
+    }
+    tokens
+}
+
+/// 单次权威 source 解析同时投影 legacy maskedText、敏感 metadata 和有序安全 parts。
+/// 每个识别出的敏感 range 只向 parts 写入 opaque segmentId，绝不写出原值。
+fn masked_source_content_for(
+    file: &NativeFileRef,
+    raw_bytes: &[u8],
+    fixture_prefix: &str,
+) -> MaskedSourceContent {
+    let raw = String::from_utf8_lossy(raw_bytes);
+    let tokens = parse_sensitive_tokens(raw.as_ref(), fixture_prefix);
+    let revision = revision_of(raw_bytes);
+    let mut masked_text = String::with_capacity(raw.len());
+    let mut segments = Vec::new();
+    let mut masked_parts = Vec::new();
+    let mut cursor = 0;
+    for token in &tokens {
+        let text = &raw[cursor..token.start];
+        masked_text.push_str(text);
+        if !text.is_empty() {
+            masked_parts.push(MaskedSourcePart::Text {
+                text: text.to_string(),
+            });
+        }
+        masked_text.push_str(SENSITIVE_MASK);
+        segments.push(SensitiveSegmentRef {
+            segment_id: token.segment_id.clone(),
             file_id: file.file_id.clone(),
             revision: revision.clone(),
             display_state: SensitiveDisplayState::Masked,
         });
-        offset = suffix_start;
+        masked_parts.push(MaskedSourcePart::SensitivePlaceholder {
+            segment_id: token.segment_id.clone(),
+        });
+        cursor = token.end;
     }
-    segments
+    let text = &raw[cursor..];
+    masked_text.push_str(text);
+    if !text.is_empty() {
+        masked_parts.push(MaskedSourcePart::Text {
+            text: text.to_string(),
+        });
+    }
+    MaskedSourceContent {
+        masked_text,
+        sensitive_segments: segments,
+        masked_parts: (!tokens.is_empty()).then_some(masked_parts),
+    }
 }
 
 fn native_file_content(
     file: &NativeFileRef,
     raw_bytes: &[u8],
-    sensitive_segments: Vec<SensitiveSegmentRef>,
+    fixture_prefix: &str,
 ) -> NativeFileContent {
     match file.file_kind {
-        FileKind::Text => NativeFileContent::Source(MaskedSourceContent {
-            masked_text: mask_synthetic_secrets(&String::from_utf8_lossy(raw_bytes)),
-            sensitive_segments,
-        }),
+        FileKind::Text => {
+            NativeFileContent::Source(masked_source_content_for(file, raw_bytes, fixture_prefix))
+        }
         FileKind::NonText | FileKind::Unknown => {
             NativeFileContent::NonTextMetadata(crate::domain::NonTextMetadataContent {
                 file_kind_label: "非文本二进制文件".to_string(),

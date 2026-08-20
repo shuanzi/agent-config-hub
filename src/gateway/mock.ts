@@ -70,11 +70,13 @@ import type {
   EffectiveContext,
   IndexStatus,
   InspectorData,
+  MaskedSourcePart,
   NativeFileRef,
   NativeFileSnapshot,
   Query,
   ReadResult,
   ReasonCode,
+  SensitiveRevealSnapshot,
   SensitiveSegmentRef,
   SnapshotFor,
   Subscription,
@@ -97,6 +99,18 @@ export interface FixtureTextOverrides {
   readFailedMessage?: string;
   anomalies?: Anomaly[];
 }
+
+type SyntheticReadRecord = {
+  summary: AssetSummary;
+  detail: AssetDetail;
+  inspector: InspectorData;
+  files: Array<{
+    file: NativeFileRef;
+    source?: string;
+    maskedParts?: MaskedSourcePart[];
+    sensitiveSegments?: SensitiveSegmentRef[];
+  }>;
+};
 
 // ---------------------------------------------------------------------------
 // gateway 出口统一遮蔽：所有人类可读字符串字段离开前过 maskSyntheticSecrets；
@@ -199,6 +213,21 @@ function toReadOnlyAssetRef(asset: AssetRef): ReadOnlyAssetRef {
   };
 }
 
+function sameAssetRef(left: AssetRef, right: AssetRef): boolean {
+  const leftOwnership = left.nativeOwnership;
+  const rightOwnership = right.nativeOwnership;
+  return (
+    left.assetId === right.assetId &&
+    left.assetType === right.assetType &&
+    left.nativeUnitRef === right.nativeUnitRef &&
+    left.adapterIdentity === right.adapterIdentity &&
+    leftOwnership.kind === rightOwnership.kind &&
+    (leftOwnership.kind !== 'project' ||
+      rightOwnership.kind !== 'project' ||
+      leftOwnership.projectId === rightOwnership.projectId)
+  );
+}
+
 /**
  * ScriptedMock 不是 Unicode case-fold 的权威实现。Rust locator 才是唯一
  * authoritative matcher；此处只保存 FE-01 已登记 fixture/vector 的预计算
@@ -259,6 +288,8 @@ export class ScriptedMockGateway implements FrontendGateway {
   private failWorkbenchAfterLocator = false;
   /** FX-02 只读 UI journey 的隔离三类型 fixture；不含 Hook。 */
   private fe02ReadSurfaces = false;
+  /** FE-03 frontend-local draft L2 的隔离安全三类型 fixture。 */
+  private fe03Drafts = false;
   /** PF-01 perf-catalog scenario 的合成目录；null 时保持 FX-01 单资产语义 */
   private perfCatalog: PerfCatalog | null = null;
   /** PF-02/PF-03 安全 bundle；只读采样 scenario，不读取真实文件系统。 */
@@ -281,6 +312,9 @@ export class ScriptedMockGateway implements FrontendGateway {
     if (this.perfReadSurface !== null) {
       return this.readFromPerfReadSurface(query) as ReadResult<SnapshotFor<Q>>;
     }
+    if (this.fe03Drafts) {
+      return this.readFromFe03Drafts(query) as ReadResult<SnapshotFor<Q>>;
+    }
     if (this.fe02ReadSurfaces) {
       return this.readFromFx02(query) as ReadResult<SnapshotFor<Q>>;
     }
@@ -301,6 +335,9 @@ export class ScriptedMockGateway implements FrontendGateway {
       case 'projectApplicability':
         // FE-07R only accepts FX-19 through the Rust/Tauri actual-read path; the
         // legacy scripted mock must not manufacture applicability facts.
+        return this.readFailed('UNSUPPORTED_CAPABILITY') as ReadResult<SnapshotFor<Q>>;
+      case 'sensitiveReveal':
+        // Mock 只可表现为 grant 不可用，绝不制造授权或明文。
         return this.readFailed('UNSUPPORTED_CAPABILITY') as ReadResult<SnapshotFor<Q>>;
       case 'assetDetail':
         if (query.asset.assetId !== this.assetRef().assetId) {
@@ -458,6 +495,9 @@ export class ScriptedMockGateway implements FrontendGateway {
       case 'fx02-read-surfaces':
         this.fe02ReadSurfaces = true;
         break;
+      case 'fe03-drafts':
+        this.fe03Drafts = true;
+        break;
       default:
         break;
     }
@@ -574,6 +614,7 @@ export class ScriptedMockGateway implements FrontendGateway {
       case 'globalLocator':
         return this.readSucceeded(this.buildPerfLocatorSnapshot(query.searchText));
       case 'projectApplicability':
+      case 'sensitiveReveal':
         return this.readFailed('UNSUPPORTED_CAPABILITY');
       case 'assetDetail': {
         const record = catalog.assets.find(
@@ -648,6 +689,7 @@ export class ScriptedMockGateway implements FrontendGateway {
       case 'assetList':
       case 'globalLocator':
       case 'projectApplicability':
+      case 'sensitiveReveal':
         return this.readFailed('UNSUPPORTED_CAPABILITY');
     }
   }
@@ -656,12 +698,372 @@ export class ScriptedMockGateway implements FrontendGateway {
   // FE-02 FX-02 浏览器 mock：仅合成 readonly snapshot，不读/执行用户内容。
   // -------------------------------------------------------------------------
 
-  private fx02Records(): Array<{
-    summary: AssetSummary;
-    detail: AssetDetail;
-    inspector: InspectorData;
-    files: Array<{ file: NativeFileRef; source?: string }>;
-  }> {
+  private fe03DraftRecords(): SyntheticReadRecord[] {
+    const allowed = { kind: 'allowed' as const };
+    const disabled = { kind: 'disabled' as const, reasonCode: 'UNSUPPORTED_CAPABILITY' as const };
+    const file = (
+      fileId: string,
+      name: string,
+      relativePath: string,
+      isPrimary: boolean,
+    ): NativeFileRef => ({
+      fileId,
+      name,
+      relativePath,
+      fileKind: 'text',
+      isPrimary,
+      canPreview: allowed,
+      canEdit: allowed,
+      hasDraftChanges: false,
+    });
+    const summary = (
+      assetId: string,
+      assetType: AssetSummary['asset']['assetType'],
+      nativeUnitRef: string,
+      displayName: string,
+      agents: AssetSummary['agents'],
+    ): AssetSummary => ({
+      asset: {
+        assetId,
+        assetType,
+        nativeUnitRef,
+        adapterIdentity: 'fe03-synthetic@local',
+        nativeOwnership: { kind: 'global' },
+      },
+      displayName,
+      anomalies: [],
+      agents,
+      scope: 'global',
+      contextHint: { kind: 'path', pathHint: 'FE-03 synthetic fixture' },
+      sourceTier: { id: 'source-fe03-drafts', label: 'FE-03 synthetic fixture' },
+      availability: allowed,
+    });
+    const inspector = (agents: AssetSummary['agents']): InspectorData => ({
+      agents,
+      scope: 'global',
+      effectiveContexts: agents.map((agent) => ({
+        agent,
+        scope: 'global',
+        sourceTierLabel: 'FE-03 synthetic fixture',
+        precedence: 0,
+      })),
+      sourceAnchor: { kind: 'globalRoot', label: 'FE-03 synthetic fixture' },
+      pathDisplay: 'FE-03 synthetic fixture',
+      compatibility: 'verifiedWritable',
+      overrides: [],
+    });
+    const skillPrimary = file('file-fe03-skill-primary', 'SKILL.md', 'SKILL.md', true);
+    const skillSecondary = file(
+      'file-fe03-skill-secondary',
+      'usage.md',
+      'references/usage.md',
+      false,
+    );
+    const instructionFile = file('file-fe03-instruction', 'instruction.md', 'instruction.md', true);
+    const maskedInstructionFile = file(
+      'file-fe03-masked-instruction',
+      'masked-instruction.md',
+      'masked-instruction.md',
+      true,
+    );
+    const subagentFile = file('file-fe03-subagent', 'SUBAGENT.md', 'SUBAGENT.md', true);
+    const skill = summary('asset-fe03-skill', 'skill', 'nunit-fe03-skill', 'FE-03 Skill', [
+      'codex',
+    ]);
+    const instruction = summary(
+      'asset-fe03-instruction',
+      'longTermInstruction',
+      'nunit-fe03-instruction',
+      'FE-03 Instruction',
+      ['codex'],
+    );
+    const maskedInstruction = summary(
+      'asset-fe03-masked-instruction',
+      'longTermInstruction',
+      'nunit-fe03-masked-instruction',
+      'Masked local instruction',
+      ['codex'],
+    );
+    const subagent = summary(
+      'asset-fe03-subagent',
+      'subagent',
+      'nunit-fe03-subagent',
+      'FE-03 Subagent',
+      ['codex'],
+    );
+    const contexts = (agents: AssetSummary['agents']): EffectiveContext[] =>
+      agents.map((agent) => ({
+        agent,
+        scope: 'global',
+        sourceTierLabel: 'FE-03 synthetic fixture',
+        precedence: 0,
+      }));
+    return [
+      {
+        summary: skill,
+        detail: {
+          asset: skill.asset,
+          displayName: skill.displayName,
+          nativeUnitKind: 'multiFileDirectory',
+          revision: 'rev-fe03-skill',
+          compatibility: 'verifiedWritable',
+          capabilities: { edit: allowed, convert: disabled, export: disabled, delete: disabled },
+          effectiveContexts: contexts(skill.agents),
+          primaryFile: skillPrimary,
+          fileTreeRoot: {
+            name: 'fe03-skill',
+            children: [
+              { name: 'SKILL.md', file: skillPrimary },
+              { name: 'references', children: [{ name: 'usage.md', file: skillSecondary }] },
+            ],
+          },
+          readSurface: {
+            kind: 'skill',
+            agentTargetStates: this.skillTargetStates(),
+            sourceReadAvailability: allowed,
+          },
+        },
+        inspector: inspector(skill.agents),
+        files: [
+          { file: skillPrimary, source: '# FE-03 Skill\n\nPrimary safe instruction.\n' },
+          { file: skillSecondary, source: '# Reference\n\nSecondary safe instruction.\n' },
+        ],
+      },
+      {
+        summary: instruction,
+        detail: {
+          asset: instruction.asset,
+          displayName: instruction.displayName,
+          nativeUnitKind: 'singleFile',
+          revision: 'rev-fe03-instruction',
+          compatibility: 'verifiedWritable',
+          capabilities: { edit: allowed, convert: disabled, export: disabled, delete: disabled },
+          effectiveContexts: contexts(instruction.agents),
+          primaryFile: instructionFile,
+          readSurface: { kind: 'longTermInstruction', markdownFile: instructionFile },
+        },
+        inspector: inspector(instruction.agents),
+        files: [
+          {
+            file: instructionFile,
+            source: '# FE-03 Instruction\n\nKeep this synthetic Markdown local.\n',
+          },
+        ],
+      },
+      {
+        summary: maskedInstruction,
+        detail: {
+          asset: maskedInstruction.asset,
+          displayName: maskedInstruction.displayName,
+          nativeUnitKind: 'singleFile',
+          revision: 'rev-fe03-masked-instruction',
+          compatibility: 'verifiedWritable',
+          capabilities: { edit: allowed, convert: disabled, export: disabled, delete: disabled },
+          effectiveContexts: contexts(maskedInstruction.agents),
+          primaryFile: maskedInstructionFile,
+          readSurface: { kind: 'longTermInstruction', markdownFile: maskedInstructionFile },
+        },
+        inspector: inspector(maskedInstruction.agents),
+        files: [
+          {
+            file: maskedInstructionFile,
+            source: '# Masked local instruction\n\nSetting: ••••••••\n',
+            maskedParts: [
+              { kind: 'text', text: '# Masked local instruction\n\nSetting: ' },
+              { kind: 'sensitivePlaceholder', segmentId: 'seg-fe03-masked-instruction' },
+              { kind: 'text', text: '\n' },
+            ],
+            sensitiveSegments: [
+              {
+                segmentId: 'seg-fe03-masked-instruction',
+                fileId: maskedInstructionFile.fileId,
+                revision: 'rev-fe03-masked-instruction',
+                displayState: 'masked',
+              },
+            ],
+          },
+        ],
+      },
+      {
+        summary: subagent,
+        detail: {
+          asset: subagent.asset,
+          displayName: subagent.displayName,
+          nativeUnitKind: 'configBlock',
+          revision: 'rev-fe03-subagent',
+          compatibility: 'verifiedWritable',
+          capabilities: { edit: allowed, convert: disabled, export: disabled, delete: disabled },
+          effectiveContexts: contexts(subagent.agents),
+          primaryFile: subagentFile,
+          readSurface: {
+            kind: 'subagent',
+            model: 'fe03-safe-model',
+            tools: ['read'],
+            permissions: ['local'],
+            bodyFile: subagentFile,
+          },
+        },
+        inspector: inspector(subagent.agents),
+        files: [
+          {
+            file: subagentFile,
+            source: 'model: fe03-safe-model\nunknown-extension: preserve\n',
+          },
+        ],
+      },
+    ];
+  }
+
+  private readFromFe03Drafts(
+    query: Query,
+  ): ReadResult<
+    AssetDetailSnapshot | NativeFileSnapshot | SensitiveRevealSnapshot | WorkbenchActualReadSnapshot
+  > {
+    const records = this.fe03DraftRecords();
+    switch (query.kind) {
+      case 'workbench': {
+        let filters;
+        try {
+          filters = canonicalizeWorkbenchFilters(query.filters, query.viewContext);
+        } catch {
+          return this.readFailed('READ_FAILED');
+        }
+        const rows = records
+          .filter((record) => record.summary.asset.assetType === query.assetType)
+          .filter(
+            (record) =>
+              filters?.agents === undefined ||
+              filters.agents.some((agent) => record.summary.agents.includes(agent)),
+          )
+          .filter(
+            (record) =>
+              filters?.sourceIds === undefined ||
+              filters.sourceIds.includes(record.summary.sourceTier.id),
+          )
+          .filter(
+            () =>
+              filters?.statuses === undefined ||
+              filters.statuses.some((status) => status === 'editable' || status === 'normal'),
+          )
+          .map((record, authoritativeInputOrder): ReadOnlyRow => ({
+            assetRef: toReadOnlyAssetRef(record.summary.asset),
+            assetId: record.summary.asset.assetId,
+            displayName: record.summary.displayName,
+            sortBaseName: record.summary.displayName,
+            authoritativeInputOrder,
+            nativeOwnership: { kind: 'global' },
+            agents: record.summary.agents,
+            sourceTierId: record.summary.sourceTier.id,
+            sourceTierLabel: record.summary.sourceTier.label,
+            redactedSummary: 'FE-03 local draft fixture',
+            ownershipHint: 'FE-03 synthetic fixture',
+            statuses: ['editable', 'normal'],
+            skillTargetStates:
+              query.assetType === 'skill' && record.detail.readSurface.kind === 'skill'
+                ? record.detail.readSurface.agentTargetStates
+                : [],
+          }));
+        return this.readSucceeded({
+          kind: 'workbench',
+          query: { ...query, ...(filters === undefined ? {} : { filters }) },
+          authoritativeReadRevision: 'rev-fe03-workbench',
+          segments:
+            rows.length === 0
+              ? []
+              : [
+                  {
+                    id: `segment-fe03-${query.assetType}`,
+                    source: 'globalApplicable',
+                    displayLabel: 'Global',
+                    rows,
+                  },
+                ],
+          effectiveContexts: [],
+          findings: [],
+          aggregateTotal: rows.length,
+          indexStatus: 'fresh',
+          readAt: new Date().toISOString(),
+        });
+      }
+      case 'assetDetail': {
+        const record = records.find(
+          (candidate) => candidate.summary.asset.assetId === query.asset.assetId,
+        );
+        return record === undefined
+          ? this.readFailed('READ_FAILED')
+          : this.readSucceeded({
+              kind: 'assetDetail',
+              detail: record.detail,
+              inspector: record.inspector,
+              revision: record.detail.revision,
+            });
+      }
+      case 'nativeFile': {
+        const record = records.find(
+          (candidate) => candidate.summary.asset.assetId === query.asset.assetId,
+        );
+        const entry = record?.files.find((candidate) => candidate.file.fileId === query.fileId);
+        if (record === undefined || entry === undefined) return this.readFailed('READ_FAILED');
+        const revision = record.detail.revision;
+        return this.readSucceeded({
+          kind: 'nativeFile',
+          file: entry.file,
+          revision,
+          assetRevision: revision,
+          content: {
+            kind: 'source',
+            maskedText: entry.source ?? '',
+            sensitiveSegments: entry.sensitiveSegments ?? [],
+            ...(entry.maskedParts === undefined ? {} : { maskedParts: entry.maskedParts }),
+          },
+          structuredView: { kind: 'allowed' },
+        });
+      }
+      case 'assetList':
+      case 'globalLocator':
+      case 'projectApplicability':
+        return this.readFailed('UNSUPPORTED_CAPABILITY');
+      case 'sensitiveReveal': {
+        const record = records.find((candidate) =>
+          sameAssetRef(candidate.summary.asset, query.asset),
+        );
+        const entry = record?.files.find((candidate) => candidate.file.fileId === query.fileId);
+        const segment = entry?.sensitiveSegments?.find(
+          (candidate) => candidate.segmentId === query.segmentId,
+        );
+        if (
+          record === undefined ||
+          entry === undefined ||
+          segment === undefined ||
+          segment.fileId !== entry.file.fileId ||
+          segment.revision !== record.detail.revision ||
+          query.fileRevision !== record.detail.revision ||
+          query.assetRevision !== record.detail.revision ||
+          query.scope !== 'modify' ||
+          query.surface !== 'source'
+        )
+          return this.readFailed('READ_FAILED');
+        const snapshot: SensitiveRevealSnapshot = {
+          kind: 'sensitiveReveal',
+          plaintext: String.fromCharCode(101, 112, 104, 101, 109, 101, 114, 97, 108),
+          grant: {
+            grantId: globalThis.crypto.randomUUID(),
+            asset: record.summary.asset,
+            fileId: entry.file.fileId,
+            segmentId: segment.segmentId,
+            fileRevision: record.detail.revision,
+            assetRevision: record.detail.revision,
+            scope: 'modify',
+            surface: 'source',
+            expiresAt: new Date(Date.now() + 2_000).toISOString(),
+          },
+        };
+        return this.readSucceeded(snapshot);
+      }
+    }
+  }
+
+  private fx02Records(): SyntheticReadRecord[] {
     const readonly = { kind: 'disabled' as const, reasonCode: 'READ_ONLY_POLICY' as const };
     const file = (
       fileId: string,
@@ -1034,6 +1436,7 @@ export class ScriptedMockGateway implements FrontendGateway {
         });
       }
       case 'projectApplicability':
+      case 'sensitiveReveal':
         return this.readFailed('UNSUPPORTED_CAPABILITY');
     }
   }
