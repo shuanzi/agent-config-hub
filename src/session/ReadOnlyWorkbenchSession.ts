@@ -80,6 +80,11 @@ export type DirtyGuardState =
 
 export type SensitiveEditorStatus = Readonly<Record<string, { kind: 'active' | 'changed' }>>;
 
+/** FE-10 只读查看只公开 opaque segment 状态；失败时只保留稳定 reasonCode。 */
+export type SensitiveViewStatus = Readonly<
+  Record<string, { kind: 'active' } | { kind: 'failed'; reasonCode: ReasonCode }>
+>;
+
 export interface ReadOnlyWorkbenchState {
   loadState: ReadOnlyLoadState;
   assetType: MvpAssetType;
@@ -104,6 +109,8 @@ export interface ReadOnlyWorkbenchState {
   dirtyGuard: DirtyGuardState;
   /** 只公开 opaque segment 的编辑状态；绝不公开明文、grant 或 expiry。 */
   sensitiveEditorStatus: SensitiveEditorStatus;
+  /** 只公开 opaque segment 的查看状态；绝不公开明文、grant 或 expiry。 */
+  sensitiveViewStatus: SensitiveViewStatus;
   locator:
     | { kind: 'closed' }
     | {
@@ -132,6 +139,7 @@ export type ReadOnlyWorkbenchAction =
   | { kind: 'replaceDraftText'; text: string }
   | { kind: 'replaceDraftTextPart'; partIndex: number; text: string }
   | { kind: 'beginSensitiveModify'; segmentId: string; scope?: 'modify'; surface?: 'source' }
+  | { kind: 'beginSensitiveView'; segmentId: string; scope?: 'view'; surface?: 'source' }
   | { kind: 'replaceSensitiveDraftSegment'; segmentId: string; value: string }
   | { kind: 'replaceDraftField'; field: 'model'; value: string }
   | { kind: 'setDraftSectionExpanded'; sectionId: string; expanded: boolean }
@@ -160,6 +168,12 @@ type EphemeralSensitiveBuffer = {
   grant: SensitiveAccessGrant;
 };
 
+/** FE-10 专用的只读 buffer；绝不与 FE-03 modify buffer 或 draft 共享。 */
+type EphemeralSensitiveViewBuffer = {
+  plaintext: string;
+  grant: SensitiveAccessGrant;
+};
+
 type SensitiveModifySource = {
   assetRef: ReadOnlyAssetRef;
   fileId: string;
@@ -167,6 +181,15 @@ type SensitiveModifySource = {
   assetRevision: string;
   maskedText: string;
   maskedParts: readonly MaskedSourcePart[];
+  sensitiveSegmentIds: readonly string[];
+};
+
+/** `view` 只要求当前 masked source 的 authoritative binding，不要求可编辑。 */
+type SensitiveViewSource = {
+  assetRef: ReadOnlyAssetRef;
+  fileId: string;
+  fileRevision: string;
+  assetRevision: string;
   sensitiveSegmentIds: readonly string[];
 };
 
@@ -453,8 +476,8 @@ function sensitiveRevealSnapshotForRequest(
     !isOpaqueString(grant.segmentId) ||
     !isOpaqueString(grant.fileRevision) ||
     !isOpaqueString(grant.assetRevision) ||
-    grant.scope !== 'modify' ||
-    grant.surface !== 'source' ||
+    grant.scope !== request.scope ||
+    grant.surface !== request.surface ||
     !isCanonicalFutureTimestamp(grant.expiresAt) ||
     !hasMatchingAssetRef(grant.asset, request.asset) ||
     grant.fileId !== request.fileId ||
@@ -477,6 +500,9 @@ export class ReadOnlyWorkbenchSession {
   #sensitiveBuffer: EphemeralSensitiveBuffer | null = null;
   #sensitiveRequestEpoch = 0;
   #sensitiveExpiryTimer: ReturnType<typeof setTimeout> | null = null;
+  #sensitiveViewBuffer: EphemeralSensitiveViewBuffer | null = null;
+  #sensitiveViewRequestEpoch = 0;
+  #sensitiveViewExpiryTimer: ReturnType<typeof setTimeout> | null = null;
   private workbenchGeneration = 0;
   private locatorGeneration = 0;
   private detailGeneration = 0;
@@ -502,6 +528,7 @@ export class ReadOnlyWorkbenchSession {
     draft: null,
     dirtyGuard: { kind: 'idle' },
     sensitiveEditorStatus: {},
+    sensitiveViewStatus: {},
     locator: { kind: 'closed' },
   };
 
@@ -521,6 +548,11 @@ export class ReadOnlyWorkbenchSession {
     return this.#currentSensitiveBuffer(segmentId)?.plaintext;
   }
 
+  /** 仅供当前只读临时 overlay 的纯读取；不会在 render/read 中发布状态。 */
+  getSensitiveViewValue(segmentId: string): string | undefined {
+    return this.#currentSensitiveViewBuffer(segmentId)?.plaintext;
+  }
+
   subscribe(listener: Listener): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
@@ -531,6 +563,9 @@ export class ReadOnlyWorkbenchSession {
     this.#sensitiveBuffer = null;
     this.#sensitiveRequestEpoch += 1;
     this.#cancelSensitiveExpiryTimer();
+    this.#sensitiveViewBuffer = null;
+    this.#sensitiveViewRequestEpoch += 1;
+    this.#cancelSensitiveViewExpiryTimer();
     this.workbenchGeneration += 1;
     this.locatorGeneration += 1;
     this.detailGeneration += 1;
@@ -545,6 +580,7 @@ export class ReadOnlyWorkbenchSession {
         if (this.state.assetType === action.assetType) return;
         if (this.deferDraftTransition({ kind: 'assetType', assetType: action.assetType })) return;
         this.#clearSensitiveBuffer(false);
+        this.#clearSensitiveViewBuffer();
         this.commitAssetTypeTransition(action.assetType, false);
         return;
       case 'selectViewContext':
@@ -552,6 +588,7 @@ export class ReadOnlyWorkbenchSession {
         if (this.deferDraftTransition({ kind: 'viewContext', viewContext: action.viewContext }))
           return;
         this.#clearSensitiveBuffer(false);
+        this.#clearSensitiveViewBuffer();
         this.commitViewContextTransition(action.viewContext, false);
         return;
       case 'setFilters':
@@ -559,6 +596,7 @@ export class ReadOnlyWorkbenchSession {
           return;
         if (this.deferFiltersDraftTransition(action.filters)) return;
         if (this.state.draft === null) this.#clearSensitiveBuffer(false);
+        this.#clearSensitiveViewBuffer();
         this.commitFiltersTransition(action.filters, false);
         return;
       case 'setNameSort':
@@ -582,6 +620,8 @@ export class ReadOnlyWorkbenchSession {
             !sameAssetRef(this.state.selected.assetRef, action.row.assetRef))
         )
           this.#clearSensitiveBuffer(false);
+        // 显式重开同一行同样会发起新的 detail read，旧 view 不得跨 read 存活。
+        this.#clearSensitiveViewBuffer();
         this.commitRowTransition(action.row, false);
         return;
       case 'selectDetailFile': {
@@ -601,6 +641,8 @@ export class ReadOnlyWorkbenchSession {
         }
         if (this.state.detail.file?.file.fileId !== action.file.fileId)
           this.#clearSensitiveBuffer(false);
+        // 即使是同一文件的显式重读，也必须在新 nativeFile 事实返回前重新遮蔽。
+        this.#clearSensitiveViewBuffer();
         const readOnlyAssetRef: ReadOnlyAssetRef = {
           assetId: assetRef.assetId,
           assetType: assetRef.assetType,
@@ -613,12 +655,18 @@ export class ReadOnlyWorkbenchSession {
         return;
       }
       case 'setDetailView':
-        if (this.state.detailView !== action.view) this.#clearSensitiveBuffer(false);
+        if (this.state.detailView !== action.view) {
+          this.#clearSensitiveBuffer(false);
+          this.#clearSensitiveViewBuffer();
+        }
         this.update({ detailView: action.view });
         return;
       case 'focusEditSurface':
         // 聚焦本身不建立草稿，也不触发任何 gateway 操作。
-        if (this.state.detailView !== action.surface) this.#clearSensitiveBuffer(false);
+        if (this.state.detailView !== action.surface) {
+          this.#clearSensitiveBuffer(false);
+          this.#clearSensitiveViewBuffer();
+        }
         this.update({ detailView: action.surface });
         return;
       case 'replaceDraftText':
@@ -629,6 +677,9 @@ export class ReadOnlyWorkbenchSession {
         return;
       case 'beginSensitiveModify':
         this.beginSensitiveModify(action.segmentId, action.scope, action.surface);
+        return;
+      case 'beginSensitiveView':
+        this.beginSensitiveView(action.segmentId, action.scope, action.surface);
         return;
       case 'replaceSensitiveDraftSegment':
         this.replaceSensitiveDraftSegment(action.segmentId, action.value);
@@ -648,6 +699,7 @@ export class ReadOnlyWorkbenchSession {
         return;
       case 'openLocator':
         this.locatorGeneration += 1;
+        this.#clearSensitiveViewBuffer();
         this.update({ locator: { kind: 'open', searchText: '', snapshot: null } });
         return;
       case 'closeLocator':
@@ -660,11 +712,13 @@ export class ReadOnlyWorkbenchSession {
       case 'setLocatorSearch': {
         if (this.state.locator.kind !== 'open') return;
         const locatorGeneration = ++this.locatorGeneration;
+        const searchText = action.searchText;
+        const canonicalSearchText = searchText.trim();
         this.update({
-          locator: { kind: 'open', searchText: action.searchText, snapshot: null },
+          locator: { kind: 'open', searchText, snapshot: null },
           ...this.invalidatePendingLocatorTransition(),
         });
-        if (action.searchText.trim() !== '') this.readLocator(action.searchText, locatorGeneration);
+        if (canonicalSearchText !== '') this.readLocator(canonicalSearchText, locatorGeneration);
         return;
       }
       case 'selectLocatorResult':
@@ -673,6 +727,7 @@ export class ReadOnlyWorkbenchSession {
         return;
       case 'retry':
         this.#clearSensitiveBuffer(false);
+        this.#clearSensitiveViewBuffer();
         this.refresh(true);
         if (this.state.selected !== null) this.readDetail(this.state.selected.assetRef);
         return;
@@ -828,6 +883,8 @@ export class ReadOnlyWorkbenchSession {
         !sameAssetRef(this.state.selected.assetRef, result.assetRef))
     )
       this.#clearSensitiveBuffer(false);
+    // locator result 一律建立新的 detail read destination；同一资产重开也不能保留 view。
+    this.#clearSensitiveViewBuffer();
     this.detailGeneration += 1;
     this.locatorGeneration += 1;
     this.preserveUnsupportedLocatorDetail = result.destination.kind === 'unsupportedReadOnly';
@@ -891,6 +948,7 @@ export class ReadOnlyWorkbenchSession {
   private discardDraft(): void {
     const pending = this.pendingDirtyTransition;
     const sensitiveEditorStatus = this.#clearSensitiveBuffer(true, false);
+    this.#clearSensitiveViewBuffer();
     if (pending === null) {
       // 普通 discard 只清 frontend-local draft；绝不发起 read 或写入。
       this.update({
@@ -953,7 +1011,6 @@ export class ReadOnlyWorkbenchSession {
         // 当前 authoritative workbench read 已失败，旧 detail/nativeFile 不再有
         // 可绑定的 selection；先废弃它们，迟到结果不得复活 detail。
         this.detailGeneration += 1;
-        this.pendingRereadSelection = null;
         const detailAsset = this.pendingLocatorDetail;
         this.pendingLocatorDetail = null;
         const preserveUnsupported = this.preserveUnsupportedLocatorDetail;
@@ -995,6 +1052,8 @@ export class ReadOnlyWorkbenchSession {
                 sameAssetRef(row.assetRef, selectedBeforeReread.assetRef),
             ) ?? null)
           : null;
+      const shouldRestoreDetail =
+        selected !== null && this.state.selected === null && this.state.detail.kind === 'idle';
       this.pendingRereadSelection = null;
       this.pendingLocatorDetail = null;
       const preserveUnsupported = this.preserveUnsupportedLocatorDetail;
@@ -1011,12 +1070,14 @@ export class ReadOnlyWorkbenchSession {
             : { ...this.state.presentation, page: projected.page },
       });
       if (selected === null) this.detailGeneration += 1;
+      else if (shouldRestoreDetail) this.readDetail(selected.assetRef);
     });
   }
 
   private invalidateAndReread(): void {
     // event 不携带事实：到达瞬间先失效旧 snapshot/cells，后续仅接受新 read。
     this.#clearSensitiveBuffer(false);
+    this.#clearSensitiveViewBuffer();
     this.workbenchGeneration += 1;
     this.detailGeneration += 1;
     // locator snapshot 同样不是权威事实；若用户正在搜索，保留输入和 open state，
@@ -1026,7 +1087,7 @@ export class ReadOnlyWorkbenchSession {
         ? this.state.locator.searchText
         : null;
     const locatorGeneration = ++this.locatorGeneration;
-    this.pendingRereadSelection = this.state.selected;
+    this.pendingRereadSelection = this.state.selected ?? this.pendingRereadSelection;
     this.pendingLocatorDetail = null;
     this.preserveUnsupportedLocatorDetail = false;
     this.update({
@@ -1047,10 +1108,12 @@ export class ReadOnlyWorkbenchSession {
   }
 
   private readLocator(searchText: string, generation: number): void {
+    const canonicalSearchText = searchText.trim();
+    if (canonicalSearchText === '') return;
     void this.gateway
       .read({
         kind: 'globalLocator',
-        searchText,
+        searchText: canonicalSearchText,
         assetTypes: ['skill', 'longTermInstruction', 'subagent'],
       })
       .then((result) => {
@@ -1058,16 +1121,19 @@ export class ReadOnlyWorkbenchSession {
           this.disposed ||
           generation !== this.locatorGeneration ||
           this.state.locator.kind !== 'open' ||
-          this.state.locator.searchText !== searchText
+          this.state.locator.searchText.trim() !== canonicalSearchText
         )
           return;
+        const currentSearchText = this.state.locator.searchText;
         if (result.kind === 'readSucceeded') {
-          this.update({ locator: { kind: 'open', searchText, snapshot: result.snapshot } });
+          this.update({
+            locator: { kind: 'open', searchText: currentSearchText, snapshot: result.snapshot },
+          });
         } else {
           this.update({
             locator: {
               kind: 'open',
-              searchText,
+              searchText: currentSearchText,
               snapshot: null,
               error: { kind: 'readFailed', reasonCode: result.reasonCode, message: result.message },
             },
@@ -1126,6 +1192,7 @@ export class ReadOnlyWorkbenchSession {
           fileResult.snapshot.assetRevision !== detail.revision
         ) {
           this.#clearSensitiveBufferForFileResult(assetRef, detail, null);
+          this.#clearSensitiveViewBufferForFileResult(assetRef, detail, null);
           this.update({
             detail: {
               kind: 'failed',
@@ -1139,6 +1206,7 @@ export class ReadOnlyWorkbenchSession {
           return;
         }
         this.#clearSensitiveBufferForFileResult(assetRef, detail, fileResult.snapshot);
+        this.#clearSensitiveViewBufferForFileResult(assetRef, detail, fileResult.snapshot);
         const restoredDraft = this.draftForFile(assetRef, fileResult.snapshot.file.fileId);
         this.update({
           detail: { kind: 'ready', detail, file: fileResult.snapshot },
@@ -1324,6 +1392,62 @@ export class ReadOnlyWorkbenchSession {
       .catch(() => undefined);
   }
 
+  /**
+   * FE-10 只读查看路径：单独请求 `view` grant，结果只进入当前 overlay 的私有
+   * buffer。它不读取或创建 draft，也不会触碰 FE-03 的 modify buffer/status。
+   */
+  private beginSensitiveView(
+    segmentId: unknown,
+    scope: unknown = 'view',
+    surface: unknown = 'source',
+  ): void {
+    this.#clearSensitiveViewBuffer();
+    if (!isOpaqueString(segmentId) || scope !== 'view' || surface !== 'source') return;
+    const source = this.sensitiveViewSource(segmentId);
+    if (source === null) return;
+    const requestEpoch = ++this.#sensitiveViewRequestEpoch;
+    const request: SensitiveRevealQuery = {
+      kind: 'sensitiveReveal',
+      asset: source.assetRef,
+      fileId: source.fileId,
+      segmentId,
+      fileRevision: source.fileRevision,
+      assetRevision: source.assetRevision,
+      scope: 'view',
+      surface: 'source',
+    };
+    void this.gateway
+      .read(request)
+      .then((result) => {
+        if (this.disposed || requestEpoch !== this.#sensitiveViewRequestEpoch) return;
+        if (result.kind === 'readFailed') {
+          this.#publishSensitiveViewFailure(segmentId, result.reasonCode);
+          return;
+        }
+        const snapshot = sensitiveRevealSnapshotForRequest(result.snapshot, request);
+        if (snapshot === null) {
+          this.#publishSensitiveViewFailure(segmentId, 'GATEWAY_UNAVAILABLE');
+          return;
+        }
+        const currentSource = this.sensitiveViewSource(segmentId);
+        if (
+          currentSource === null ||
+          !this.#viewGrantMatchesSource(snapshot.grant, currentSource, segmentId)
+        ) {
+          this.#publishSensitiveViewFailure(segmentId, 'READ_FAILED');
+          return;
+        }
+        this.#sensitiveViewBuffer = { plaintext: snapshot.plaintext, grant: snapshot.grant };
+        this.#scheduleSensitiveViewExpiry(snapshot.grant, requestEpoch);
+        if (this.#sensitiveViewBuffer === null) return;
+        this.update({ sensitiveViewStatus: { [segmentId]: { kind: 'active' } } });
+      })
+      .catch(() => {
+        if (this.disposed || requestEpoch !== this.#sensitiveViewRequestEpoch) return;
+        this.#publishSensitiveViewFailure(segmentId, 'GATEWAY_UNAVAILABLE');
+      });
+  }
+
   /** 明文只更新 `#sensitiveBuffer`；公开 draft 仅追加 opaque changed marker。 */
   private replaceSensitiveDraftSegment(segmentId: string, value: string): void {
     if (typeof value !== 'string') return;
@@ -1404,6 +1528,99 @@ export class ReadOnlyWorkbenchSession {
       },
       sensitiveEditorStatus: this.#statusWith(segmentId, 'changed'),
     });
+  }
+
+  #currentSensitiveViewBuffer(
+    segmentId: string,
+    source: SensitiveViewSource | null = this.sensitiveViewSource(segmentId),
+  ): EphemeralSensitiveViewBuffer | null {
+    const buffer = this.#sensitiveViewBuffer;
+    if (buffer === null) return null;
+    if (source === null || !this.#viewGrantMatchesSource(buffer.grant, source, segmentId))
+      return null;
+    return buffer;
+  }
+
+  #viewGrantMatchesSource(
+    grant: SensitiveAccessGrant,
+    source: SensitiveViewSource,
+    segmentId: string,
+  ): boolean {
+    return (
+      sameAssetRef(grant.asset, source.assetRef) &&
+      grant.fileId === source.fileId &&
+      grant.segmentId === segmentId &&
+      source.sensitiveSegmentIds.includes(segmentId) &&
+      grant.fileRevision === source.fileRevision &&
+      grant.assetRevision === source.assetRevision &&
+      grant.scope === 'view' &&
+      grant.surface === 'source' &&
+      isCanonicalFutureTimestamp(grant.expiresAt)
+    );
+  }
+
+  #scheduleSensitiveViewExpiry(grant: SensitiveAccessGrant, bufferEpoch: number): void {
+    this.#cancelSensitiveViewExpiryTimer();
+    const delay = Date.parse(grant.expiresAt) - Date.now();
+    if (!Number.isFinite(delay) || delay <= 0) {
+      this.#clearSensitiveViewBuffer();
+      return;
+    }
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    timer = setTimeout(() => {
+      const buffer = this.#sensitiveViewBuffer;
+      if (
+        timer === null ||
+        this.disposed ||
+        this.#sensitiveViewExpiryTimer !== timer ||
+        this.#sensitiveViewRequestEpoch !== bufferEpoch ||
+        buffer === null ||
+        !this.#sameGrantIdentity(buffer.grant, grant)
+      )
+        return;
+      this.#sensitiveViewExpiryTimer = null;
+      this.#clearSensitiveViewBuffer();
+    }, delay);
+    this.#sensitiveViewExpiryTimer = timer;
+  }
+
+  #cancelSensitiveViewExpiryTimer(): void {
+    if (this.#sensitiveViewExpiryTimer === null) return;
+    clearTimeout(this.#sensitiveViewExpiryTimer);
+    this.#sensitiveViewExpiryTimer = null;
+  }
+
+  #clearSensitiveViewBufferForFileResult(
+    assetRef: ReadOnlyAssetRef,
+    detail: AssetDetailSnapshot,
+    file: NativeFileSnapshot | null,
+  ): void {
+    const buffer = this.#sensitiveViewBuffer;
+    if (
+      buffer !== null &&
+      (file === null ||
+        !sameAssetRef(buffer.grant.asset, assetRef) ||
+        buffer.grant.fileId !== file.file.fileId ||
+        buffer.grant.fileRevision !== file.revision ||
+        buffer.grant.assetRevision !== file.assetRevision ||
+        file.assetRevision !== detail.revision)
+    )
+      this.#clearSensitiveViewBuffer();
+  }
+
+  #clearSensitiveViewBuffer(publishStatus = true): void {
+    this.#cancelSensitiveViewExpiryTimer();
+    this.#sensitiveViewBuffer = null;
+    this.#sensitiveViewRequestEpoch += 1;
+    if (Object.keys(this.state.sensitiveViewStatus).length > 0 && publishStatus) {
+      this.update({ sensitiveViewStatus: {} });
+    }
+  }
+
+  /** 失败态只公开 opaque reasonCode；清除任何旧 grant/buffer 后再发布。 */
+  #publishSensitiveViewFailure(segmentId: string, reasonCode: ReasonCode): void {
+    this.#clearSensitiveViewBuffer(false);
+    this.update({ sensitiveViewStatus: { [segmentId]: { kind: 'failed', reasonCode } } });
   }
 
   #currentSensitiveBuffer(
@@ -1691,6 +1908,47 @@ export class ReadOnlyWorkbenchSession {
     if (!isOpaqueString(segmentId)) return null;
     const source = this.editableMaskedPartsSource();
     return source === null || !source.sensitiveSegmentIds.includes(segmentId) ? null : source;
+  }
+
+  /**
+   * FE-10 `view` 不继承 modify 的可编辑限制：只接受当前已遮蔽 source 明确给出的
+   * opaque segment/revision binding，任何不一致都在 read 前封闭失败。
+   */
+  private sensitiveViewSource(segmentId: string): SensitiveViewSource | null {
+    if (!isOpaqueString(segmentId)) return null;
+    const ready = this.state.detail;
+    if (ready.kind !== 'ready' || ready.file === undefined) return null;
+    const { detail, file } = ready;
+    const source = file.content;
+    const asset = detail.detail.asset;
+    if (
+      asset.assetType === 'hook' ||
+      file.file.fileKind !== 'text' ||
+      source.kind !== 'source' ||
+      file.assetRevision !== detail.revision
+    )
+      return null;
+    const segment = source.sensitiveSegments.find((candidate) => candidate.segmentId === segmentId);
+    if (
+      segment === undefined ||
+      segment.fileId !== file.file.fileId ||
+      segment.revision !== file.revision ||
+      segment.displayState !== 'masked'
+    )
+      return null;
+    return {
+      assetRef: {
+        assetId: asset.assetId,
+        assetType: asset.assetType,
+        nativeUnitRef: asset.nativeUnitRef,
+        adapterIdentity: asset.adapterIdentity,
+        nativeOwnership: asset.nativeOwnership,
+      },
+      fileId: file.file.fileId,
+      fileRevision: file.revision,
+      assetRevision: file.assetRevision,
+      sensitiveSegmentIds: source.sensitiveSegments.map((candidate) => candidate.segmentId),
+    };
   }
 
   /** 仅限 Subagent 已验证结构化 surface 的单一 `model` 字段。 */

@@ -185,7 +185,13 @@ export interface NativeFileQuery {
   fileId: string;
 }
 
-/** FE-03 仅允许通过既有 read seam 请求一个敏感片段的短生命周期 modify grant。 */
+/**
+ * 敏感片段的短生命周期访问范围。`view` 与 `modify` 必须由各自的 UI/session
+ * consumer 独立处理；前者不能授权写入，后者也不能被前者复用。
+ */
+export type SensitiveAccessScope = 'view' | 'modify';
+
+/** 通过既有 read seam 请求一个敏感片段的短生命周期 grant。 */
 export interface SensitiveRevealQuery {
   kind: 'sensitiveReveal';
   asset: AssetRef;
@@ -193,7 +199,7 @@ export interface SensitiveRevealQuery {
   segmentId: string;
   fileRevision: string;
   assetRevision: string;
-  scope: 'modify';
+  scope: SensitiveAccessScope;
   surface: 'source';
 }
 
@@ -455,7 +461,7 @@ export interface NativeFileSnapshot {
   structuredView: ActionAvailability;
 }
 
-/** Rust 权威边界签发的 opaque modify grant；前端只消费，不构造或延展。 */
+/** Rust 权威边界签发的 opaque sensitive grant；前端只消费，不构造或延展。 */
 export interface SensitiveAccessGrant {
   grantId: string;
   asset: AssetRef;
@@ -463,7 +469,7 @@ export interface SensitiveAccessGrant {
   segmentId: string;
   fileRevision: string;
   assetRevision: string;
-  scope: 'modify';
+  scope: SensitiveAccessScope;
   surface: 'source';
   expiresAt: string;
 }

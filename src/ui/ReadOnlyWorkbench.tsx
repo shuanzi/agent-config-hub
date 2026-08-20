@@ -5,6 +5,7 @@ import type {
   ReadOnlyWorkbenchSession,
   ReadOnlyWorkbenchState,
 } from '../session/ReadOnlyWorkbenchSession';
+import { reasonCodeExplanation } from './labels';
 import {
   AGENT_ORDER,
   MVP_ASSET_TYPES,
@@ -22,6 +23,33 @@ const typeLabel: Record<MvpAssetType, string> = {
 
 const SOURCE_CONTEXT_SECTION_ID = 'detail-source-context';
 const HISTORY_RECOVERY_SECTION_ID = 'detail-history-recovery';
+
+type NarrowStage = 'type' | 'scope' | 'list' | 'detail';
+
+function isNarrowViewport(): boolean {
+  return (
+    typeof window !== 'undefined' &&
+    typeof window.matchMedia === 'function' &&
+    window.matchMedia('(max-width: 640px)').matches
+  );
+}
+
+function isVisibleFocusTarget(target: HTMLElement | null): target is HTMLElement {
+  return (
+    target?.isConnected === true &&
+    target.tabIndex >= 0 &&
+    !target.matches(':disabled') &&
+    target.getClientRects().length > 0 &&
+    window.getComputedStyle(target).visibility !== 'hidden'
+  );
+}
+
+function sameViewContext(left: ViewContext, right: ViewContext): boolean {
+  return (
+    left.kind === right.kind &&
+    (left.kind !== 'project' || (right.kind === 'project' && left.projectId === right.projectId))
+  );
+}
 
 function detailEditBinding(
   detail: AssetDetailSnapshot,
@@ -42,6 +70,20 @@ function detailEditBinding(
   ].join('\u0000');
 }
 
+function detailDisclosureBinding(detail: AssetDetailSnapshot): string {
+  const asset = detail.detail.asset;
+  const ownership = asset.nativeOwnership;
+  return [
+    asset.assetId,
+    asset.assetType,
+    asset.nativeUnitRef,
+    asset.adapterIdentity,
+    ownership.kind,
+    ownership.kind === 'project' ? ownership.projectId : '',
+    detail.detail.revision,
+  ].join('\u0000');
+}
+
 function stateLabel(state: ReadOnlyWorkbenchState): string {
   if (state.loadState.kind === 'failed') return `读取失败：${state.loadState.reasonCode}`;
   if (state.loadState.kind === 'loading') return '正在读取资产…';
@@ -50,18 +92,49 @@ function stateLabel(state: ReadOnlyWorkbenchState): string {
   return '';
 }
 
+function WorkbenchPresentationStatus({
+  session,
+  state,
+}: {
+  session: ReadOnlyWorkbenchSession;
+  state: ReadOnlyWorkbenchState;
+}) {
+  const message = stateLabel(state);
+  return (
+    <>
+      {message !== '' && (
+        <p role={state.loadState.kind === 'failed' ? 'alert' : 'status'}>{message}</p>
+      )}
+      {state.loadState.kind === 'failed' && (
+        <button type="button" onClick={() => session.dispatch({ kind: 'retry' })}>
+          重试
+        </button>
+      )}
+      {(state.loadState.kind === 'ready' ||
+        state.loadState.kind === 'empty' ||
+        state.loadState.kind === 'stale') && (
+        <p data-testid="authoritative-revision">
+          {state.loadState.snapshot.authoritativeReadRevision}
+        </p>
+      )}
+    </>
+  );
+}
+
 function SegmentList({
   session,
   state,
   listPaneRef,
   emptyHeadingRef,
   firstRowRef,
+  onOpenNarrowDetail,
 }: {
   session: ReadOnlyWorkbenchSession;
   state: ReadOnlyWorkbenchState;
   listPaneRef: RefObject<HTMLDivElement>;
   emptyHeadingRef: RefObject<HTMLHeadingElement>;
   firstRowRef: RefObject<HTMLButtonElement>;
+  onOpenNarrowDetail: () => void;
 }) {
   const snapshot =
     state.loadState.kind === 'ready' ||
@@ -69,7 +142,8 @@ function SegmentList({
     state.loadState.kind === 'stale'
       ? state.loadState.snapshot
       : null;
-  if (snapshot === null) return null;
+  if (snapshot === null)
+    return <div ref={listPaneRef} className="readonly-segment-list list-pane" />;
   const projection = projectWorkbenchProjection(snapshot, state.presentation);
   const rowIdentity = (row: ReadOnlyRow) => {
     const ownership = row.assetRef.nativeOwnership;
@@ -111,7 +185,10 @@ function SegmentList({
                   aria-selected={
                     state.selected !== null && rowIdentity(state.selected) === rowIdentity(row)
                   }
-                  onClick={() => session.dispatch({ kind: 'selectRow', row })}
+                  onClick={() => {
+                    onOpenNarrowDetail();
+                    session.dispatch({ kind: 'selectRow', row });
+                  }}
                 >
                   <span>{row.displayName}</span>
                   {row.redactedSummary !== undefined && <small>{row.redactedSummary}</small>}
@@ -191,7 +268,7 @@ function SkillCells({
             reasonCode: 'UNKNOWN_FIELD_PRESERVED',
           };
           return (
-            <article key={agent} aria-label={`${agent} 状态`}>
+            <article key={agent} tabIndex={0} aria-label={`${agent} 状态`}>
               <h3>{agent}</h3>
               <p>存在：{presence}</p>
               <p>激活：{activation}</p>
@@ -246,16 +323,70 @@ function NativeFileTree({
   );
 }
 
-function NativeFileSurface({ file }: { file: NativeFileSnapshot }) {
+function NativeFileSurface({
+  file,
+  session,
+  sensitiveViewStatus,
+}: {
+  file: NativeFileSnapshot;
+  session: ReadOnlyWorkbenchSession;
+  sensitiveViewStatus: ReadOnlyWorkbenchState['sensitiveViewStatus'];
+}) {
   if (file.content.kind === 'source') {
+    const activeSegment = file.content.sensitiveSegments.find(
+      (segment) => sensitiveViewStatus[segment.segmentId]?.kind === 'active',
+    );
+    const temporarilyViewedValue =
+      activeSegment === undefined
+        ? undefined
+        : session.getSensitiveViewValue(activeSegment.segmentId);
+    const failedSegment = file.content.sensitiveSegments.find(
+      (segment) => sensitiveViewStatus[segment.segmentId]?.kind === 'failed',
+    );
+    const failedStatus =
+      failedSegment === undefined ? undefined : sensitiveViewStatus[failedSegment.segmentId];
     return (
       <section data-testid="native-file-text" aria-label="文本原生文件（只读）">
         <h3>{file.file.relativePath}</h3>
-        <pre>{file.content.maskedText}</pre>
+        <pre
+          data-testid={
+            file.content.sensitiveSegments.length > 0 ? 'fe10-fx12-masked-placeholder' : undefined
+          }
+        >
+          {file.content.maskedText}
+        </pre>
         {file.content.sensitiveSegments.length > 0 && (
-          <p role="status" data-testid="safety-finding">
-            敏感字段已遮蔽。
-          </p>
+          <>
+            <p role="status" data-testid="safety-finding">
+              敏感字段已遮蔽。
+            </p>
+            {file.content.sensitiveSegments.map((segment, index) => (
+              <button
+                key={segment.segmentId}
+                type="button"
+                aria-label={`查看敏感内容（片段 ${index + 1}）`}
+                onClick={() =>
+                  session.dispatch({ kind: 'beginSensitiveView', segmentId: segment.segmentId })
+                }
+              >
+                查看敏感内容
+              </button>
+            ))}
+          </>
+        )}
+        {failedStatus?.kind === 'failed' && (
+          <section role="alert" aria-label="敏感内容读取失败">
+            <p>无法临时查看敏感内容。</p>
+            <p>原因码：{failedStatus.reasonCode}</p>
+            <p>{reasonCodeExplanation(failedStatus.reasonCode)}</p>
+          </section>
+        )}
+        {activeSegment !== undefined && temporarilyViewedValue !== undefined && (
+          <section aria-label="敏感内容（临时查看）">
+            <h4>敏感内容（临时查看）</h4>
+            <output aria-label="临时敏感内容">{temporarilyViewedValue}</output>
+            <p>此内容仅在当前只读表面短暂显示，失效后会重新遮蔽。</p>
+          </section>
         )}
       </section>
     );
@@ -309,15 +440,37 @@ function ReadOnlyDetail({
   headingRef: RefObject<HTMLHeadingElement>;
 }) {
   const [subagentEditBinding, setSubagentEditBinding] = useState<string | null>(null);
+  const [sourceContextOpen, setSourceContextOpen] = useState(false);
+  const [historyRecoveryOpen, setHistoryRecoveryOpen] = useState(false);
+  const [sourcePathCopyStatus, setSourcePathCopyStatus] = useState<string | null>(null);
+  const sourceContextTriggerRef = useRef<HTMLButtonElement>(null);
+  const historyRecoveryTriggerRef = useRef<HTMLElement>(null);
+  const lastReadyDisclosureDetailKeyRef = useRef<string | null>(null);
   const currentDetailBinding =
     state.detail.kind === 'ready' && state.detail.file !== undefined
       ? detailEditBinding(state.detail.detail, state.detail.file, state.detailView)
       : null;
+  const sourceContextDetailKey =
+    state.detail.kind === 'ready' ? detailDisclosureBinding(state.detail.detail) : null;
   useEffect(() => {
     if (subagentEditBinding !== null && subagentEditBinding !== currentDetailBinding) {
       setSubagentEditBinding(null);
     }
   }, [currentDetailBinding, subagentEditBinding]);
+  useEffect(() => {
+    // 同 asset 的 file/view 切换会短暂进入 loading；它不是 disclosure 的新
+    // destination。只在下一次 ready 身份实际变为另一 asset/revision 时重置。
+    if (sourceContextDetailKey === null) return;
+    if (
+      lastReadyDisclosureDetailKeyRef.current !== null &&
+      lastReadyDisclosureDetailKeyRef.current !== sourceContextDetailKey
+    ) {
+      setSourceContextOpen(false);
+      setHistoryRecoveryOpen(false);
+      setSourcePathCopyStatus(null);
+    }
+    lastReadyDisclosureDetailKeyRef.current = sourceContextDetailKey;
+  }, [sourceContextDetailKey]);
 
   if (state.detail.kind === 'idle') return <p>在列表中选择资产以查看只读状态。</p>;
   if (state.detail.kind === 'loading') {
@@ -349,6 +502,24 @@ function ReadOnlyDetail({
     state.draft !== null && state.draft.assetRef.assetId === detail.detail.asset.assetId
       ? state.draft
       : null;
+  const sourceContextExpanded = sourceContextOpen;
+  const closeSourceContext = () => {
+    setSourceContextOpen(false);
+    queueMicrotask(() => sourceContextTriggerRef.current?.focus());
+  };
+  const closeHistoryRecovery = () => {
+    setHistoryRecoveryOpen(false);
+    queueMicrotask(() => historyRecoveryTriggerRef.current?.focus());
+  };
+  const copySourcePath = async () => {
+    try {
+      if (!navigator.clipboard?.writeText) throw new Error('clipboard unavailable');
+      await navigator.clipboard.writeText(detail.inspector.pathDisplay);
+      setSourcePathCopyStatus('来源路径已复制。');
+    } catch {
+      setSourcePathCopyStatus('无法复制来源路径。');
+    }
+  };
   const editableTextSource = isEditableTextSource(detail, file);
   const editableSourceSurface =
     editableTextSource &&
@@ -593,24 +764,50 @@ function ReadOnlyDetail({
             </button>
           )}
           {!editableSource && !editableMaskedSource && !editableSubagent && (
-            <NativeFileSurface file={file} />
+            <NativeFileSurface
+              file={file}
+              session={session}
+              sensitiveViewStatus={state.sensitiveViewStatus}
+            />
           )}
         </>
       )}
+      <button
+        ref={sourceContextTriggerRef}
+        type="button"
+        aria-controls={SOURCE_CONTEXT_SECTION_ID}
+        aria-expanded={sourceContextExpanded}
+        onClick={() => setSourceContextOpen(true)}
+        onKeyDown={(event) => {
+          if (event.key !== 'Escape' || !sourceContextExpanded) return;
+          event.preventDefault();
+          closeSourceContext();
+        }}
+      >
+        查看辅助信息
+      </button>
       <details
         id={SOURCE_CONTEXT_SECTION_ID}
-        open={draft?.expandedSectionIds.includes(SOURCE_CONTEXT_SECTION_ID) === true}
+        open={sourceContextExpanded}
         onToggle={(event) => {
-          if (draft === null) return;
-          session.dispatch({
-            kind: 'setDraftSectionExpanded',
-            sectionId: SOURCE_CONTEXT_SECTION_ID,
-            expanded: event.currentTarget.open,
-          });
+          setSourceContextOpen(event.currentTarget.open);
+        }}
+        onKeyDown={(event) => {
+          if (event.key !== 'Escape' || !sourceContextExpanded) return;
+          event.preventDefault();
+          closeSourceContext();
         }}
       >
         <summary>来源与上下文</summary>
-        <p>来源路径：{detail.inspector.pathDisplay}</p>
+        <p>
+          来源路径：{detail.inspector.pathDisplay}{' '}
+          <button type="button" onClick={() => void copySourcePath()}>
+            复制来源路径
+          </button>
+        </p>
+        <p role="status" aria-live="polite" aria-atomic="true">
+          {sourcePathCopyStatus}
+        </p>
         <p>来源锚点：{sourceAnchorLabel(detail.inspector.sourceAnchor)}</p>
         {detail.inspector.effectiveContexts.map((context) => (
           <p key={`${context.agent}-${context.scope}-${context.precedence}`}>
@@ -630,17 +827,15 @@ function ReadOnlyDetail({
       </details>
       <details
         id={HISTORY_RECOVERY_SECTION_ID}
-        open={draft?.expandedSectionIds.includes(HISTORY_RECOVERY_SECTION_ID) === true}
-        onToggle={(event) => {
-          if (draft === null) return;
-          session.dispatch({
-            kind: 'setDraftSectionExpanded',
-            sectionId: HISTORY_RECOVERY_SECTION_ID,
-            expanded: event.currentTarget.open,
-          });
+        open={historyRecoveryOpen}
+        onToggle={(event) => setHistoryRecoveryOpen(event.currentTarget.open)}
+        onKeyDown={(event) => {
+          if (event.key !== 'Escape' || !historyRecoveryOpen) return;
+          event.preventDefault();
+          closeHistoryRecovery();
         }}
       >
-        <summary>历史与恢复</summary>
+        <summary ref={historyRecoveryTriggerRef}>历史与恢复</summary>
         <p>当前版本：{detail.revision}</p>
         <p>漂移：当前详情 snapshot 未提供权威事实</p>
         <p>最近变更：当前详情 snapshot 未提供权威事实</p>
@@ -654,11 +849,13 @@ function Locator({
   session,
   state,
   onClose,
+  onOpenNarrowDetail,
   errorHeadingRef,
 }: {
   session: ReadOnlyWorkbenchSession;
   state: ReadOnlyWorkbenchState;
   onClose: () => void;
+  onOpenNarrowDetail: () => void;
   errorHeadingRef: RefObject<HTMLHeadingElement>;
 }) {
   if (state.locator.kind !== 'open') return null;
@@ -705,12 +902,13 @@ function Locator({
               key={`${row.assetRef.assetId}\u0000${row.assetRef.nativeUnitRef}`}
               type="button"
               data-testid="locator-result"
-              onClick={() =>
+              onClick={() => {
+                onOpenNarrowDetail();
                 session.dispatch({
                   kind: 'selectLocatorResult',
                   result: row,
-                })
-              }
+                });
+              }}
             >
               <span>{row.displayName}</span>
               <small>{row.redactedSummary}</small>
@@ -745,8 +943,71 @@ export function ReadOnlyWorkbench({ session }: { session: ReadOnlyWorkbenchSessi
   const listPaneRef = useRef<HTMLDivElement>(null!);
   const emptyHeadingRef = useRef<HTMLHeadingElement>(null!);
   const firstRowRef = useRef<HTMLButtonElement>(null!);
+  const selectedTypeRef = useRef<HTMLButtonElement>(null);
+  const selectedScopeRef = useRef<HTMLButtonElement>(null);
   const focusedPageRef = useRef<number | null>(null);
   const focusedSnapshotRef = useRef<unknown>(null);
+  const pendingNarrowStageRef = useRef<NarrowStage | null>(null);
+  const narrowResizeFocusRef = useRef<HTMLElement | null>(null);
+  const [narrowViewport, setNarrowViewport] = useState(isNarrowViewport);
+  const [narrowStage, setNarrowStage] = useState<NarrowStage>('type');
+  const hasDetailSurface =
+    state.selected !== null || state.detail.kind !== 'idle' || state.detailError !== null;
+  const isNarrowDetailOpen = narrowViewport && narrowStage === 'detail' && hasDetailSurface;
+  const enterNarrowStage = (stage: NarrowStage) => {
+    if (narrowViewport) setNarrowStage(stage);
+  };
+  const enterNarrowStageAfterTransition = (stage: NarrowStage) => {
+    if (!narrowViewport) return;
+    const nextState = session.getSnapshot();
+    if (nextState.dirtyGuard.kind !== 'idle' || nextState.draft !== null) {
+      pendingNarrowStageRef.current = stage;
+      return;
+    }
+    setNarrowStage(stage);
+  };
+  const restoreNarrowDirtyDetail = () => {
+    const nextState = session.getSnapshot();
+    if (
+      !narrowViewport ||
+      nextState.dirtyGuard.kind !== 'idle' ||
+      nextState.draft === null ||
+      nextState.detail.kind !== 'ready'
+    )
+      return false;
+    setNarrowStage('detail');
+    return true;
+  };
+  const selectAssetType = (assetType: MvpAssetType) => {
+    const sameType = session.getSnapshot().assetType === assetType;
+    session.dispatch({ kind: 'selectAssetType', assetType });
+    if (sameType && restoreNarrowDirtyDetail()) return;
+    enterNarrowStageAfterTransition('scope');
+  };
+  const selectViewContext = (viewContext: ViewContext) => {
+    const currentContext = session.getSnapshot().viewContext;
+    session.dispatch({ kind: 'selectViewContext', viewContext });
+    if (sameViewContext(currentContext, viewContext) && restoreNarrowDirtyDetail()) return;
+    enterNarrowStageAfterTransition('list');
+  };
+  const openNarrowDetail = () => enterNarrowStage('detail');
+  const returnToList = () => {
+    setNarrowStage('list');
+    queueMicrotask(() => {
+      const selectedRow = listPaneRef.current?.querySelector<HTMLButtonElement>(
+        '[role="option"][aria-selected="true"]',
+      );
+      (selectedRow ?? firstRowRef.current)?.focus({ preventScroll: true });
+    });
+  };
+  const returnToScope = () => {
+    setNarrowStage('scope');
+    queueMicrotask(() => selectedScopeRef.current?.focus({ preventScroll: true }));
+  };
+  const returnToType = () => {
+    setNarrowStage('type');
+    queueMicrotask(() => selectedTypeRef.current?.focus({ preventScroll: true }));
+  };
   const openLocator = () => {
     locatorReturnTargetRef.current =
       document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -756,14 +1017,77 @@ export function ReadOnlyWorkbench({ session }: { session: ReadOnlyWorkbenchSessi
     session.dispatch({ kind: 'closeLocator' });
     queueMicrotask(() => {
       const target = locatorReturnTargetRef.current;
-      if (target?.isConnected === true && target.tabIndex >= 0 && !target.matches(':disabled')) {
+      if (isVisibleFocusTarget(target)) {
         target.focus();
       } else {
-        locatorButtonRef.current?.focus();
+        const visibleLocatorButton = isVisibleFocusTarget(locatorButtonRef.current)
+          ? locatorButtonRef.current
+          : [...document.querySelectorAll<HTMLButtonElement>('button')].find(
+              (button) => button.textContent?.trim() === '全局搜索' && isVisibleFocusTarget(button),
+            );
+        visibleLocatorButton?.focus();
       }
       locatorReturnTargetRef.current = null;
     });
   };
+  useEffect(() => {
+    if (typeof window.matchMedia !== 'function') return;
+    const query = window.matchMedia('(max-width: 640px)');
+    const updateNarrowViewport = () => {
+      const active = document.activeElement;
+      if (
+        query.matches &&
+        active instanceof HTMLElement &&
+        active.closest('.detail-panel') !== null
+      ) {
+        narrowResizeFocusRef.current = active;
+      }
+      setNarrowViewport(query.matches);
+    };
+    updateNarrowViewport();
+    query.addEventListener('change', updateNarrowViewport);
+    return () => query.removeEventListener('change', updateNarrowViewport);
+  }, []);
+  useEffect(() => {
+    if (narrowViewport && hasDetailSurface) setNarrowStage('detail');
+  }, [hasDetailSurface, narrowViewport]);
+  useEffect(() => {
+    if (
+      narrowViewport &&
+      narrowStage === 'detail' &&
+      !hasDetailSurface &&
+      state.loadState.kind === 'failed'
+    ) {
+      setNarrowStage('list');
+    }
+  }, [hasDetailSurface, narrowStage, narrowViewport, state.loadState.kind]);
+  useEffect(() => {
+    if (!narrowViewport || narrowStage !== 'detail') return;
+    const target =
+      narrowResizeFocusRef.current ??
+      (state.draft === null
+        ? null
+        : document.querySelector<HTMLElement>('[data-testid="fe03-draft-textarea"]'));
+    if (target === null) return;
+    narrowResizeFocusRef.current = null;
+    queueMicrotask(() => {
+      if (target.isConnected && target.getClientRects().length > 0) {
+        target.focus({ preventScroll: true });
+      }
+    });
+  }, [narrowStage, narrowViewport, state.draft]);
+  useEffect(() => {
+    const pendingStage = pendingNarrowStageRef.current;
+    if (
+      !narrowViewport ||
+      pendingStage === null ||
+      state.dirtyGuard.kind !== 'idle' ||
+      state.draft !== null
+    )
+      return;
+    pendingNarrowStageRef.current = null;
+    setNarrowStage(pendingStage);
+  }, [narrowViewport, state.dirtyGuard.kind, state.draft]);
   useEffect(() => {
     if (state.detail.kind === 'ready' || state.detail.kind === 'failed') {
       detailHeadingRef.current?.focus({ preventScroll: true });
@@ -804,6 +1128,25 @@ export function ReadOnlyWorkbench({ session }: { session: ReadOnlyWorkbenchSessi
     });
   }, [state.detailError, state.loadState, state.presentation]);
   useEffect(() => {
+    if (!narrowViewport || narrowStage !== 'list' || state.detailError !== null) return;
+    if (
+      state.loadState.kind !== 'ready' &&
+      state.loadState.kind !== 'empty' &&
+      state.loadState.kind !== 'stale'
+    )
+      return;
+    if (
+      projectWorkbenchProjection(state.loadState.snapshot, state.presentation).aggregateTotal !== 0
+    )
+      return;
+    queueMicrotask(() => {
+      const heading = emptyHeadingRef.current;
+      if (heading?.isConnected && heading.getClientRects().length > 0) {
+        heading.focus({ preventScroll: true });
+      }
+    });
+  }, [narrowStage, narrowViewport, state.detailError, state.loadState, state.presentation]);
+  useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.metaKey && event.key.toLowerCase() === 'k') {
         event.preventDefault();
@@ -817,9 +1160,18 @@ export function ReadOnlyWorkbench({ session }: { session: ReadOnlyWorkbenchSessi
     { label: '全部', value: { kind: 'all' } },
     { label: '全局', value: { kind: 'global' } },
   ];
+  const presentationStatus = <WorkbenchPresentationStatus session={session} state={state} />;
+  const globalSearchTrigger = () => (
+    <button ref={locatorButtonRef} type="button" onClick={openLocator}>
+      全局搜索
+    </button>
+  );
   return (
-    <main className="workbench read-only-workbench" aria-label="只读工作台">
-      <header>
+    <main
+      className={`workbench read-only-workbench narrow-stage-${narrowStage}`}
+      aria-label="只读工作台"
+    >
+      <header className="workbench-header">
         <nav aria-label="资产类型">
           <div role="tablist" aria-label="一级资产类型">
             {MVP_ASSET_TYPES.map((assetType) => (
@@ -828,18 +1180,30 @@ export function ReadOnlyWorkbench({ session }: { session: ReadOnlyWorkbenchSessi
                 type="button"
                 role="tab"
                 aria-selected={state.assetType === assetType}
-                onClick={() => session.dispatch({ kind: 'selectAssetType', assetType })}
+                ref={state.assetType === assetType ? selectedTypeRef : undefined}
+                onClick={() => selectAssetType(assetType)}
               >
                 {typeLabel[assetType]}
               </button>
             ))}
           </div>
         </nav>
-        <button ref={locatorButtonRef} type="button" onClick={openLocator}>
-          全局搜索
-        </button>
+        {(!narrowViewport || narrowStage === 'type') && globalSearchTrigger()}
+        {narrowViewport && narrowStage === 'type' && presentationStatus}
       </header>
-      <section aria-label="作用域">
+      <section className="scope-pane" aria-label="作用域">
+        {narrowViewport && narrowStage === 'scope' && (
+          <button
+            className="narrow-back-to-type"
+            type="button"
+            aria-label="返回资产类型"
+            onClick={returnToType}
+          >
+            返回资产类型
+          </button>
+        )}
+        {narrowViewport && narrowStage === 'scope' && presentationStatus}
+        {narrowViewport && narrowStage === 'scope' && globalSearchTrigger()}
         {[
           ...viewContexts,
           ...state.availableProjectIds.map((projectId) => ({
@@ -856,13 +1220,35 @@ export function ReadOnlyWorkbench({ session }: { session: ReadOnlyWorkbenchSessi
                   state.viewContext.projectId === value.projectId
                 : state.viewContext.kind === value.kind
             }
-            onClick={() => session.dispatch({ kind: 'selectViewContext', viewContext: value })}
+            ref={
+              (
+                value.kind === 'project'
+                  ? state.viewContext.kind === 'project' &&
+                    state.viewContext.projectId === value.projectId
+                  : state.viewContext.kind === value.kind
+              )
+                ? selectedScopeRef
+                : undefined
+            }
+            onClick={() => selectViewContext(value)}
           >
             {label}
           </button>
         ))}
       </section>
       <section className="toolbar" aria-label="列表投影">
+        {narrowViewport && narrowStage === 'list' && (
+          <button
+            className="narrow-back-to-scope"
+            type="button"
+            aria-label="返回作用域"
+            onClick={returnToScope}
+          >
+            返回作用域
+          </button>
+        )}
+        {narrowViewport && narrowStage === 'list' && presentationStatus}
+        {narrowViewport && narrowStage === 'list' && globalSearchTrigger()}
         <label htmlFor="filter-agent">Agent 筛选</label>
         <select
           id="filter-agent"
@@ -917,21 +1303,7 @@ export function ReadOnlyWorkbench({ session }: { session: ReadOnlyWorkbenchSessi
           <option value="100">100</option>
         </select>
       </section>
-      {stateLabel(state) !== '' && (
-        <p role={state.loadState.kind === 'failed' ? 'alert' : 'status'}>{stateLabel(state)}</p>
-      )}
-      {state.loadState.kind === 'failed' && (
-        <button type="button" onClick={() => session.dispatch({ kind: 'retry' })}>
-          重试
-        </button>
-      )}
-      {(state.loadState.kind === 'ready' ||
-        state.loadState.kind === 'empty' ||
-        state.loadState.kind === 'stale') && (
-        <p data-testid="authoritative-revision">
-          {state.loadState.snapshot.authoritativeReadRevision}
-        </p>
-      )}
+      {!narrowViewport && <section className="workbench-status">{presentationStatus}</section>}
       <div className="workbench-main">
         <SegmentList
           session={session}
@@ -939,8 +1311,21 @@ export function ReadOnlyWorkbench({ session }: { session: ReadOnlyWorkbenchSessi
           listPaneRef={listPaneRef}
           emptyHeadingRef={emptyHeadingRef}
           firstRowRef={firstRowRef}
+          onOpenNarrowDetail={openNarrowDetail}
         />
         <aside className="detail-panel" aria-label="资产详情">
+          {isNarrowDetailOpen && presentationStatus}
+          {isNarrowDetailOpen && globalSearchTrigger()}
+          {isNarrowDetailOpen && (
+            <button
+              className="narrow-back-to-list"
+              type="button"
+              aria-label="返回列表"
+              onClick={returnToList}
+            >
+              返回列表
+            </button>
+          )}
           {state.detailError !== null ? (
             <section role="alert" aria-label="只读详情错误">
               <h2 ref={detailErrorHeadingRef} tabIndex={-1} data-testid="detail-error-heading">
@@ -952,6 +1337,15 @@ export function ReadOnlyWorkbench({ session }: { session: ReadOnlyWorkbenchSessi
           ) : (
             <ReadOnlyDetail session={session} state={state} headingRef={detailHeadingRef} />
           )}
+          {state.draft !== null && state.dirtyGuard.kind === 'idle' && (
+            <button
+              type="button"
+              data-testid="fe03-draft-discard"
+              onClick={() => session.dispatch({ kind: 'discardDraft' })}
+            >
+              丢弃本地草稿
+            </button>
+          )}
         </aside>
       </div>
       {state.dirtyGuard.kind === 'pending' && (
@@ -959,7 +1353,11 @@ export function ReadOnlyWorkbench({ session }: { session: ReadOnlyWorkbenchSessi
           <button
             type="button"
             data-testid="fe03-dirty-guard-continue"
-            onClick={() => session.dispatch({ kind: 'continueEditing' })}
+            onClick={() => {
+              pendingNarrowStageRef.current = null;
+              session.dispatch({ kind: 'continueEditing' });
+              restoreNarrowDirtyDetail();
+            }}
           >
             继续编辑
           </button>
@@ -972,19 +1370,11 @@ export function ReadOnlyWorkbench({ session }: { session: ReadOnlyWorkbenchSessi
           </button>
         </section>
       )}
-      {state.draft !== null && state.dirtyGuard.kind === 'idle' && (
-        <button
-          type="button"
-          data-testid="fe03-draft-discard"
-          onClick={() => session.dispatch({ kind: 'discardDraft' })}
-        >
-          丢弃本地草稿
-        </button>
-      )}
       <Locator
         session={session}
         state={state}
         onClose={closeLocator}
+        onOpenNarrowDetail={openNarrowDetail}
         errorHeadingRef={locatorErrorHeadingRef}
       />
     </main>

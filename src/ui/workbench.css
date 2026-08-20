@@ -4,7 +4,7 @@
   color-scheme: light;
   font-family:
     -apple-system, BlinkMacSystemFont, 'Helvetica Neue', 'PingFang SC', 'Segoe UI', sans-serif;
-  --border: #d0d0d4;
+  --border: #767676;
   --bg-subtle: #f6f6f8;
   --accent: #0b5fff;
   --warn: #8a5a00;
@@ -368,4 +368,50 @@ body {
 .path-display {
   font-family: 'SF Mono', Menlo, Consolas, monospace;
   font-size: 12px;
+}
+
+.narrow-back-to-list,
+.narrow-back-to-scope,
+.narrow-back-to-type {
+  display: none;
+}
+
+@media (max-width: 640px) {
+  /* FE-10 窄屏以 type → scope → list → detail 呈现单一可见表面。 */
+  .read-only-workbench.narrow-stage-type > .scope-pane,
+  .read-only-workbench.narrow-stage-type > .toolbar,
+  .read-only-workbench.narrow-stage-type > .workbench-main,
+  .read-only-workbench.narrow-stage-scope > .workbench-header,
+  .read-only-workbench.narrow-stage-scope > .toolbar,
+  .read-only-workbench.narrow-stage-scope > .workbench-main,
+  .read-only-workbench.narrow-stage-list > .workbench-header,
+  .read-only-workbench.narrow-stage-list > .scope-pane,
+  .read-only-workbench.narrow-stage-detail > .workbench-header,
+  .read-only-workbench.narrow-stage-detail > .scope-pane,
+  .read-only-workbench.narrow-stage-detail > .toolbar {
+    display: none;
+  }
+
+  .workbench-main {
+    display: block;
+    min-width: 0;
+  }
+
+  .list-pane,
+  .detail-panel {
+    min-width: 0;
+    border-right: 0;
+  }
+
+  .read-only-workbench.narrow-stage-list .detail-panel,
+  .read-only-workbench.narrow-stage-detail .list-pane {
+    display: none;
+  }
+
+  .read-only-workbench.narrow-stage-scope .narrow-back-to-type,
+  .read-only-workbench.narrow-stage-list .narrow-back-to-scope,
+  .read-only-workbench.narrow-stage-detail .narrow-back-to-list {
+    display: inline-flex;
+    margin-bottom: 12px;
+  }
 }

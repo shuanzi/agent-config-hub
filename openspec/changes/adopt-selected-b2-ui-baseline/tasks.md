@@ -63,10 +63,10 @@
 
 ### FE-10：只读响应式和可访问性表面
 
-- [ ] 3.13 重新读取并验证 ARCH-GATE、FE-10 正式 Ticket Status 与 direct blocker FE-02=done/evidence；它们仍是 FE-10 formal ticket verification/closure 的前置。若 FE-02 已经独立功能复验并人工记录 `functional complete`，只能按本节人工排期 FE-10 产品功能开发，不得把它记为 FE-10 ready/done/closure；本次不据此启动或推进 FE-10。任一所需 formal 条件不满足时，记录相应 blocker 并停止 formal 活动。
-- [ ] 3.14 在 FE-10 内完成只读宽／中／窄、精确列表控件／焦点／搜索呈现和四 Agent 状态可访问性的最小 contract／domain／Rust-first wire delta；不得引入 FE-03～FE-09 的写入行为。
-- [ ] 3.15 在 FE-10 内生成或复验 TypeScript wire、vectors 与 drift，并实现响应式只读 UI、焦点旅程和语义状态。
-- [ ] 3.16 在 FE-10 内只执行 L0／L1 可访问性／状态测试和 L2 响应式 journey；明确无 L3、无 PF。上述功能检查经独立复验后，才可人工记录为 non-closure 的 task-only `functional complete`，可按本节成为下游产品功能开发的人工排期输入，但不得标记 FE-10 done、更新 frontier 或替代正式 gate/direct-blocker evidence。
+- [x] 3.13 重新读取并验证 ARCH-GATE、FE-10 正式 Ticket Status 与 direct blocker FE-02=done/evidence；它们仍是 FE-10 formal ticket verification/closure 的前置。若 FE-02 已经独立功能复验并人工记录 `functional complete`，只能按本节人工排期 FE-10 产品功能开发，不得把它记为 FE-10 ready/done/closure；本次不据此启动或推进 FE-10。任一所需 formal 条件不满足时，记录相应 blocker 并停止 formal 活动。
+- [x] 3.14 在 FE-10 内完成只读宽／中／窄、精确列表控件／焦点／搜索呈现和四 Agent 状态可访问性的最小 contract／domain／Rust-first wire delta；不得引入 FE-03～FE-09 的写入行为。
+- [x] 3.15 在 FE-10 内生成或复验 TypeScript wire、vectors 与 drift，并实现响应式只读 UI、焦点旅程和语义状态。
+- [x] 3.16 在 FE-10 内只执行 L0／L1 可访问性／状态测试和 L2 响应式 journey；明确无 L3、无 PF。上述功能检查经独立复验后，才可人工记录为 non-closure 的 task-only `functional complete`，可按本节成为下游产品功能开发的人工排期输入，但不得标记 FE-10 done、更新 frontier 或替代正式 gate/direct-blocker evidence。
 - [ ] 3.17 仅在 FE-10 自身授权建立的 registry entry 已存在、3.16 已人工记录 `functional complete` 且当前 formal direct blockers 仍满足后，按冻结 acceptance（无 PF）运行 `npm run verify:ticket -- FE-10`；保留命令、层级、运行标识和未覆盖边界。正式 closure 失败阻止 FE-10 done。
 - [ ] 3.18 对 FE-10 进行独立只读复审；任何功能或正式 closure 失败／inconclusive 均停止本 slice 尚未开始的后续实现、closure，仍须进入本复审并独立记录 finding；复审本身不是 closure，不得标记 done 或更新 frontier；只有全部证据满足 acceptance，才可标记 FE-10 done 并更新 frontier。
 

@@ -400,7 +400,11 @@ export function projectWorkbenchProjection(
   snapshot: WorkbenchActualReadSnapshot,
   presentation: ListPresentationState,
 ): WorkbenchProjection {
-  if (![20, 50, 100].includes(presentation.pageSize) || presentation.page < 1) {
+  if (
+    (presentation.nameSort !== 'asc' && presentation.nameSort !== 'desc') ||
+    ![20, 50, 100].includes(presentation.pageSize) ||
+    presentation.page < 1
+  ) {
     throw new Error('READ_FAILED: invalid local list presentation');
   }
   const segments = orderedSegments(snapshot)

@@ -160,12 +160,12 @@ fn skill_cell_wire_domain_semantics_reject_contradictory_presence_activation_and
 fn valid_request_vectors_decode() {
     let vectors = [
         json!({
-            "wireVersion": 4,
+            "wireVersion": GATEWAY_WIRE_VERSION,
             "requestId": "req-list-1",
             "payload": { "kind": "assetList", "scope": { "kind": "allAssets" } }
         }),
         json!({
-            "wireVersion": 4,
+            "wireVersion": GATEWAY_WIRE_VERSION,
             "requestId": "req-list-2",
             "payload": {
                 "kind": "assetList",
@@ -180,7 +180,7 @@ fn valid_request_vectors_decode() {
             }
         }),
         json!({
-            "wireVersion": 4,
+            "wireVersion": GATEWAY_WIRE_VERSION,
             "requestId": "req-detail-1",
             "payload": {
                 "kind": "assetDetail",
@@ -194,7 +194,7 @@ fn valid_request_vectors_decode() {
             }
         }),
         json!({
-            "wireVersion": 4,
+            "wireVersion": GATEWAY_WIRE_VERSION,
             "requestId": "req-file-1",
             "payload": {
                 "kind": "nativeFile",
@@ -229,7 +229,27 @@ fn valid_request_vectors_decode() {
             }
         }),
         json!({
-            "wireVersion": 4,
+            "wireVersion": GATEWAY_WIRE_VERSION,
+            "requestId": "req-sensitive-view-1",
+            "payload": {
+                "kind": "sensitiveReveal",
+                "asset": {
+                    "assetId": "asset-fe10-view-vector-safe",
+                    "assetType": "longTermInstruction",
+                    "nativeUnitRef": "nunit-fe10-view-vector-safe",
+                    "adapterIdentity": "fixture@synthetic",
+                    "nativeOwnership": { "kind": "global" }
+                },
+                "fileId": "file-fe10-view-vector-safe",
+                "segmentId": "segment-fe10-view-vector-safe",
+                "fileRevision": "revision-fe10-view-vector-safe",
+                "assetRevision": "asset-revision-fe10-view-vector-safe",
+                "scope": "view",
+                "surface": "source"
+            }
+        }),
+        json!({
+            "wireVersion": GATEWAY_WIRE_VERSION,
             "requestId": "req-fx19-project",
             "payload": {
                 "kind": "projectApplicability",
@@ -237,7 +257,7 @@ fn valid_request_vectors_decode() {
             }
         }),
         json!({
-            "wireVersion": 4,
+            "wireVersion": GATEWAY_WIRE_VERSION,
             "requestId": "req-workbench",
             "payload": {
                 "kind": "workbench",
@@ -247,7 +267,7 @@ fn valid_request_vectors_decode() {
             }
         }),
         json!({
-            "wireVersion": 4,
+            "wireVersion": GATEWAY_WIRE_VERSION,
             "requestId": "req-locator",
             "payload": {
                 "kind": "globalLocator",
@@ -448,7 +468,7 @@ fn negative_vectors_are_rejected_at_decode() {
         }),
         // project view 的 opaque identity shape 不可扩展
         json!({
-            "wireVersion": 4, "requestId": "r",
+            "wireVersion": GATEWAY_WIRE_VERSION, "requestId": "r",
             "payload": {
                 "kind": "projectApplicability",
                 "view": { "kind": "project", "projectId": "project-same-b", "bogus": true }
@@ -496,9 +516,9 @@ fn assert_normalized_gateway_unavailable(response: &Value, request_id: &str) {
 fn wire_faults_normalize_to_gateway_unavailable() {
     let core = core();
     let cases: Vec<Value> = vec![
-        // breaking bump 的精确前一版 V3：ingress 不协商、不 fallback。
+        // breaking bump 的精确前一版 V4：ingress 不协商、不 fallback。
         json!({
-            "wireVersion": 3, "requestId": "r1",
+            "wireVersion": 4, "requestId": "r1",
             "payload": { "kind": "assetList", "scope": { "kind": "allAssets" } }
         }),
         // 未知 tag
@@ -525,7 +545,7 @@ fn wire_faults_normalize_to_gateway_unavailable() {
 
     // 超限 payload
     let huge = json!({
-        "wireVersion": 4,
+        "wireVersion": GATEWAY_WIRE_VERSION,
         "requestId": "r1",
         "payload": {
             "kind": "assetList",
@@ -541,7 +561,7 @@ fn wire_faults_normalize_to_gateway_unavailable() {
 fn oversized_search_text_over_limit_is_rejected_but_normal_request_passes() {
     let core = core();
     let ok = json!({
-        "wireVersion": 4,
+        "wireVersion": GATEWAY_WIRE_VERSION,
         "requestId": "r-ok",
         "payload": { "kind": "assetList", "scope": { "kind": "allAssets" } }
     });
@@ -760,7 +780,7 @@ fn fx19_all_projection_wire_keeps_registry_provenance_and_stable_findings() {
 fn response_envelope_serializes_to_golden_json() {
     let core = core();
     let request = json!({
-        "wireVersion": 4,
+        "wireVersion": GATEWAY_WIRE_VERSION,
         "requestId": "req-golden-1",
         "payload": {
             "kind": "assetDetail",
@@ -844,7 +864,7 @@ fn response_envelope_serializes_to_golden_json() {
 fn masked_native_file_response_matches_fixture_golden() {
     let core = core();
     let request = json!({
-        "wireVersion": 4,
+        "wireVersion": GATEWAY_WIRE_VERSION,
         "requestId": "req-golden-2",
         "payload": {
             "kind": "nativeFile",
@@ -913,7 +933,7 @@ fn event_envelope_serializes_to_golden_json() {
     let text = serde_json::to_string(&envelope).unwrap();
     assert_eq!(
         text,
-        r#"{"wireVersion":4,"event":{"kind":"assetsInvalidated","assetType":"skill"}}"#
+        r#"{"wireVersion":5,"event":{"kind":"assetsInvalidated","assetType":"skill"}}"#
     );
 
     // 不带 assetType 时字段省略（skip_serializing_if），不序列化 null。
@@ -926,7 +946,7 @@ fn event_envelope_serializes_to_golden_json() {
     let text = serde_json::to_string(&envelope).unwrap();
     assert_eq!(
         text,
-        r#"{"wireVersion":4,"event":{"kind":"assetsInvalidated"}}"#
+        r#"{"wireVersion":5,"event":{"kind":"assetsInvalidated"}}"#
     );
 
     // 事件往返解码，未知 tag 被拒绝。

@@ -13,9 +13,9 @@ use crate::domain::{
     LocatorMatchedField, LocatorResult, MvpAssetType, ProjectApplicabilityQuery,
     ProjectApplicabilitySegmentKind, ProjectApplicabilitySnapshot, ProjectApplicabilityView, Query,
     ReadFailure, ReadResult, ReasonCode, RecoveryAction, SegmentSource, SensitiveAccessGrant,
-    SensitiveRevealQuery, SensitiveRevealSnapshot, SensitiveWorkbenchSurface, SkillActivation,
-    SkillPresence, SkillTargetState, Snapshot, WorkbenchActualReadSnapshot, WorkbenchFinding,
-    WorkbenchQuery, WorkbenchRow, WorkbenchSegment, WorkbenchStatusFacts,
+    SensitiveAccessScope, SensitiveRevealQuery, SensitiveRevealSnapshot, SensitiveWorkbenchSurface,
+    SkillActivation, SkillPresence, SkillTargetState, Snapshot, WorkbenchActualReadSnapshot,
+    WorkbenchFinding, WorkbenchQuery, WorkbenchRow, WorkbenchSegment, WorkbenchStatusFacts,
 };
 use crate::{
     adapter_registry::AdapterRegistry, project_applicability::ProjectApplicabilityResolver,
@@ -98,16 +98,22 @@ impl GatewayCore {
         })
     }
 
-    /// FE-03 sensitive `modify` 仍沿唯一 read verb。请求必须引用当前 core
-    /// 读取到的 asset/file/segment/revision；失败统一为不含敏感值的稳定拒绝。
+    /// 敏感 `view` / `modify` 均沿唯一 read verb；两种 scope 在 core/catalog
+    /// 独立授权，不能通过新增 enum 值静默扩大已有 modify 行为。
     fn read_sensitive_reveal(&self, query: &SensitiveRevealQuery) -> ReadResult<Snapshot> {
-        // 当前 FE-03 的封闭表面只有 `modify` + `source`。未来若扩展 enum，编译器
-        // 会强制这里显式审查，而不会将新 scope/surface 静默授权。
         match (query.scope, query.surface) {
-            (crate::domain::SensitiveAccessScope::Modify, SensitiveWorkbenchSurface::Source) => {}
+            (SensitiveAccessScope::Modify, SensitiveWorkbenchSurface::Source) => {
+                self.read_sensitive_modify(query)
+            }
+            (SensitiveAccessScope::View, SensitiveWorkbenchSurface::Source) => {
+                self.read_sensitive_view(query)
+            }
         }
+    }
 
-        let Some(plaintext) = self.catalog.sensitive_reveal(
+    /// FE-03 modify 仍只接受 catalog 的 editable source，保留既有路径与语义。
+    fn read_sensitive_modify(&self, query: &SensitiveRevealQuery) -> ReadResult<Snapshot> {
+        let Some(plaintext) = self.catalog.sensitive_modify_reveal(
             &query.asset,
             &query.file_id,
             &query.segment_id,
@@ -116,6 +122,28 @@ impl GatewayCore {
         ) else {
             return Self::sensitive_reveal_denied();
         };
+        self.issue_sensitive_reveal_grant(query, plaintext)
+    }
+
+    /// FE-10 view 只读独立路径：不依赖 modify 的 can_edit 或授权语义。
+    fn read_sensitive_view(&self, query: &SensitiveRevealQuery) -> ReadResult<Snapshot> {
+        let Some(plaintext) = self.catalog.sensitive_view_reveal(
+            &query.asset,
+            &query.file_id,
+            &query.segment_id,
+            &query.file_revision,
+            &query.asset_revision,
+        ) else {
+            return Self::sensitive_reveal_denied();
+        };
+        self.issue_sensitive_reveal_grant(query, plaintext)
+    }
+
+    fn issue_sensitive_reveal_grant(
+        &self,
+        query: &SensitiveRevealQuery,
+        plaintext: String,
+    ) -> ReadResult<Snapshot> {
         let Some(grant_id) = opaque_grant_id() else {
             return Self::sensitive_reveal_denied();
         };
@@ -141,7 +169,7 @@ impl GatewayCore {
     fn sensitive_reveal_denied() -> ReadResult<Snapshot> {
         ReadResult::Failed(ReadFailure {
             reason_code: ReasonCode::PermissionDenied,
-            message: "敏感片段当前不可用于修改，请重新读取并显式授权。".to_string(),
+            message: "敏感片段当前不可用，请重新读取并显式授权。".to_string(),
             recovery_action: Some(RecoveryAction::RetryRead),
         })
     }
