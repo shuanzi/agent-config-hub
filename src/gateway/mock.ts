@@ -504,6 +504,10 @@ export class ScriptedMockGateway implements FrontendGateway {
       case 'fe03-drafts':
         this.fe03Drafts = true;
         break;
+      case 'fe03-drafts-stale':
+        this.fe03Drafts = true;
+        this.setIndexStatus('stale');
+        break;
       case 'fx12-sensitive-view':
         this.fx12SensitiveView = true;
         break;
@@ -880,15 +884,26 @@ export class ScriptedMockGateway implements FrontendGateway {
         files: [
           {
             file: maskedInstructionFile,
-            source: '# Masked local instruction\n\nSetting: ••••••••\n',
+            source: '# Masked local instruction\n\nSetting: ••••••••\nFallback: ••••••••\n',
             maskedParts: [
               { kind: 'text', text: '# Masked local instruction\n\nSetting: ' },
               { kind: 'sensitivePlaceholder', segmentId: 'seg-fe03-masked-instruction' },
+              { kind: 'text', text: '\nFallback: ' },
+              {
+                kind: 'sensitivePlaceholder',
+                segmentId: 'seg-fe03-masked-instruction-secondary',
+              },
               { kind: 'text', text: '\n' },
             ],
             sensitiveSegments: [
               {
                 segmentId: 'seg-fe03-masked-instruction',
+                fileId: maskedInstructionFile.fileId,
+                revision: 'rev-fe03-masked-instruction',
+                displayState: 'masked',
+              },
+              {
+                segmentId: 'seg-fe03-masked-instruction-secondary',
                 fileId: maskedInstructionFile.fileId,
                 revision: 'rev-fe03-masked-instruction',
                 displayState: 'masked',
@@ -994,7 +1009,7 @@ export class ScriptedMockGateway implements FrontendGateway {
           effectiveContexts: [],
           findings: [],
           aggregateTotal: rows.length,
-          indexStatus: 'fresh',
+          indexStatus: this.indexStatus,
           readAt: new Date().toISOString(),
         });
       }

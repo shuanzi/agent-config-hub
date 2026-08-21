@@ -9,10 +9,12 @@ import { $, $$, browser, expect } from '@wdio/globals';
 import type {} from 'webdriverio';
 
 const ENTRY = '/tests/l2/workbench.html?scenario=fe03-drafts';
+const STALE_ENTRY = '/tests/l2/workbench.html?scenario=fe03-drafts-stale';
 const LTI_MARKER = '\n# l2-local-instruction-change';
 const PRIMARY_MARKER = '\n# l2-primary-change';
 const SECONDARY_MARKER = '\n# l2-secondary-change';
 const MODEL_MARKER = '-l2-local';
+const SECOND_MASKED_SEGMENT_ID = 'seg-fe03-masked-instruction-secondary';
 
 async function expectDraftDiscard(visible: boolean): Promise<void> {
   const discard = await $('[data-testid="fe03-draft-discard"]');
@@ -166,6 +168,66 @@ describe('FE-03 frontend-local drafts mock L2 journey', () => {
     await assertMockOnlyTransport();
   });
 
+  it('renders stale editable detail surfaces as read-only without edit controls', async () => {
+    await browser.url(STALE_ENTRY);
+    await $('.read-only-workbench').waitForDisplayed();
+    await $('[role="status"]').waitForDisplayed();
+    expect(await $('[role="status"]').getText()).toContain('索引已过期');
+    await $('button=长期指令').click();
+    const ordinaryRow = await $(
+      '//button[@role="option"][.//span[normalize-space()="FE-03 Instruction"]]',
+    );
+    await ordinaryRow.waitForDisplayed();
+    await ordinaryRow.click();
+    await $('[data-testid="long-term-instruction-readonly-detail"]').waitForDisplayed();
+    const ordinaryTextarea = await $('[data-testid="fe03-draft-textarea"]').isExisting();
+    const ordinaryReadOnly = await $('[data-testid="native-file-text"]').isDisplayed();
+
+    await browser.url(STALE_ENTRY);
+    await $('.read-only-workbench').waitForDisplayed();
+    await $('button=长期指令').click();
+    const maskedRow = await $(
+      '//button[@role="option"][.//span[normalize-space()="Masked local instruction"]]',
+    );
+    await maskedRow.waitForDisplayed();
+    await maskedRow.click();
+    await $('[data-testid="long-term-instruction-readonly-detail"]').waitForDisplayed();
+    const maskedTextInput = await $('[data-testid="fe03-masked-text-part-0"]').isExisting();
+    const maskedModify = await $('[data-testid="fe03-sensitive-modify"]').isExisting();
+    const maskedReadOnly = await $('[data-testid="native-file-text"]').isDisplayed();
+
+    await browser.url(STALE_ENTRY);
+    await $('.read-only-workbench').waitForDisplayed();
+    await $('button=Subagents').click();
+    await $('[role="option"]').waitForDisplayed();
+    await $('[role="option"]').click();
+    await $('[data-testid="subagent-readonly-detail"]').waitForDisplayed();
+    const subagentEdit = await $('[data-testid="fe03-subagent-edit"]').isExisting();
+    const subagentModel = await $('[data-testid="fe03-subagent-model"]').isExisting();
+    const subagentReadOnly =
+      (await $('[data-testid="subagent-readonly-detail"]').isDisplayed()) &&
+      (await $('[data-testid="native-file-text"]').isDisplayed());
+
+    expect({
+      ordinaryTextarea,
+      maskedTextInput,
+      maskedModify,
+      subagentEdit,
+      subagentModel,
+    }).toEqual({
+      ordinaryTextarea: false,
+      maskedTextInput: false,
+      maskedModify: false,
+      subagentEdit: false,
+      subagentModel: false,
+    });
+    expect({ ordinaryReadOnly, maskedReadOnly, subagentReadOnly }).toEqual({
+      ordinaryReadOnly: true,
+      maskedReadOnly: true,
+      subagentReadOnly: true,
+    });
+  });
+
   describe('masked long-term instruction', () => {
     beforeEach(async () => {
       await browser.url(ENTRY);
@@ -235,6 +297,59 @@ describe('FE-03 frontend-local drafts mock L2 journey', () => {
       );
       expect(await $('[data-testid="fe03-masked-placeholder"]').isDisplayed()).toBe(true);
       await expectDraftDiscard(true);
+      await assertMockOnlyTransport(true);
+    });
+
+    it('keeps the current opaque sensitive editor on B after A becomes changed', async () => {
+      await $('button=长期指令').click();
+      const maskedRow = await $(
+        '//button[@role="option"][.//span[normalize-space()="Masked local instruction"]]',
+      );
+      await maskedRow.waitForDisplayed();
+      await maskedRow.click();
+
+      const firstModify = (await $$('[data-testid="fe03-sensitive-modify"]'))[0];
+      if (firstModify === undefined) throw new Error('first masked segment control is required');
+      await firstModify.click();
+      const editorA = await $('[data-testid="fe03-sensitive-editor"]');
+      await editorA.waitForDisplayed();
+      await editorA.addValue('~');
+      expect(await editorA.isDisplayed()).toBe(true);
+
+      const secondModify = (await $$('[data-testid="fe03-sensitive-modify"]'))[1];
+      if (secondModify === undefined) throw new Error('second masked segment control is required');
+      const callsBeforeB = await browser.execute(() => window.__fx01?.getCalls() ?? []);
+      await secondModify.click();
+      await browser.waitUntil(async () => {
+        const segmentId = await browser.execute(() => {
+          const latest = [...(window.__fx01?.getCalls() ?? [])]
+            .reverse()
+            .find((call) => call.queryKind === 'sensitiveReveal');
+          return latest?.query.kind === 'sensitiveReveal' ? latest.query.segmentId : undefined;
+        });
+        return segmentId === SECOND_MASKED_SEGMENT_ID;
+      });
+      await $('[data-testid="fe03-sensitive-editor"]').waitForDisplayed({
+        timeout: 4_000,
+        timeoutMsg: 'B modify reveal 后当前敏感编辑器未保留',
+      });
+
+      const newCalls = (await browser.execute(() => window.__fx01?.getCalls() ?? [])).slice(
+        callsBeforeB.length,
+      );
+      const latestReveal = [...newCalls]
+        .reverse()
+        .find((call) => call.queryKind === 'sensitiveReveal');
+      expect(latestReveal?.query).toMatchObject({
+        kind: 'sensitiveReveal',
+        segmentId: SECOND_MASKED_SEGMENT_ID,
+        scope: 'modify',
+        surface: 'source',
+      });
+      const queryText = JSON.stringify(latestReveal?.query);
+      for (const forbiddenKey of [['plain', 'text'].join(''), ['gr', 'ant'].join('')]) {
+        expect(queryText).not.toContain(forbiddenKey);
+      }
       await assertMockOnlyTransport(true);
     });
   });

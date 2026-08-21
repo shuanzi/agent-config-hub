@@ -369,6 +369,50 @@ describe('FE-10 FX-12 responsive read-only journey', () => {
     });
   });
 
+  it('keeps a returned narrow list open after an authoritative invalidation reread', async () => {
+    await openNarrowSkillDetail();
+
+    await $('button[aria-label="返回列表"]').click();
+    await $('[role="option"]').waitForDisplayed();
+    await browser.execute(() => window.__fx01?.emitWorkspaceInvalidation());
+    await browser.waitUntil(
+      async () =>
+        (await $('[data-testid="authoritative-revision"]').getText()).includes('+external-'),
+      { timeout: 4_000, timeoutMsg: '失效后未完成 authoritative reread' },
+    );
+
+    expect(await visibleNarrowRootSurfaces()).toEqual(['list-projection', 'list']);
+    expect(await visibleSurfaceState()).toMatchObject({
+      assetType: false,
+      scope: false,
+      listProjection: true,
+      list: true,
+      detail: false,
+    });
+  });
+
+  it('reopens the current detail when returning to a narrow viewport', async () => {
+    await openNarrowSkillDetail();
+
+    await $('button[aria-label="返回列表"]').click();
+    await $('[role="option"]').waitForDisplayed();
+    await browser.setWindowSize(1280, 900);
+    await browser.setWindowSize(360, 900);
+    await browser.waitUntil(async () => (await visibleNarrowRootSurfaces()).includes('detail'), {
+      timeout: 4_000,
+      timeoutMsg: '重新进入窄屏后未恢复当前详情',
+    });
+
+    expect(await visibleNarrowRootSurfaces()).toEqual(['detail']);
+    expect(await visibleSurfaceState()).toMatchObject({
+      assetType: false,
+      scope: false,
+      listProjection: false,
+      list: false,
+      detail: true,
+    });
+  });
+
   it('uses a 360px type-to-scope-to-list-to-detail single-surface stack', async () => {
     await openWorkbench(360, false);
     expect(await visibleNarrowRootSurfaces()).toEqual(['type']);

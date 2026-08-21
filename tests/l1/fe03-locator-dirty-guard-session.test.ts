@@ -222,7 +222,7 @@ describe('FE-03 locator dirty guard', () => {
     session.dispose();
   });
 
-  it.each(['close', 'searchFailure'] as const)(
+  it.each(['close', 'searchFailure', 'reopen'] as const)(
     'invalidates a pending locator destination after %s, so ordinary discard stays local',
     async (invalidation) => {
       const gateway = new LocatorDirtyGateway();
@@ -267,6 +267,13 @@ describe('FE-03 locator dirty guard', () => {
         if (invalidation === 'close') {
           session.dispatch({ kind: 'closeLocator' });
           expect(stateOf(session).locator).toEqual({ kind: 'closed' });
+        } else if (invalidation === 'reopen') {
+          session.dispatch({ kind: 'openLocator' });
+          expect(stateOf(session).locator).toEqual({
+            kind: 'open',
+            searchText: '',
+            snapshot: null,
+          });
         } else {
           session.dispatch({ kind: 'setLocatorSearch', searchText: 'missing' });
           await waitForSession(() => {

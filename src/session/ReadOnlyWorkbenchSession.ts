@@ -548,6 +548,19 @@ export class ReadOnlyWorkbenchSession {
     return this.#currentSensitiveBuffer(segmentId)?.plaintext;
   }
 
+  /** 仅供当前敏感编辑 surface 选择；只暴露已校验 buffer 的 opaque segment ID。 */
+  getCurrentSensitiveEditorSegmentId(): string | undefined {
+    const buffer = this.#sensitiveBuffer;
+    if (buffer === null) return undefined;
+    const segmentId = buffer.grant.segmentId;
+    const source = this.sensitiveModifySource(segmentId);
+    if (source === null || !this.#grantMatchesSource(buffer.grant, source, segmentId)) {
+      this.#clearSensitiveBuffer(false, false);
+      return undefined;
+    }
+    return segmentId;
+  }
+
   /** 仅供当前只读临时 overlay 的纯读取；不会在 render/read 中发布状态。 */
   getSensitiveViewValue(segmentId: string): string | undefined {
     return this.#currentSensitiveViewBuffer(segmentId)?.plaintext;
@@ -700,7 +713,10 @@ export class ReadOnlyWorkbenchSession {
       case 'openLocator':
         this.locatorGeneration += 1;
         this.#clearSensitiveViewBuffer();
-        this.update({ locator: { kind: 'open', searchText: '', snapshot: null } });
+        this.update({
+          locator: { kind: 'open', searchText: '', snapshot: null },
+          ...this.invalidatePendingLocatorTransition(),
+        });
         return;
       case 'closeLocator':
         this.locatorGeneration += 1;
@@ -1807,6 +1823,7 @@ export class ReadOnlyWorkbenchSession {
     fileId: string;
     maskedText: string;
   } | null {
+    if (this.state.loadState.kind !== 'ready') return null;
     const ready = this.state.detail;
     if (ready.kind !== 'ready' || ready.file === undefined) return null;
     const { detail, file } = ready;
@@ -1854,6 +1871,7 @@ export class ReadOnlyWorkbenchSession {
     maskedParts: readonly MaskedSourcePart[];
     sensitiveSegmentIds: readonly string[];
   } | null {
+    if (this.state.loadState.kind !== 'ready') return null;
     const ready = this.state.detail;
     if (ready.kind !== 'ready' || ready.file === undefined) return null;
     const { detail, file } = ready;
@@ -1958,6 +1976,7 @@ export class ReadOnlyWorkbenchSession {
     maskedText: string;
     model: string;
   } | null {
+    if (this.state.loadState.kind !== 'ready') return null;
     const ready = this.state.detail;
     if (ready.kind !== 'ready' || ready.file === undefined) return null;
     const { detail, file } = ready;

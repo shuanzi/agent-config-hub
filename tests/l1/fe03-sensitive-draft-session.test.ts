@@ -158,16 +158,24 @@ const MULTIFILE_BINDING: SensitiveBinding = {
 
 class SensitiveDraftGateway implements FrontendGateway {
   readonly methods: Array<'read' | 'observe'> = [];
+  readonly queries: Query[] = [];
   private listener: ((event: WorkspaceEvent) => void) | null = null;
 
-  constructor(protected readonly binding: SensitiveBinding = LTI_BINDING) {}
+  constructor(
+    protected readonly binding: SensitiveBinding = LTI_BINDING,
+    private readonly indexStatus: 'fresh' | 'stale' = 'fresh',
+  ) {}
 
   read<Q extends Query>(query: Q): Promise<ReadResult<SnapshotFor<Q>>> {
     this.methods.push('read');
+    this.queries.push(query);
     if (query.kind === 'workbench') {
       return Promise.resolve({
         kind: 'readSucceeded',
-        snapshot: workbench(query, this.binding.row, this.binding.detail.revision),
+        snapshot: {
+          ...workbench(query, this.binding.row, this.binding.detail.revision),
+          indexStatus: this.indexStatus,
+        },
       } as ReadResult<SnapshotFor<Q>>);
     }
     if (query.kind === 'assetDetail') {
@@ -408,6 +416,26 @@ describe('FE-03 sensitive masked-parts local draft', () => {
     }
     expect(gateway.methods.every((method) => method === 'read' || method === 'observe')).toBe(true);
 
+    session.dispose();
+  });
+
+  it('does not create a masked draft or request a modify reveal while the index is stale', async () => {
+    const gateway = new SensitiveDraftGateway(LTI_BINDING, 'stale');
+    const session = new ReadOnlyWorkbenchSession(gateway);
+
+    await waitForSession(() => stateOf(session).loadState.kind === 'stale');
+    const loaded = stateOf(session).loadState;
+    if (loaded.kind !== 'stale') throw new Error('sensitive instruction list must be stale');
+    session.dispatch({ kind: 'selectRow', row: loaded.snapshot.segments[0].rows[0] });
+    await waitForSession(() => stateOf(session).detail.kind === 'ready');
+    session.dispatch({ kind: 'focusEditSurface', surface: 'source' });
+
+    session.dispatch({ kind: 'replaceDraftTextPart', partIndex: 0, text: 'updated-setting=' });
+    session.dispatch({ kind: 'beginSensitiveModify', segmentId: SEGMENT_ID });
+    await flushMicrotasks();
+
+    expect(stateOf(session).draft).toBeNull();
+    expect(gateway.queries.filter((query) => query.kind === 'sensitiveReveal')).toHaveLength(0);
     session.dispose();
   });
 
@@ -781,6 +809,42 @@ describe('FE-03 sensitive masked-parts local draft', () => {
     } finally {
       cleanupSession?.dispose();
       session?.dispose();
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not publish while checking an expired current sensitive editor segment', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2030-01-01T00:00:00.000Z'));
+    const expiresAt = new Date(Date.now() + 60_000).toISOString();
+    const gateway = authoritativeSensitiveGateway('', globalThis.crypto.randomUUID(), expiresAt);
+    const session = new ReadOnlyWorkbenchSession(gateway);
+    try {
+      await readySensitiveSource(session);
+      session.dispatch({ kind: 'beginSensitiveModify', segmentId: SEGMENT_ID });
+      await flushMicrotasks();
+      expect(session.getCurrentSensitiveEditorSegmentId()).toBe(SEGMENT_ID);
+      expect(stateOf(session).sensitiveEditorStatus).toEqual({
+        [SEGMENT_ID]: { kind: 'active' },
+      });
+      let publications = 0;
+      const unsubscribe = session.subscribe(() => {
+        publications += 1;
+      });
+      try {
+        vi.setSystemTime(new Date(Date.parse(expiresAt) + 1));
+
+        expect(session.getCurrentSensitiveEditorSegmentId()).toBeUndefined();
+        expect(publications).toBe(0);
+        vi.setSystemTime(new Date(Date.parse(expiresAt) - 1));
+        expect(session.getCurrentSensitiveEditorSegmentId()).toBeUndefined();
+        expect(publications).toBe(0);
+        expect(vi.getTimerCount()).toBe(0);
+      } finally {
+        unsubscribe();
+      }
+    } finally {
+      session.dispose();
       vi.useRealTimers();
     }
   });
