@@ -78,4 +78,29 @@ describe('FE-03 Subagent structured local draft', () => {
 
     session.dispose();
   });
+
+  it('does not create a structured draft while the authoritative index is stale', async () => {
+    const gateway = new ReadOnlyGateway((query) =>
+      query.kind === 'workbench'
+        ? { ...workbench(query, ROW, DETAIL.revision), indexStatus: 'stale' }
+        : query.kind === 'assetDetail'
+          ? DETAIL
+          : query.kind === 'nativeFile'
+            ? SOURCE
+            : undefined,
+    );
+    const session = new ReadOnlyWorkbenchSession(gateway);
+
+    await waitForSession(() => session.getSnapshot().loadState.kind === 'stale');
+    const loaded = session.getSnapshot().loadState;
+    if (loaded.kind !== 'stale') throw new Error('Subagent list must be stale');
+    session.dispatch({ kind: 'selectRow', row: loaded.snapshot.segments[0].rows[0] });
+    await waitForSession(() => session.getSnapshot().detail.kind === 'ready');
+
+    session.dispatch({ kind: 'focusEditSurface', surface: 'structured' });
+    session.dispatch({ kind: 'replaceDraftField', field: 'model', value: UPDATED_MODEL });
+
+    expect(stateOf(session).draft).toBeNull();
+    session.dispose();
+  });
 });

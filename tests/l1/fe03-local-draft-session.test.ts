@@ -77,4 +77,29 @@ describe('FE-03 long-term-instruction local draft', () => {
 
     session.dispose();
   });
+
+  it('does not create a source draft while the authoritative index is stale', async () => {
+    const gateway = new ReadOnlyGateway((query) =>
+      query.kind === 'workbench'
+        ? { ...workbench(query, ROW, DETAIL.revision), indexStatus: 'stale' }
+        : query.kind === 'assetDetail'
+          ? DETAIL
+          : query.kind === 'nativeFile'
+            ? SOURCE
+            : undefined,
+    );
+    const session = new ReadOnlyWorkbenchSession(gateway);
+
+    await waitForSession(() => session.getSnapshot().loadState.kind === 'stale');
+    const loaded = session.getSnapshot().loadState;
+    if (loaded.kind !== 'stale') throw new Error('long-term instruction list must be stale');
+    session.dispatch({ kind: 'selectRow', row: loaded.snapshot.segments[0].rows[0] });
+    await waitForSession(() => session.getSnapshot().detail.kind === 'ready');
+
+    session.dispatch({ kind: 'focusEditSurface', surface: 'source' });
+    session.dispatch({ kind: 'replaceDraftText', text: EDITED_TEXT });
+
+    expect(draftOf(session)).toBeNull();
+    session.dispose();
+  });
 });

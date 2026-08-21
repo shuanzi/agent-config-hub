@@ -520,7 +520,7 @@ function ReadOnlyDetail({
       setSourcePathCopyStatus('无法复制来源路径。');
     }
   };
-  const editableTextSource = isEditableTextSource(detail, file);
+  const editableTextSource = state.loadState.kind === 'ready' && isEditableTextSource(detail, file);
   const editableSourceSurface =
     editableTextSource &&
     ((surface.kind === 'longTermInstruction' && surface.markdownFile.fileId === file.file.fileId) ||
@@ -534,6 +534,7 @@ function ReadOnlyDetail({
       ? file.content.maskedParts
       : undefined;
   const editableMaskedSourceSurface =
+    state.loadState.kind === 'ready' &&
     file !== undefined &&
     authorityMaskedParts !== undefined &&
     isEditableAuthority(detail) &&
@@ -549,6 +550,7 @@ function ReadOnlyDetail({
     editableMaskedSourceSurface && surface.kind === 'skill' && state.detailView === 'source';
   const editableMaskedSource = directInstructionMaskedEditor || skillMaskedSourceEditor;
   const editableSubagentSurface =
+    state.loadState.kind === 'ready' &&
     editableTextSource &&
     surface.kind === 'subagent' &&
     surface.bodyFile.fileId === file.file.fileId &&
@@ -573,13 +575,13 @@ function ReadOnlyDetail({
       ? (draft?.fileProjections.find((projection) => projection.fileId === file.file.fileId)
           ?.maskedParts ?? authorityMaskedParts)
       : undefined;
+  const currentSensitiveSegmentId =
+    state.detailView === 'source' ? session.getCurrentSensitiveEditorSegmentId() : undefined;
   const activeSensitivePart = maskedParts?.find(
     (part): part is { kind: 'sensitivePlaceholder'; segmentId: string } =>
-      part.kind === 'sensitivePlaceholder' &&
-      state.sensitiveEditorStatus[part.segmentId] !== undefined,
+      part.kind === 'sensitivePlaceholder' && part.segmentId === currentSensitiveSegmentId,
   );
-  const activeSensitiveSegmentId =
-    state.detailView === 'source' ? activeSensitivePart?.segmentId : undefined;
+  const activeSensitiveSegmentId = activeSensitivePart?.segmentId;
   const sensitiveEditorValue =
     activeSensitiveSegmentId === undefined
       ? undefined
@@ -949,7 +951,9 @@ export function ReadOnlyWorkbench({ session }: { session: ReadOnlyWorkbenchSessi
   const focusedSnapshotRef = useRef<unknown>(null);
   const pendingNarrowStageRef = useRef<NarrowStage | null>(null);
   const narrowResizeFocusRef = useRef<HTMLElement | null>(null);
+  const narrowDetailDismissedRef = useRef(false);
   const [narrowViewport, setNarrowViewport] = useState(isNarrowViewport);
+  const narrowViewportRef = useRef(narrowViewport);
   const [narrowStage, setNarrowStage] = useState<NarrowStage>('type');
   const hasDetailSurface =
     state.selected !== null || state.detail.kind !== 'idle' || state.detailError !== null;
@@ -975,6 +979,7 @@ export function ReadOnlyWorkbench({ session }: { session: ReadOnlyWorkbenchSessi
       nextState.detail.kind !== 'ready'
     )
       return false;
+    narrowDetailDismissedRef.current = false;
     setNarrowStage('detail');
     return true;
   };
@@ -990,8 +995,12 @@ export function ReadOnlyWorkbench({ session }: { session: ReadOnlyWorkbenchSessi
     if (sameViewContext(currentContext, viewContext) && restoreNarrowDirtyDetail()) return;
     enterNarrowStageAfterTransition('list');
   };
-  const openNarrowDetail = () => enterNarrowStage('detail');
+  const openNarrowDetail = () => {
+    narrowDetailDismissedRef.current = false;
+    enterNarrowStage('detail');
+  };
   const returnToList = () => {
+    narrowDetailDismissedRef.current = true;
     setNarrowStage('list');
     queueMicrotask(() => {
       const selectedRow = listPaneRef.current?.querySelector<HTMLButtonElement>(
@@ -1001,10 +1010,12 @@ export function ReadOnlyWorkbench({ session }: { session: ReadOnlyWorkbenchSessi
     });
   };
   const returnToScope = () => {
+    narrowDetailDismissedRef.current = true;
     setNarrowStage('scope');
     queueMicrotask(() => selectedScopeRef.current?.focus({ preventScroll: true }));
   };
   const returnToType = () => {
+    narrowDetailDismissedRef.current = true;
     setNarrowStage('type');
     queueMicrotask(() => selectedTypeRef.current?.focus({ preventScroll: true }));
   };
@@ -1034,6 +1045,7 @@ export function ReadOnlyWorkbench({ session }: { session: ReadOnlyWorkbenchSessi
     if (typeof window.matchMedia !== 'function') return;
     const query = window.matchMedia('(max-width: 640px)');
     const updateNarrowViewport = () => {
+      const wasNarrowViewport = narrowViewportRef.current;
       const active = document.activeElement;
       if (
         query.matches &&
@@ -1042,6 +1054,8 @@ export function ReadOnlyWorkbench({ session }: { session: ReadOnlyWorkbenchSessi
       ) {
         narrowResizeFocusRef.current = active;
       }
+      if (query.matches && !wasNarrowViewport) narrowDetailDismissedRef.current = false;
+      narrowViewportRef.current = query.matches;
       setNarrowViewport(query.matches);
     };
     updateNarrowViewport();
@@ -1049,7 +1063,8 @@ export function ReadOnlyWorkbench({ session }: { session: ReadOnlyWorkbenchSessi
     return () => query.removeEventListener('change', updateNarrowViewport);
   }, []);
   useEffect(() => {
-    if (narrowViewport && hasDetailSurface) setNarrowStage('detail');
+    if (narrowViewport && hasDetailSurface && !narrowDetailDismissedRef.current)
+      setNarrowStage('detail');
   }, [hasDetailSurface, narrowViewport]);
   useEffect(() => {
     if (
