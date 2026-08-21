@@ -22,7 +22,9 @@
 
 ## 计划验证契约
 
-**状态：** `planned / unverified`。计划统一入口为 `npm run verify:ticket -- FE-06`；该命令未运行，不能作为 ticket closure 或 runtime evidence。
+> **2026-08-21 MVP 治理优先于本段旧的 per-ticket formal 文字。** FE-06 在最小实现、L0/L1、必要 L2、FX-09/10/11 的真实转换安全负例、isolated-temp L3 和独立功能复审均完成后直接标记 `done`。PF-06、逐票 `verify:ticket`、formal comparison 与 release hardening 只进入统一 release/optimization；未执行时为 `deferred`，不能表述为通过或 release-ready。下文的 lossless-or-blocked、raw-copy 拒绝与 L3 边界仍是 MVP 必需项。
+
+**状态：** `planned / unverified`。MVP 只按本票最小 L0/L1、必要 L2、真实转换安全负例、isolated-temp L3 与独立复审推进；不为 MVP 新建 registry 或运行 `npm run verify:ticket -- FE-06`。逐票 formal 入口仅作为统一 release/optimization 的 deferred 输入，尚未运行，不是 runtime evidence、通过或 ticket closure。
 
 **前置条件：** FE-04 的审查与安全应用闭环已有其自身可复验的前置证据；bootstrap、生成 wire 类型和 `FX-09/10/11` 安全 fixture 可用。L3 使用专用 Tauri 测试构建、每次新建的隔离临时根与单一合成 target，不读取或修改真实 Agent 配置。
 
@@ -32,9 +34,9 @@
 - L1：检查 24 路决定性 mapping、target change 的 authoritative reread/remap 与旧 mapping/prepared/review/confirm 失效、lossless-or-blocked、敏感引用、重名处理、raw-copy 拒绝、独立结果和 no-sync。
 - L2：以 scripted mock `FrontendGateway` 跑 `FX-09/10/11`，分别验证完整转换进入审查、target change 的 authoritative reread/remap 与旧 mapping/prepared/review/confirm 失效、其他差异的明确 manual/degraded 风险，以及阻断停留在报告。
 - L3：只在 isolated temporary root 上执行单一 synthetic target 的转换，覆盖 target change 的 authoritative reread/remap 与旧 mapping/prepared/review/confirm 失效，并记录 WebView/Core/IPC command/event tracer。
-- PF-06：记录 synthetic conversion-transaction descriptor 的 prepare、apply、恢复点/回滚测量及 fixture digest；`inconclusive` 不计通过。
+- PF-06：不属于 MVP；synthetic conversion-transaction 的性能/压力测量仅在统一 release/optimization 获授权后按实际需要决定，当前没有预算、样本、formal comparison 或通过结论。
 
-**通过判据：** 各层只覆盖上述完整、降级、阻断、重名和 lossless-or-blocked 分支；target change 必须 authoritative reread/remap 并使旧 mapping/prepared/review/confirm 失效。L3 只保留隔离单目标路径的 tracer，PF-06 留存原始样本、运行环境与 baseline/预算冻结记录。
+**通过判据：** 各层只覆盖上述完整、降级、阻断、重名和 lossless-or-blocked 分支；target change 必须 authoritative reread/remap 并使旧 mapping/prepared/review/confirm 失效。L3 只保留隔离单目标路径的 tracer。PF-06 的任何样本、运行环境、baseline 或预算冻结均为未来统一 release/optimization 的 deferred 事项，不构成本票 MVP pass gate。
 
 **失败证据：** 计划以脱敏日志、WebDriver trace、截图或 DOM dump，并附层级和 fixture 标识，写入 `.artifacts/verification/FE-06/<run-id>/`。
 

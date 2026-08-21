@@ -1,8 +1,30 @@
 # 测试执行顺序与范围矩阵
 
+## 当前 MVP 与 release/optimization 执行顺序（2026-08-21）
+
+本节是当前治理规则，并取代下方历史快照中关于 pending ticket status、`functional checks complete` 与每票 formal closure 的旧语义；历史命令、样本、waiver 和 evidence 本身不被改写。
+
+1. 完成冻结功能契约所需的最小实现；
+2. 运行该票据必要的 L0/L1 功能测试；
+3. 运行必要的 L2 产品 journey；
+4. 运行与真实产品边界有关的安全负例，以及该票据确有需要的 isolated L3；
+5. 完成独立 functional review 后，直接将票据标为 MVP `done`；
+6. 在所有 MVP 功能票据完成后，统一安排性能、压力、平台 hardening、formal comparison、`verify:ticket` 与 release gate。它们在执行前均为 deferred，不能借用其他票据的 evidence，也不构成通过或 release-ready。
+
+FE-03 与 FE-10 不需要 L3，且不得借用任何 L3 credit；FE-04 的真实 write 边界仍需要 WebView → IPC → Core → isolated disk 的 grant consumption、prepare/apply/conflict/recovery 与 sensitive first-write L3。没有并行的 `functional-done` 状态。
+
+### 已完成 MVP 最小功能记录（本次 apply 未重跑）
+
+| 票据 | 合并记录 | 实际命令与结果 | 未覆盖边界 | 独立复审 |
+| --- | --- | --- | --- | --- |
+| FE-03 | PR #22（功能实现）与 PR #27（回归修复）；实现提交 `27cf50a024947eac08533ef88e537a3613d0dec4` | `npm run test:frontend -- tests/l1/fe03-dirty-guard-session.test.ts tests/l1/fe03-local-draft-session.test.ts tests/l1/fe03-locator-dirty-guard-session.test.ts tests/l1/fe03-multifile-draft-session.test.ts tests/l1/fe03-sensitive-draft-session.test.ts tests/l1/fe03-subagent-draft-session.test.ts tests/l1/fe03-tauri-draft-wire.test.ts`：7 files / 20 PASS；`npm run test:ui -- --spec tests/l2/fe03-drafts.journey.test.ts`：连续两轮 2/2 PASS；聚焦 Rust：19/19 PASS。PR #27 又记录 FE-03 L1 4 files / 16 PASS 与 browser L2 4 PASS。 | 未运行 L3、PF、formal comparison 或 `npm run verify:ticket -- FE-03`；没有 actual Tauri IPC、磁盘写入或 closure/release credit。完整 wire vectors 的既有 `assetDetail` golden mismatch 未改写。 | Standards/Spec/minimality 复审均为 P0=P1=P2=P3=0；PR #27 独立 Standards/Spec 复审亦为 P0=P1=P2=P3=0。 |
+| FE-10 | PR #23（功能实现）与 PR #27（回归修复）；实现提交 `7882f0ca9367416d3a0226d9d02bad32fcfcb48b` | `npm run test:frontend -- tests/l1/fe10-read-only-accessibility.test.ts tests/l1/fe10-sensitive-view-grant.test.ts tests/l1/fe10-tauri-view-wire.test.ts`：17/17 PASS；`npm run test:ui -- --spec tests/l2/fe10-responsive-accessibility.journey.test.ts`：25 PASS、1 条 normal-mode reduced-motion 条件 skip，forced reduced-motion 1/1 PASS。PR #27 又记录 browser L2 27 PASS、1 条既有条件 skip。 | 未运行 L3、PF、formal comparison 或 `npm run verify:ticket -- FE-10`；没有 write、apply、closure 或 release credit。既有 FX-01 `assetDetail` golden mismatch 未改写。 | Standards/Spec 双轴复审为 P0=P1=P2=P3=0；PR #27 独立 Standards/Spec 复审亦为 P0=P1=P2=P3=0。 |
+
+上述记录只说明 MVP gate 已满足；没有重新采样、生成 manifest、建立 registry/verifier/schema 或修改历史 evidence。FE-04 现在是唯一 `ready-for-agent` frontier，FE-05 至 FE-09 继续被 FE-04 阻塞，`RELEASE-GATE` 保持 blocked。
+
 ## 实施前只读基线
 
-本节记录于本文件创建前；它是 task 1.1 的只读快照，不是 runtime、ticket closure 或 gate evidence。
+本节记录于本文件创建前；它是 task 1.1 的只读快照，不是 runtime、ticket closure 或 gate evidence。其分支、完成计数、ticket status 与 frontier 均为历史事实，已由本文件顶部的当前 MVP 与 release/optimization 执行顺序取代，不得作为当前状态或 blocker 读取。
 
 - 分支：`codex/separate-functional-and-performance-gates`。
 - `HEAD`、`origin/main` 和 `git merge-base HEAD origin/main` 都是 `d5740baaf8ecea496ff8195953d0fe5a15ab0ce5`；本地与上游 ahead/behind 均为 `0/0`。
@@ -43,6 +65,8 @@
 若某项工作需要修改 denylist 路径，立即停止该项并记录为 `out-of-scope`；不得修改禁区、不得新增例外，也不得把停止规则解释为失败 evidence。
 
 ## Task-only 功能检查点
+
+> 下列段落是此前治理的历史快照。对于尚未完成的票据，其“仅 task-only、不得标记 done、每票 `verify:ticket` 后才能推进”的 status 语义已由本文件顶部的当前 MVP 执行顺序取代；既有已完成 FE-07R、FE-01、FE-02 的证据、waiver 与 release 边界保持原样。
 
 功能检查成功只能在对应 ticket 的未完成任务中记录 `functional checks complete`。该检查点不是 Ticket Status、ticket closure、runtime evidence、DAG blocker evidence、closure index 或 release credit，不能把任何 ticket 标为 `done`、推进 frontier 或启动仍被 blocker 阻塞的下游 ticket。
 

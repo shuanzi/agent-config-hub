@@ -13,41 +13,11 @@
 - [x] 2.5 为原 change 的 3.22 运行仅限 FE-03 的 L0/L1 草稿、保真、dirty guard、FX-04 全量行为和 grant invalidation/re-masking focused checks，以及 mock `FrontendGateway` 的 L2 编辑 journey；仅在 2.1–2.4 与完整 3.19–3.22 functional coverage 全部通过且独立复验后，人工记录 `functional complete` 为 task-only、`non-closure` 结果，并明确无 L3、actual Tauri IPC、磁盘写入、真实授权或真实 write credit。该记录未来只可人工赋予 FE-04 产品功能开发排期资格，不改变 FE-03/FE-04 formal status、DAG/frontier、closure 或 release gate。
 - [x] 2.6 在 2.1–2.5 全部完成并已人工记录 `functional complete` 前，不实施、采集或运行 `fe03-edit-pf/v1` 的 descriptor、collector、measurement、comparison 或 formal closure；不得以任何功能检查点勾选 FE-03、更新 frontier 或替代后续 gate。
 
-## 3. Edit-PF protocol 实现 gate
+## 3. 2026-08-21 治理补充 disposition
 
-**方案 A 的受信任 runner 边界。** 3.1–5.1 只在 trusted local/CI runner 内实施：保留 exact relative-path allowlist、controlled evidence root、可检测 symlink 拒绝、leaf `O_EXCL`/`O_NOFOLLOW`、同一 fd I/O、写后校验和 fail-closed；它们不提供同权限恶意目录交换的原子保证。本任务不实现 native evidence-only `openat`、跨平台 secure filesystem、复杂 binary provenance、per-module bytes digest 或 actual L2 module graph/physical-ancestry attestation；独立 edit identity、ticket provenance 与代表性负例仍须保留。
+本节是新增的治理记录，不替换或重新解释上方历史已完成项。它不表示 descriptor、fixture、collector、runner、evaluator、registry、verifier、budget、PF、formal comparison 或 `verify:ticket` 已实现、执行或通过。
 
-- [ ] 3.1 仅在 2.5 已人工记录 `functional complete` 后，创建 `fe03-edit-pf/v1` 的 `PF-02-edit-v1` 与 `PF-03-edit-v1` descriptor 及各自受控 relative path，定义 edit 输入、草稿投影、文件切换、profile/seed 和 fail-closed identity 校验；不得复用、改名或修改任何 read descriptor。
-- [ ] 3.2 实现 edit 专用安全 fixture generator 与 canonical fixture digest，令 PF-02 包含 edit 输入和同 revision 草稿投影，PF-03 包含多文件草稿、active-file 切换和投影；验证 fixture、digest 和 edit script 不含敏感明文、grant 或真实路径，且不复用 `pf-read-fixtures.ts` 的 identity。
-- [ ] 3.3 实现 edit 专用 WDIO collector/config、runner、evaluator 和 measurement attestation，使其只接受并绑定 `PF_EDIT_*` protocol/descriptor/profile/controlled-relative-path/run identity，输出独立 raw/evidence root。对该 root 与 leaf I/O 保留 allowlist、可检测 symlink 拒绝、`O_EXCL`/`O_NOFOLLOW`、同一 fd、写后校验与 fail-closed；任一 canonical identity 错配、缺失、symlink 或 `PF_READ_*` 回退均拒绝。不得以 module bytes、SUT graph 或 physical-ancestry attestation 宣称同权限原子安全。
-
-## 4. Additive verification route gate
-
-- [ ] 4.1 仅在 3.1–3.3 通过后，为 FE-03 增加 edit-only registry entry 和 `verify:ticket` route，将 canonical edit protocol/descriptor/fixture/profile/run identity、独立 raw samples、manifest 与 ticket `FE-03` 绑定，并按 record phase fail close：no-budget baseline 验证 `budgetState=not-frozen` 与 budget-lineage absence attestation 且拒绝 budget/freeze/history reference；只有用户批准后的 formal comparison/closure record 验证 exact approved budget lineage/path/freeze。不得要求 per-module bytes、module graph 或 physical provenance，且不得改变 legacy FE-02 read route。
-- [ ] 4.2 新增负向 focused tests：任一 FE-02 read descriptor、fixture digest、collector、budget、waiver、raw/evidence directory 或 manifest 交给 FE-03 edit route 时必须被拒绝；任一 edit identity/evidence 交给 legacy FE-02 route 时也必须被拒绝。
-- [ ] 4.3 为 canonical protocol/descriptor/fixture/profile/run ID/controlled relative path、allowlist、symlink、leaf-I/O 或 read/edit identity 错配新增代表性拒绝测试，并证明 legacy FE-02 read 的字节内容、语义和 fail-closed 结果不变；若任一回归失败，拒绝 additive route，不得以 edit evidence 覆盖或替代 read lineage，也不得把测试表述为同权限原子保证。
-
-## 5. No-budget baseline gate
-
-- [ ] 5.1 仅在 4.1–4.3 通过后，以完整且单次的 edit-only input/run identity 采集 `PF-02-edit-v1` 和 `PF-03-edit-v1` no-budget raw samples、attestation 与 evidence，保留独立 descriptor/fixture identity、controlled evidence root 和 raw lineage；不得重跑或挑选通过样本，也不得以 module/graph/physical provenance 冒充同权限对抗证明。
-- [ ] 5.2 将两条 baseline 均明确标记为 `baseline-collected`、`budgetState=not-frozen` 和 `non-closure`，并绑定可验证的 budget-lineage absence attestation，明确不存在 budget/freeze/history reference；验证此状态不继承 FE-02 budget、不写入任何 budget/freeze/history 文件、不触发 formal comparison/closure、不勾选 FE-03 且不推进 frontier。
-- [ ] 5.3 从 5.1 的完整 edit-only lineage 计算 independent exact proposed budget table，逐项列出 descriptor/profile/metric identity、公式、baseline 输入、拟冻结数值、run/digest lineage，并标记为 `proposed-not-frozen` 与 `non-closure`；仅供后续审批呈现，不写入 budget/freeze/history 文件。
-
-## 6. 用户 budget freeze 停点
-
-- [ ] 6.1 携带 5.1–5.3 的完整 edit-only baseline/provenance 与 exact `proposed-not-frozen` budget table 回主任务，请求用户对该表中的具体 identity、公式、输入、数值和 lineage 作出明确 budget freeze approval，并在收到无歧义批准前停止。
-- [ ] 6.2 在 6.1 未获批准时，不写任何 edit budget/freeze/history 文件，不运行 formal comparison、`verify:ticket -- FE-03` 或 3.23，不勾选 FE-03 且不更新 frontier。
-
-## 7. 获批后的预算与 formal closure gate
-
-- [ ] 7.1 仅在用户明确批准 freeze 后，从 5.1 的完整 raw lineage 写入与获批 5.3 table 完全一致的独立 versioned `fe03-edit-pf/v1` PF-02/PF-03 budget、freeze 和 history 文件，并验证没有 FE-02 budget、waiver 或样本进入其 lineage；任一 identity、公式、输入、数值或 lineage 变化均停止写入并重新请求批准。
-- [ ] 7.2 仅在 7.1 成功后运行 edit-only formal comparison，并令 formal comparison/closure record 绑定 exact approved budget lineage；任何 budget、descriptor、fixture、attestation、manifest 或 comparison 的 fail/inconclusive 均阻断后续 closure。
-- [ ] 7.3 仅在 7.2 通过且 FE-03 自身 registry entry 已存在后，按原 change 3.23 先保留 PF-02/PF-03 edit 的层级、run identity 和未覆盖边界，再运行 `npm run verify:ticket -- FE-03`；formal closure 失败/inconclusive 不得标记 FE-03 done。
-
-## 8. 最终验证、独立审查与状态 gate
-
-- [ ] 8.1 在每个实现 gate 后运行相应的 focused RED→GREEN、静态/类型、wire drift、grant invalidation、collector/evaluator 和 verifier negative tests；测试结果必须按 L0/L1/L2/PF 分层记录，mock PASS 不得抬升为 runtime 或 closure credit。
-- [ ] 8.2 在交付前使用 OpenSpec 1.8 的 positional change-scoped 语法运行 `openspec validate establish-fe03-edit-performance-protocol --type change --strict --no-interactive`，再运行 `openspec validate --all --strict --no-interactive`，并修复本 change artifacts 的有效 validation finding。
-- [ ] 8.3 对本 change 的 Markdown 运行目标 Prettier，对 tracked/untracked changed paths 运行 whitespace 检查；本纠偏 PR 的精确 changed-path scope 仅为 `proposal.md`、`design.md`、`specs/fe03-edit-performance-protocol/spec.md` 和 `tasks.md`。只有本 change 经重新验收／冻结后，future implementation 才可使用本任务已声明的 FE-03 functional、edit-PF 与 additive verification route paths；不得通过本 validation 修改既有 read PF、budget、waiver、collector/verifier、历史 evidence 或其他 change。
-- [ ] 8.4 按原 change 3.24 执行独立只读审查，即使功能、PF 或 closure 失败/inconclusive 也记录 finding 且不把审查本身当 closure；修复有效 finding 后重新运行受影响的 focused checks。
-- [ ] 8.5 只有 1.1–8.4 的全部适用 gate 均通过、3.23 formal closure 成功且 3.24 独立审查无未解决有效 finding 后，才按正式流程标记 FE-03 done 并更新 frontier；否则保持现有 formal 状态，FE-04 formal verification/closure 继续 blocked。只有未来 2.5 经独立功能复验并人工记录 `functional complete` 后，FE-04 产品功能开发可按方案 A 人工排期；本 apply 不授予该资格。
+- [x] 3.1 已记录 FE-03 的自身 MVP completion record、实际功能检查、未覆盖边界和独立功能复审；它直接支持 MVP `done`，但不提供 L3、actual IPC、真实 grant、磁盘写入或 release credit。
+- [x] 3.2 已将原 edit-PF descriptor/fixture/collector/runner/evaluator、registry/manifest、baseline/budget/formal comparison 与逐票 closure 统一标记为 deferred release/optimization 输入；历史 read/edit failure、baseline、budget、waiver、raw artifact 与 provenance 保持原样，不采集、重跑、挑选、删除或互借。
+- [x] 3.3 已记录 trusted-runner residual risk：不实现 native `openat` helper、跨平台 secure filesystem、复杂 binary provenance、per-module digest 或 module-graph/physical-ancestry attestation；真实产品安全边界继续由相应产品 ticket 覆盖。
+- [x] 3.4 本 change 可在当前治理 PR 合并后按“已归并为 release/optimization planning”归档；未来实际 hardening 必须新建经授权的 change，不自动恢复 FE-03 或创建 FE-04 实现任务。

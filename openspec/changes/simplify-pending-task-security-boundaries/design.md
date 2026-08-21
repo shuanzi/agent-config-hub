@@ -27,6 +27,20 @@ formal sources 还存在必须保留而不可在本 change 裁决的差异：
 - 不把 trusted-runner 假设延伸至外部项目输入、真实业务数据、授权或写入边界。
 - 本次只记录 FE-03 dirty WIP 的最小化后续范围，不写入、恢复、整理、stash、clean 或 cherry-pick `/Users/xiquandai/.codex/worktrees/6e5c/agent_config_hub`。
 
+## 2026-08-21 当前治理 supersession
+
+本节只替代 D5–D7 与 Migration Plan 中冲突的未来执行编排，不改写其中的历史审计、历史 evidence 或
+真实产品安全边界。`simplify-mvp-functional-done-gates` 已吸收原有 `functional complete`/
+`hardening pending` 的双轨人工报告：当最小 contract/implementation、L0/L1、必要 L2、真实产品安全
+负例、适用的必要 isolated L3 与独立功能复审完成时，ticket 直接为 MVP `done` 并按其 DAG 解锁下游。
+
+因此，原本要求逐票 PF、`verify:ticket`、formal comparison/closure 在 `done` 或 frontier 更新前完成的
+表述已被 supersede；这些事项保留为 unified release/optimization 的 deferred 输入，既不删除，也不得
+冒充通过、release-ready 或跨票据 credit。FE-03 已按其自身 MVP record `done`（无 L3/actual write
+credit），FE-04 是唯一 `ready-for-agent` frontier，且仍须以自身真实 write/recovery/sensitive L3 完成
+MVP gate。任何其他 frozen product acceptance、release gate 或真实产品安全 requirement 的改变仍须单列
+并取得用户显式批准。
+
 ## Decisions
 
 ### D1：以 formal source 分层记录，而非合并冲突

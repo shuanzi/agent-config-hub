@@ -20,6 +20,21 @@
 - 不新增批量写入、一对多转换、Agent 生命周期管理、中央资产副本、产品自有 suppression registry 或绕过安全事务的写入路径。
 - 不把 FX-03 作为正向 Hook UI journey；它只保留 Adapter／wire、内容安全和负向 UI 可达性覆盖。
 
+## 2026-08-21 当前 MVP 治理（优先）
+
+本节优先于 D8、ORCH-UI-B2-01 与迁移计划中任何“逐票 PF、`verify:ticket`、formal closure 均须在
+`done` 前完成”或将 `functional complete` 作为并行状态的历史规划文字；历史 evidence、已完成
+checkbox 与其原始结论均不改写。当前 ticket 的 MVP `done` 直接表示：最小
+contract/implementation、L0/L1、必要 L2、真实产品安全负例、适用的必要 isolated L3 与独立功能复审
+均已完成；它不表示 PF、performance/stress/platform hardening、逐票 formal comparison、
+`verify:ticket` 或 release ready 已通过。
+
+FE-03 与 FE-10 按各自上述 MVP record 直接 `done`，均不取得 L3（FE-10 也不取得 PF）credit，且不得
+借用其他票据的证据。FE-04 因此是唯一 `ready-for-agent` frontier，仍须保留 WebView→IPC→Core→
+isolated disk 的 prepare/apply/conflict/recovery/sensitive L3；其 3.29 是通过独立功能复审后直接
+`done`/解锁下游的 MVP gate，3.30 只把 PF/formal/release 事项移交统一 release/optimization，均不再是
+MVP done 前置。该治理不降低真实产品安全边界，也不把 deferred hardening 表述为通过或 release-ready。
+
 ## 决策
 
 ### D1：MVP 可见类型与 Hook 兼容边界分离

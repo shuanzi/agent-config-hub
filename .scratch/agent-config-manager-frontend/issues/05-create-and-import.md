@@ -22,7 +22,9 @@
 
 ## 计划验证契约
 
-**状态：** `planned / unverified`。计划统一入口为 `npm run verify:ticket -- FE-05`；该命令尚未运行，不是 runtime evidence 或 ticket closure，静态检查和 Mock PASS 也不改变该边界。
+> **2026-08-21 MVP 治理优先于本段旧的 per-ticket formal 文字。** FE-05 在最小实现、L0/L1、必要 L2、FX-08/15/17 的真实产品安全负例、isolated-temp L3 和独立功能复审均完成后直接标记 `done`。PF、逐票 `verify:ticket`、formal comparison 与 release hardening 只进入统一 release/optimization；未执行时为 `deferred`，不能表述为通过或 release-ready。下文的 L3 安全与 provenance 边界仍是 MVP 必需项。
+
+**状态：** `planned / unverified`。MVP 只按本票最小 L0/L1、必要 L2、真实安全负例、isolated-temp L3 与独立复审推进；不为 MVP 新建 registry 或运行 `npm run verify:ticket -- FE-05`。逐票 formal 入口仅作为统一 release/optimization 的 deferred 输入，尚未运行，不是 runtime evidence、通过或 ticket closure。
 
 **前置条件：** FE-04 的审查与安全应用闭环已有其自身可复验的前置证据；`FX-08`、`FX-15`、`FX-17` 及不透明合成来源引用可在隔离测试数据根复现。L3 使用专用 Tauri 测试构建与每次新建的临时来源/目标根，不访问用户来源或配置。
 
@@ -32,7 +34,7 @@
 - L1：创建、导入来源引用、单目标 `installAsset`、完整 target summary；target change 的 authoritative reread/remap 与旧 operation/prepared/review/confirm 失效；取消/collision/`prepare` validation failure 无副作用、`apply` 已开始失败时保留 shared transaction recovery point/rollback facts；以及 `FX-08/15/17` 中 rename/`reviewAndOverwrite` 使旧 operation 失效、重新 `prepare`，且 overwrite 进入新版 review/confirm 的 module/contract 断言。
 - L2：以 scripted mock `FrontendGateway` 驱动 `FX-08/15/17` 的浏览器 journey，断言完整 target summary、target change 的 authoritative reread/remap，以及 rename/`reviewAndOverwrite` 使旧 operation 失效后的 reprepare/new review/confirm。
 - L3：专用 Tauri 测试构建在 isolated temporary roots 执行创建、导入、同格式单目标安装与 collision tracer，覆盖完整 target summary、target change authoritative reread/remap，以及 rename/`reviewAndOverwrite` 使旧 operation 失效后的 reprepare/new review/confirm。
-- PF：无新增 performance fixture 或 baseline；复用 FE-04 的 `prepare`/`apply` 不取得新的 performance credit。
+- PF：无 MVP performance fixture 或 baseline；任何适用性能/平台 hardening 在统一 release/optimization 再决定，复用 FE-04 的 `prepare`/`apply` 不取得 performance credit。
 
 **通过判据：** 仅覆盖本票据的独立创建/导入、单目标同格式安装与完整 target summary；target change 必须 authoritative reread/remap 并使旧 operation/prepared/review/confirm 失效。`FX-17` 的 rename/`reviewAndOverwrite` 均重新 `prepare`，overwrite 进入新版 review/confirm；取消与 `prepare` validation failure 无副作用，`apply` 已开始失败保留 shared transaction recovery point/rollback facts。转换不得进入该票据。L3 留存隔离临时根中的 command/event 与文件事实。
 

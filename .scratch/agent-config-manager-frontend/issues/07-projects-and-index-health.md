@@ -22,7 +22,9 @@
 
 ## 计划验证契约
 
-**状态：** `planned / unverified`。计划统一入口为 `npm run verify:ticket -- FE-07`；该命令未运行，不能作为 ticket closure 或 runtime evidence。
+> **2026-08-21 MVP 治理优先于本段旧的 per-ticket formal 文字。** FE-07 在最小实现、L0/L1、必要 L2、路径/symlink/review 等真实产品安全负例、isolated-temp project/event/rebuild L3 和独立功能复审均完成后直接标记 `done`。PF-05、逐票 `verify:ticket`、formal comparison 与 release hardening 只进入统一 release/optimization；未执行时为 `deferred`，不能表述为通过或 release-ready。下文的项目授权、写前 reread 和 L3 边界仍是 MVP 必需项。
+
+**状态：** `planned / unverified`。MVP 只按本票最小 L0/L1、必要 L2、真实路径/项目安全负例、isolated-temp L3 与独立复审推进；不为 MVP 新建 registry 或运行 `npm run verify:ticket -- FE-07`。逐票 formal 入口仅作为统一 release/optimization 的 deferred 输入，尚未运行，不是 runtime evidence、通过或 ticket closure。
 
 **前置条件：** FE-04 的审查与安全应用闭环已有其自身可复验的前置证据；bootstrap、生成 wire 类型和 `FX-07` 安全 fixture 可用。L3 使用专用 Tauri 测试构建及每次新建的 synthetic temporary project/index root，不扫描或管理真实项目。
 
@@ -32,7 +34,7 @@
 - L1：检查规范化路径/符号链接授权边界、纳入/停止管理的 `prepare` → review → confirm → `apply` → authoritative reread，以及不得跳过 review 的负向断言、stale 保留与写前重读、event 失效后的 authoritative reread 和重建不混合结果。
 - L2：以 scripted mock `FrontendGateway` 跑 `FX-07`，验证纳入/停止管理的 `prepare` → review → confirm → `apply` 与不得跳过 review 的负向断言。
 - L3：只在 isolated temporary project 上先执行 include 与 stop-management 的 `prepare` → review → confirm → `apply` → authoritative reread，断言不得跳过 review，再执行 index event → invalidation → authoritative reread → rebuild tracer。
-- PF-05：记录 synthetic index-events descriptor 的索引、事件合并、重读和重建测量及 fixture digest；`inconclusive` 不计通过。
+- PF-05：不属于 MVP；synthetic index-events 的性能/压力测量仅在统一 release/optimization 获授权后按实际需要决定，当前没有预算、样本、formal comparison 或通过结论。
 
 **通过判据：** 用户逐个纳入；纳入与停止管理均完整经过 `prepare` → review → confirm → `apply`，不得跳过 review；停止管理不删除原生资产，路径失效不猜测恢复，且 `FX-07` 的状态与可用动作符合本票据。L3 只在临时项目上保留 command/event 与索引事实链。
 
