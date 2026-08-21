@@ -99,6 +99,23 @@ trust 与 serialization boundaries。若 implementation analysis 需要新的 co
 等待新的用户决定。任何 planning artifact、Draft PR、merge 或 static validation 都不授予 FE-04
 implementation、L3、PF、`verify:ticket`、closure 或 frontier credit。
 
+## 2026-08-21 FE-04 MVP 集成
+
+本节只将 `docs/architecture/Agent_Config_Manager_MVP_技术方案_v0.1_prepared-secret_addendum_2026-08-21.md`
+的冻结精确规则映射到 FE-04 当前执行治理；不修改第 1–4 节或该 addendum。零到多个
+multi-segment pairing 必须全部经权威验证后才建立 core entry；same-target revision drift、conflict 或
+explicit reprepare 清除旧 core entry、旧 grant 与旧 bound identity，frontend 仅保留同一 target 的
+replacement 作为 unbound input，explicit reprepare 必须取得 newly authorized grant。只有
+asset/file/segment/scope/surface target identity 改变、TTL 到期或 cancel/discard 才立即清零
+frontend/core 两侧；single-use、authoritative reread cleanup 与 crash loss 语义保持不变。
+
+原 Migration Plan 中将 PF-04、`verify:ticket`、3.29–3.30、formal closure 与 frontier 统一描述为
+FE-04 后置 formal 阶段的文字，现仅在与当前 MVP 治理冲突处被 supersede：3.26–3.28 仍须独立完成
+contract/wire、L0/L1、必要 L2 及 WebView→IPC→Core→isolated-temp disk 的真实
+prepare/apply/conflict/recovery/sensitive L3；3.29 的独立功能复审通过后直接标记 FE-04 MVP `done` 并
+解锁下游；3.30 只把 PF-04、逐票 formal/`verify:ticket` 与 release hardening 记录为统一
+release/optimization 的 deferred 输入。它们未执行时不得表述为通过或 release-ready。
+
 ## Risks / Trade-offs
 
 - [Core 在 prepared operation 中持有敏感数据] → 将其限于 non-persistent、non-serializable、

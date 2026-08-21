@@ -8,28 +8,34 @@
 
 - [x] 2.1 已写明未来获准验证基础设施变更的受信任 local/CI runner 前提、排除的同权限对抗/已攻陷环境，以及 exact relative-path allowlist、controlled evidence root、可检测 symlink 拒绝、leaf `O_EXCL`/`O_NOFOLLOW`、同一 fd 读写、写后校验和异常 fail-closed 验收。
 - [x] 2.2 已作明确的“不立项/residual-risk” threat-model decision：同权限对抗、native `openat` helper、跨平台安全文件系统和复杂 binary provenance 不加入功能完成或 closure 前置；若未来提出，须独立 threat-model 与授权。
-- [ ] 2.3 仅在 formal product/ticket source 已确认并冻结最小 acceptance、且实际出现共享需求时，设计满足该 acceptance 的最小公共 preflight/registry/manifest/verifier seam；verifier 不得反向定义或扩大 acceptance，formal closure 也不得成为其前置。保持每个 ticket 的 run identity、层级和 closure credit 独立，且不发明当前 verifier 不支持的命令或自动状态机。
 
-## 3. 功能优先的 ticket 执行
+## 3. 2026-08-21 MVP 治理补充 disposition
 
-- [ ] 3.1 对每个获得授权的 ticket，先实现其最小功能契约、L0/L1、必要 L2 和真实产品安全负例，并以该 ticket 自身的证据记录功能检查结果。
-- [ ] 3.2 对涉及外部路径、敏感明文/grant/revision、apply/write/transaction/recovery、权限/跨资产隔离、不受信任 config/Adapter/extension/executable 或真实磁盘写入的 ticket，保留相应 fail-closed 产品安全验证，不以 trusted-runner 假设替代。
-- [ ] 3.3 仅在产品 acceptance 已满足并经独立功能复验后，把 `functional complete` 和 `hardening pending` 作为报告语义记录；在其他仍有效的 architecture/产品安全前提满足时，上游 `functional complete` 可使下游产品功能开发获得人工排期资格，但不得自动映射为 checkbox、formal ticket status、DAG/frontier、formal closure 或 release-ready 状态，且下游 formal verification/closure 仍须等待当前 formal direct blockers=done 且具 evidence。
+本节是新增治理记录，不替换或重新解释上方历史已完成项，也不表示尚未实施 ticket 的产品、L3、PF 或 release 工作已经通过。
+
+- [x] 3.1 已将每票的最小 contract/implementation、L0/L1、必要 L2、真实产品安全负例、必要 isolated L3 与独立功能复审定义为直接 MVP `done` gate；不新增 `functional complete` 等并行正式状态。
+- [x] 3.2 已明确外部路径、敏感明文/grant/revision、apply/write/transaction/recovery、权限/跨资产、不受信任输入和真实磁盘的 fail-closed 产品安全验证仍属于 MVP gate。
+- [x] 3.3 原公共 preflight/registry/manifest/verifier、逐票 formal closure 与 FE-03 edit-PF/budget/formal 工作均作为 deferred unified release/optimization 输入；当前不新增 verifier、registry 或自动状态机，也不把 deferred 项称为通过。
 
 ## 4. 后置 hardening 与 FE-03 路径
 
 - [x] 4.1 已将 performance、stress、platform 和低概率对抗验证编排为功能完成后的统一优化阶段；每个 ticket 使用自身输入、run identity、层级和 provenance，禁止跨票据借用 closure credit。
 - [x] 4.2 对 FE-03，后续先按已记录的最小化范围独立复验功能和真实 grant 安全边界；本 apply 不恢复 WIP。evidence-only native helper 是方案 A 的排除/停止项，未来仅在独立 threat-model 与授权后才可立项；edit-PF、formal comparison、`verify:ticket` 与 closure 才是后置受限工作。未来 `functional complete` 只能人工赋予 FE-04 产品功能开发的排期资格，不推进 FE-03/FE-04 formal 状态。
-- [ ] 4.3 若用户决定保留 FE-03 edit-PF formal closure，按已确认的最小 trusted-runner 控制建立独立 edit identity 与代表性 read/edit 隔离负例；不得复用或改写 FE-02 的 read evidence、budget、waiver 或历史 lineage。
-- [ ] 4.4 只在用户逐项批准 exact budget/freeze 输入后，执行 FE-03 的 budget/comparison/closure 工作；未批准或结果 fail/inconclusive 时保持 non-closure，不推进 frontier。
 
-## 5. Formal closure 与 release
+## 5. 归并与归档补充 disposition
 
-- [ ] 5.1 对每个 ticket，只有在其仍有效的 formal acceptance、独立 provenance 和独立 review 都满足时，才按获准的 tracker/gate 流程考虑 formal closure；review 本身不提供 closure credit。
-- [ ] 5.2 只在全部所需 ticket closure 与既有 release requirement 实际满足后，执行 release 前综合 gate；不得以聚合检查替代任一 ticket 的产品或 provenance 验收。
-- [ ] 5.3 对任何仍存在的 tracker/gate/verifier 冲突，保留来源和层级，另行请求用户裁决后再修改 formal source；不从文档、mock 或 planned command 推断 done 或 release ready。
+本节是新增治理记录，不替换或重新解释第 4 节历史完成项。
+
+- [x] 5.1 已将 performance、stress、platform 和低概率对抗验证维持为功能完成后的统一 release/optimization；未来若仍需要 FE-03 edit-PF，只能采用独立 identity、受控非敏感输入和代表性 read/edit 隔离负例，当前未实现、未采集、未通过。
+- [x] 5.2 预算/freeze/comparison 只在未来获授权的 release optimization 中按实际需要处理；当前没有 budget、waiver、formal closure 或 frontier credit。
+- [x] 5.3 tracker/gate/verifier 冲突已由 `simplify-mvp-functional-done-gates` 的显式 apply 处理；本 change 的归档不自动推断 ticket done、release-ready 或通过。
 
 ## 6. 变更验证与审查
 
 - [x] 6.1 已对本次获准的小范围 apply 运行 change-scoped strict OpenSpec validation、all strict validation、目标 Markdown formatting、diff whitespace 和 changed-path audit。
 - [x] 6.2 已对本次 apply 完成独立 Standards/Spec 双轴 review；有效 finding 已修复并重跑受影响验证，最终两轴 P0–P3 均清零，且该 review 不构成产品、PF 或 closure evidence。
+
+## 7. 当前治理归档边界
+
+- [x] 7.1 每票不再以 per-ticket formal closure 作为 MVP done 前置；release-level reconciliation 仍须保留独立审查与产品/provenance 边界，且不替代任一 ticket 的安全负例或 isolated L3。
+- [x] 7.2 本 change 可在当前治理 PR 合并后作为“已吸收的 pending-task 简化 planning”归档；归档不代表 deferred 产品、PF、budget、formal comparison 或 release hardening 已执行。

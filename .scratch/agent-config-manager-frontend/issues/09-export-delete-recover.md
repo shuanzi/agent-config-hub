@@ -22,7 +22,9 @@
 
 ## 计划验证契约
 
-**状态：** `planned / unverified`。计划统一入口为 `npm run verify:ticket -- FE-09`；该命令未运行，不能作为 ticket closure 或 runtime evidence。
+> **2026-08-21 MVP 治理优先于本段旧的 per-ticket formal 文字。** FE-09 在最小实现、L0/L1、必要 L2、delete/recover collision/no-write 等真实产品安全负例、isolated-temp export/delete/recover L3 和独立功能复审均完成后直接标记 `done`。PF-06 recovery、逐票 `verify:ticket`、formal comparison 与 release hardening 只进入统一 release/optimization；未执行时为 `deferred`，不能表述为通过或 release-ready。下文的 no-delete-fallback、occupied collision 与 L3 边界仍是 MVP 必需项。
+
+**状态：** `planned / unverified`。MVP 只按本票最小 L0/L1、必要 L2、真实 delete/recover 安全负例、isolated-temp L3 与独立复审推进；不为 MVP 新建 registry 或运行 `npm run verify:ticket -- FE-09`。逐票 formal 入口仅作为统一 release/optimization 的 deferred 输入，尚未运行，不是 runtime evidence、通过或 ticket closure。
 
 **前置条件：** FE-04 的审查与安全应用闭环已有其自身可复验的前置证据；bootstrap、生成 wire 类型和 `FX-13` 安全 fixture 可用。L3 使用专用 Tauri 测试构建及每次新建的 synthetic temporary source、export、delete 和 recovery roots，不读取或修改用户资产或 Git 工作树。
 
@@ -32,7 +34,7 @@
 - L1：检查 export 的 `prepare` → review → confirm → `apply`、导出风险/原生边界、prepare 无副作用、global projected asset 的 affected contexts、`deleteAsset` 和 `setRecoveryPointPinned` 的 `prepare` → review → confirm → `apply` 与不得跳过 review 的负向断言、删除后的 missing 表面；负向 contract 断言 toggle 绝不生成 `deleteAsset`，FE-04 不取得 delete ownership；正常 recover 经 `prepare` → review → confirm → `apply`，occupied recovery collision 为稳定 `blocked`、无写入且绝不进入 `apply`。
 - L2：以 scripted mock `FrontendGateway` 跑 `FX-13`，验证 export、`deleteAsset`、`setRecoveryPointPinned` 和正常 recover 的 `prepare` → review → confirm → `apply` 及 delete/pinning 不得跳过 review 的负向断言，以及 occupied recovery collision 的稳定 `blocked`、无写入、无 `apply`。
 - L3：只在 isolated temporary roots 执行 export → `deleteAsset` 的 `prepare` → review → confirm → `apply` → 正常 recover，以及 `setRecoveryPointPinned` 的 `prepare` → review → confirm → `apply` tracer，并断言 delete/pinning 不得跳过 review；另断言 occupied recovery collision 为稳定 `blocked`、无写入且绝不进入 `apply`，并记录 command/event 与文件事实。
-- PF-06：记录 synthetic conversion-transaction descriptor 的 recovery branch、事务与恢复测量及 fixture digest；`inconclusive` 不计通过。
+- PF-06 recovery：不属于 MVP；recovery branch 的性能/压力测量仅在统一 release/optimization 获授权后按实际需要决定，当前没有预算、样本、formal comparison 或通过结论。
 
 **通过判据：** export、正常 recover、`deleteAsset` 和 `setRecoveryPointPinned` 均完整经过 `prepare` → review → confirm → `apply`，delete/pinning 不得跳过 review，且导出保持原始结构；删除独立于 toggle/FE-04 ownership。occupied recovery collision 仅为稳定 `blocked`、无写入、无 `apply`，只呈现差异不覆盖。L3 只保留临时目录的事实 tracer。
 

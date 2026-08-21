@@ -2,7 +2,7 @@
 
 **Status:** blocked
 
-**Direct blockers:** FE-01 至 FE-10（10 张行为 tickets）全部为 `done` 并附完成证据。FE-07R 已由 run `20260810T071547Z` 的 L0/L1/L3 actual-read evidence 关闭；冻结的 v0.2 契约、acceptance 或 planning 不是 `done` evidence；`ARCH-GATE` 维持 closed。
+**Direct blockers:** FE-04 至 FE-09 尚未完成各自 MVP `done` gate；在所有行为 tickets 均已完成 MVP 后，仍须在统一 release/optimization 阶段补齐适用的性能、压力、平台 hardening 与 release evidence。FE-07R 已由 run `20260810T071547Z` 的 L0/L1/L3 actual-read evidence 关闭；FE-01、FE-02 保留各自历史闭合记录；FE-03、FE-10 已有最小功能记录但没有 PF、formal comparison、`verify:ticket` 或 release credit。冻结的 v0.2 契约、acceptance 或 planning 不是 `done` evidence；`ARCH-GATE` 维持 closed。
 
 FE-01 的 PF-01 development acceptance（L2 Vite dev/mock + L3 debug test-harness）即使有 exact manual `accepted-with-waiver` disposition，也不是 reference-Mac、release-like 或 production artifact 证据；它不更新 automatic-pass index，不能解除本门禁。发布仍须取得独立 fixed-reference/release environment 的预算复测与 production artifact 证据。
 
@@ -18,7 +18,7 @@ FE-01 的 PF-01 development acceptance（L2 Vite dev/mock + L3 debug test-harnes
 
 **前置条件：**
 
-- FE-07R 与 FE-01 至 FE-10 均为 `done` 且各自 `verify:ticket` manifest 可读取；FE-07R 的 FX-19 L0/L1/L3 actual-read evidence 与 FE-01 自身 L0/L1/L2/L3/PF-01 evidence 不得互相借用；`ARCH-GATE` 已于 2026-07-27 关闭；
+- FE-07R 与 FE-01 至 FE-10 均为 `done`，并各自保留 MVP 最小功能记录（commit、实际测试命令/结果、未覆盖边界和独立 review）；FE-03、FE-10 不要求也没有每票 `verify:ticket` manifest。既有 FE-07R、FE-01、FE-02 的历史 evidence 仅能按其原票据范围读取，不能为 FE-03 至 FE-10 借用 credit；`ARCH-GATE` 已于 2026-07-27 关闭；
 - 在待发布 commit 的干净 checkout 上使用技术方案固定的 Node/npm/Rust 与 `npm ci`；
 - Apple Silicon macOS `15.0.x` 与发布时 current stable macOS reference/release environment 可用；签名、notarization 与产品更新签名凭证可用，且不会写入仓库、artifact 或日志；
 - stable feed 的 artifact 只在本地 staging 验证；本命令不上传、覆盖 `latest.json` 或执行外部发布。
@@ -29,7 +29,7 @@ FE-01 的 PF-01 development acceptance（L2 Vite dev/mock + L3 debug test-harnes
 2. L1：全部 Rust、Vitest、wire、AdapterRegistry 只读 provenance、事务与安全负向回归；
 3. L2：FX-01 至 FX-18 的 mock renderer 全回归；FX-19 不设 L2 UI journey；只取得 renderer/mock provenance；
 4. L3：专用 Tauri test harness 对同一个 `FrontendGatewayContract` 做真实 adapter 全回归，并覆盖 FX-19 的只读 all/global/project projection，以及隔离 command/event、prepare/apply、索引、更新与恢复 tracer；
-5. PF：在固定 reference environment 复测所有已冻结预算；缺预算、超预算或环境不确定均不能通过；
+5. PF／hardening：在固定 reference environment 对统一 release/optimization 范围内适用的性能、压力、平台与安全 hardening 复测；缺少仍适用的预算、超预算或环境不确定均不能通过。此阶段不会把后置项回写成任一 MVP 票据此前已通过的证据；
 6. L4：只为 `aarch64-apple-darwin` 构建不含 WebDriver/test surface 的生产 app、DMG、`darwin-aarch64` updater `.app.tar.gz`/`.sig` 和统一 adapter bundle；在 macOS `15.0.x` 与 current stable Apple Silicon 环境验证安装/启动。最终 DMG 验证 Apple notarization/staple、Gatekeeper 及所含 app 的 Developer ID/Hardened Runtime、deployment target 和单 arm64 slice；updater archive/`.sig` 验证 Tauri 产品更新签名及解包后 app，`latest.json` 验证唯一 platform、不可变 URL 和 inline signature exact match；不得对 `.tar.gz` 或 `.sig` 执行 Apple stapling/notarization；
 7. 负向范围：检查不存在 MVP 外入口、测试 command/capability/plugin、fixture、秘密、私有路径或未声明可执行内容。
 
@@ -53,7 +53,7 @@ FE-01 的 PF-01 development acceptance（L2 Vite dev/mock + L3 debug test-harnes
 ## 关闭条件
 
 - [x] FE-07R 已以自身 L0/L1/L3 actual-read evidence 完成 FX-19；无 L2、无 PF，且其 evidence 未被计入 FE-01 closure；
-- [ ] 所有 FX-01 至 FX-19 都由各自主票据完成并保留其范围对应的聚焦 evidence；FX-19 仍无 L2 UI journey；
+- [ ] 所有 FX-01 至 FX-19 都由各自主票据完成 MVP 并保留其范围对应的聚焦记录，随后由统一 release/optimization 阶段补齐适用 hardening evidence；FX-19 仍无 L2 UI journey；
 - [ ] mock 与真实 `FrontendGateway` adapter 在已建立的同一契约测试上完成全回归；
 - [ ] 技术方案中已经实际运行并标记为“已验证可运行”的构建与打包命令通过；
 - [ ] macOS 15+ arm64-only 的签名/notarization、单一应用更新 artifact 和架构无关适配器更新范围按技术方案验证；
