@@ -1,6 +1,6 @@
 # ADR-0004：采用深 GatewayCore 与内部能力模块
 
-> 状态：Accepted
+> 状态：Superseded（2026-08-22，由 ADR-0020 取代）
 >
 > 决策日期：2026-07-27
 >

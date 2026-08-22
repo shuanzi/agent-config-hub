@@ -1,0 +1,127 @@
+/* 设置视图样式 */
+
+.settings-view {
+  max-width: 720px;
+  padding: 16px;
+}
+
+.settings-section {
+  margin-bottom: 24px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.settings-section h3 {
+  margin: 0 0 8px;
+  font-size: 15px;
+}
+
+.settings-section p {
+  margin: 0 0 12px;
+  font-size: 13px;
+  color: #555;
+}
+
+.settings-options {
+  display: inline-flex;
+  gap: 8px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-subtle);
+}
+
+.settings-option {
+  padding: 6px 14px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: none;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.settings-option:hover {
+  background: #fff;
+}
+
+.settings-option.active {
+  background: #fff;
+  border-color: var(--border);
+  font-weight: 600;
+}
+
+.settings-override-grid {
+  display: grid;
+  grid-template-columns: 120px 1fr;
+  gap: 10px 12px;
+  align-items: center;
+  margin-top: 12px;
+}
+
+.settings-override-grid label {
+  font-size: 13px;
+  color: #444;
+}
+
+.settings-override-grid input {
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 13px;
+}
+
+.settings-actions {
+  display: flex;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.settings-actions button {
+  padding: 6px 14px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: #fff;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.settings-actions button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.settings-error {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--error);
+  border-radius: 6px;
+  background: #fff0f2;
+  color: var(--error);
+  font-size: 13px;
+  white-space: pre-line;
+}
+
+.settings-success {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px solid #b7dfb9;
+  border-radius: 6px;
+  background: #e6f4ea;
+  color: #1e8e3e;
+  font-size: 13px;
+}
+
+.settings-migrate-confirm {
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-subtle);
+}
+
+.settings-migrate-confirm p {
+  margin: 0 0 8px;
+}

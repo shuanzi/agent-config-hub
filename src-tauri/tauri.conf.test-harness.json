@@ -4,6 +4,23 @@
   "identifier": "com.agentconfigmanager.testharness",
   "app": {
     "withGlobalTauri": true,
+    "security": {
+      "capabilities": [
+        "default",
+        {
+          "identifier": "l3-harness",
+          "description": "L3 test-harness 专用权限：WDIO execute/mock 与 embedded WebDriver plugin。",
+          "windows": ["main"],
+          "permissions": [
+            "core:default",
+            "core:window:default",
+            "core:event:default",
+            "wdio:default",
+            "wdio-webdriver:default"
+          ]
+        }
+      ]
+    },
     "windows": [
       {
         "label": "main",

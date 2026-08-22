@@ -1,6 +1,6 @@
 # ADR-0003：FrontendGateway 使用三个显式 command 与单一 invalidation event
 
-> 状态：Accepted
+> 状态：Superseded（2026-08-22，由 ADR-0020 取代）
 >
 > 决策日期：2026-07-27
 >

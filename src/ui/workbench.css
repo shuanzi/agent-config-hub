@@ -32,6 +32,16 @@ body {
   }
 }
 
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.spin {
+  animation: spin 1s linear infinite;
+}
+
 .workbench {
   display: flex;
   flex-direction: column;
@@ -368,4 +378,125 @@ body {
 .path-display {
   font-family: 'SF Mono', Menlo, Consolas, monospace;
   font-size: 12px;
+}
+
+/* App shell (Phase 4) */
+.app-header {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+  gap: 16px;
+  border-bottom: 1px solid var(--border);
+  padding: 0 16px;
+  min-height: 52px;
+}
+
+.app-header-brand {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  min-width: 0;
+}
+
+.app-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.app-header-page-title {
+  font-size: 13px;
+  color: #555;
+}
+
+.app-shell-main {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.agent-selector {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.agent-selector label {
+  color: #555;
+}
+
+.agent-selector select {
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 13px;
+}
+
+.sub-tabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid var(--border);
+  padding: 8px 16px 0;
+  background: var(--bg-subtle);
+}
+
+.sub-tab {
+  border: 1px solid transparent;
+  border-bottom: none;
+  background: none;
+  padding: 8px 16px;
+  font-size: 13px;
+  cursor: pointer;
+  border-radius: 6px 6px 0 0;
+}
+
+.sub-tab:hover {
+  background: #fff;
+}
+
+.sub-tab.active {
+  background: #fff;
+  border-color: var(--border);
+  font-weight: 600;
+}
+
+.skills-view {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.skills-view-content {
+  flex: 1;
+  overflow: auto;
+  padding: 16px;
+  min-height: 0;
+}
+
+.subagents-view {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.subagents-view-content {
+  flex: 1;
+  overflow: auto;
+  padding: 16px;
+  min-height: 0;
+}
+
+.placeholder-panel {
+  padding: 48px 16px;
+  text-align: center;
+  color: #555;
+}
+
+.placeholder-panel h2 {
+  margin: 0 0 8px;
+  font-size: 18px;
+  color: #1c1c1f;
 }

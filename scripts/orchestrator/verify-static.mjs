@@ -3,37 +3,46 @@
  * verify:static（L0）。
  *
  * 子检查（全部跑完再汇总，任一失败退出 1）：
- * 1. wire 漂移门禁：临时目录 `cargo run --bin export-wire -- <tmp>` 后与
- *    src/gateway/wire/gateway-wire.ts 逐字节比对（生成只在临时目录，不改仓库）；
- * 2. `corepack npm exec -- tsc -b`；
- * 3. `corepack npm exec -- eslint .`；
- * 4. `corepack npm exec -- prettier --check .`；
- * 5. `cargo fmt --check`；
- * 6. `cargo clippy --all-targets -- -D warnings`（默认 feature）；
- * 7. `cargo clippy --all-targets --features test-harness -- -D warnings`；
- * 8. 禁止依赖守卫（ARC-06a/06b：不引入横向状态/查询/编辑器/UI 库，UI 为自绘
+ * 1. `corepack npm exec -- tsc -b`；
+ * 2. `corepack npm exec -- eslint .`；
+ * 3. `corepack npm exec -- prettier --check .`；
+ * 4. `cargo fmt --check`；
+ * 5. `cargo clippy --all-targets -- -D warnings`（默认 feature）；
+ * 6. `cargo clippy --all-targets --features test-harness -- -D warnings`；
+ * 7. 禁止依赖守卫（ARC-06a/06b：不引入横向状态/查询/编辑器/UI 库，UI 为自绘
  *    最小组件；列表见 BANNED_DEPENDENCIES，命中 package.json 或
  *    package-lock.json 即失败）；
- * 9. 敏感占位值守卫：FX-01 占位明文只允许存在于 fixture 原始文件；
+ * 8. 敏感占位值守卫：FX-01 占位明文只允许存在于 fixture 原始文件；
  *    其余被跟踪源文件（src/tests/scripts/src-tauri/performance，排除
  *    node_modules/dist/target/.artifacts/lockfiles）出现即失败。
  */
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
-import { runStep, sha256File, REPO_ROOT, SRC_TAURI } from './lib.mjs';
+import { runStep, REPO_ROOT, SRC_TAURI } from './lib.mjs';
 
 /**
- * 禁止依赖清单（ARC-06a/06b 对应）：
- * - zustand / redux / @reduxjs/* / xstate：禁止引入额外客户端状态库（状态在 WorkspaceSession）；
- * - @tanstack/*：禁止引入服务端状态/表格等横向库；
- * - monaco-editor：源码视图 MVP 为只读 <pre>，不引入重型编辑器；
+ * 禁止依赖清单（ARC-06a/06b 对应；经 ADR-0020 架构 pivot 调整）：
+ * - zustand / redux / @reduxjs/* / xstate：禁止引入额外客户端状态库（服务端状态由
+ *   React Query 承担，组件本地状态用 useState）；
+ * - @tanstack/*（除 react-query 外）：禁止引入表格/路由等横向库；React Query 是
+ *   ADR-0020 指定的数据获取层，显式豁免；
+ * - monaco-editor：源码视图为只读/简单 textarea，不引入重型编辑器；
  * - @mui/* / antd / @radix-ui/* / shadcn*：禁止组件库，UI 为自绘最小组件。
  * exact：精确包名；prefix：scope/名称前缀。
  */
 const BANNED_DEPENDENCIES = {
-  exact: ['zustand', 'redux', 'xstate', 'monaco-editor', 'antd'],
-  prefix: ['@reduxjs/', '@tanstack/', '@mui/', '@radix-ui/', 'shadcn'],
+  exact: [
+    'zustand',
+    'redux',
+    'xstate',
+    'monaco-editor',
+    'antd',
+    '@tanstack/react-table',
+    '@tanstack/react-router',
+    '@tanstack/react-form',
+    '@tanstack/react-virtual',
+  ],
+  prefix: ['@reduxjs/', '@mui/', '@radix-ui/', 'shadcn'],
 };
 
 const results = [];
@@ -46,37 +55,6 @@ async function step(id, cmd, args, cwd = REPO_ROOT, timeoutMs = 600_000) {
   console.log(`\n=== ${id}: ${cmd} ${args.join(' ')}`);
   const result = await runStep({ cmd, args, cwd, timeoutMs });
   record(id, result.exitCode === 0, `exit ${result.exitCode} (${result.durationMs}ms)`);
-}
-
-async function wireDriftGate() {
-  const id = 'wire 漂移门禁（export-wire 逐字节比对）';
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'acm-wire-export-'));
-  try {
-    const gen = await runStep({
-      cmd: 'cargo',
-      args: ['run', '--quiet', '--bin', 'export-wire', '--', tmp],
-      cwd: SRC_TAURI,
-      timeoutMs: 600_000,
-    });
-    if (gen.exitCode !== 0) {
-      record(id, false, `export-wire exit ${gen.exitCode}`);
-      return;
-    }
-    const generated = path.join(tmp, 'gateway-wire.ts');
-    const committed = path.join(REPO_ROOT, 'src/gateway/wire/gateway-wire.ts');
-    const generatedBytes = fs.readFileSync(generated);
-    const committedBytes = fs.readFileSync(committed);
-    const identical = generatedBytes.equals(committedBytes);
-    record(
-      id,
-      identical,
-      identical
-        ? `sha256 ${sha256File(committed).slice(0, 16)}… 一致`
-        : `漂移：generated sha256 ${sha256File(generated).slice(0, 16)}… != committed ${sha256File(committed).slice(0, 16)}…`,
-    );
-  } finally {
-    fs.rmSync(tmp, { recursive: true, force: true });
-  }
 }
 
 async function bannedDepsGate() {
@@ -147,7 +125,6 @@ async function placeholderGuard() {
 }
 
 async function main() {
-  await wireDriftGate();
   await step('tsc -b', 'corepack', ['npm', 'exec', '--', 'tsc', '-b']);
   await step('eslint .', 'corepack', ['npm', 'exec', '--', 'eslint', '.']);
   await step('prettier --check .', 'corepack', ['npm', 'exec', '--', 'prettier', '--check', '.']);
