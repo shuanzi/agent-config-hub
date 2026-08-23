@@ -597,12 +597,13 @@ impl SkillService {
             }
         }
 
+        // 该 dest 仅用于决定是否需要下载；真正落盘的目标路径在写锁内重新解析，
+        // 避免下载期间发生的存储迁移把新 skill 写入旧根。
         let dest = ssot_dir.join(&install_name);
 
         let mut repo_branch = skill.repo_branch.clone();
         let mut resolved_doc_path: Option<String> = None;
         let mut downloaded_source: Option<(tempfile::TempDir, PathBuf)> = None;
-
         if !dest.exists() {
             let repo = SkillRepo {
                 owner: skill.repo_owner.clone(),
@@ -658,6 +659,51 @@ impl SkillService {
             }
         }
 
+        Self::finish_install_under_lock(
+            db,
+            skill,
+            &install_name,
+            current_app,
+            repo_branch,
+            resolved_doc_path,
+            downloaded_source
+                .as_ref()
+                .map(|(_, source)| source.as_path()),
+        )
+    }
+
+    /// 安装落盘段：持写锁执行。目标 SSOT 路径在锁内重新解析，
+    /// 避免下载期间发生的存储迁移把新 skill 写入旧根。
+    fn finish_install_under_lock(
+        db: &Arc<Database>,
+        skill: &DiscoverableSkill,
+        install_name: &str,
+        current_app: &AgentType,
+        repo_branch: String,
+        resolved_doc_path: Option<String>,
+        downloaded_source: Option<&Path>,
+    ) -> Result<InstalledSkill, AppError> {
+        let _state_guard = skill_state_write_guard();
+        if let Some(existing) = Self::reuse_existing_install(db, skill, install_name, current_app)?
+        {
+            return Ok(existing);
+        }
+
+        // 写锁内重新解析目标 SSOT：下载期间存储位置可能已迁移
+        let dest = Self::get_ssot_dir()?.join(install_name);
+
+        // 磁盘上已有同名目录但 DB 无记录：未托管内容，拒绝冒名接管
+        Self::ensure_no_unmanaged_destination(&dest, install_name)?;
+
+        if !dest.exists() {
+            let source = downloaded_source.ok_or_else(|| {
+                AppError::Message(
+                    "Skill directory changed during install; please retry".to_string(),
+                )
+            })?;
+            Self::copy_dir_recursive(source, &dest)?;
+        }
+
         let doc_path = Self::choose_doc_path(
             resolved_doc_path,
             skill.readme_url.as_deref(),
@@ -666,27 +712,6 @@ impl SkillService {
 
         let readme_url =
             Self::build_skill_doc_url(&skill.repo_owner, &skill.repo_name, &repo_branch, &doc_path);
-
-        let _state_guard = skill_state_write_guard();
-        if let Some(existing) = Self::reuse_existing_install(db, skill, &install_name, current_app)?
-        {
-            return Ok(existing);
-        }
-
-        // 磁盘上已有同名目录但 DB 无记录：未托管内容，拒绝冒名接管
-        Self::ensure_no_unmanaged_destination(&dest, &install_name)?;
-
-        if !dest.exists() {
-            let source = downloaded_source
-                .as_ref()
-                .map(|(_, source)| source)
-                .ok_or_else(|| {
-                    AppError::Message(
-                        "Skill directory changed during install; please retry".to_string(),
-                    )
-                })?;
-            Self::copy_dir_recursive(source, &dest)?;
-        }
 
         let content_hash = Self::compute_dir_hash(&dest).map(Some).unwrap_or_else(|e| {
             log::warn!("Failed to compute content hash for {}: {e}", install_name);
@@ -701,7 +726,7 @@ impl SkillService {
             } else {
                 Some(skill.description.clone())
             },
-            directory: install_name.clone(),
+            directory: install_name.to_string(),
             repo_owner: Some(skill.repo_owner.clone()),
             repo_name: Some(skill.repo_name.clone()),
             repo_branch: Some(repo_branch),
@@ -712,7 +737,7 @@ impl SkillService {
             updated_at: 0,
         };
 
-        Self::persist_and_sync_new_skill(db, &installed_skill, current_app)?;
+        Self::persist_and_sync_new_skill(db, &installed_skill, current_app, Some(&dest))?;
 
         log::info!(
             "Skill {} 安装成功，已启用 {}",
@@ -723,12 +748,27 @@ impl SkillService {
         Ok(installed_skill)
     }
 
+    /// `fresh_ssot_dir` 仅当是本次安装新建的 SSOT 目录时传入：
+    /// 回滚时连同该目录一起删除，避免残留"非受管内容"导致下次安装被拒。
+    /// 接管/复用的既有目录绝不删除。
     fn persist_and_sync_new_skill(
         db: &Arc<Database>,
         skill: &InstalledSkill,
         app: &AgentType,
+        fresh_ssot_dir: Option<&Path>,
     ) -> Result<(), AppError> {
-        db.save_skill(skill)?;
+        let cleanup_fresh_ssot_dir = || {
+            if let Some(dir) = fresh_ssot_dir {
+                if let Err(e) = fs::remove_dir_all(dir) {
+                    log::error!("回滚新建 Skill SSOT 目录失败 {}: {e}", dir.display());
+                }
+            }
+        };
+
+        if let Err(error) = db.save_skill(skill) {
+            cleanup_fresh_ssot_dir();
+            return Err(error);
+        }
         if let Err(error) = Self::sync_to_app_dir(&skill.directory, app) {
             if let Err(rollback_error) = db.delete_skill(&skill.id) {
                 log::error!(
@@ -736,6 +776,7 @@ impl SkillService {
                     skill.id
                 );
             }
+            cleanup_fresh_ssot_dir();
             return Err(error);
         }
         Ok(())
@@ -1092,8 +1133,6 @@ impl SkillService {
             enabled: true,
         };
 
-        let ssot_dir = Self::get_ssot_dir()?;
-
         let client = self.download_client();
         let (temp_guard, used_branch) = Self::download_repo_with_timeout(&client, &repo).await?;
         let temp_dir = temp_guard.path();
@@ -1125,31 +1164,45 @@ impl SkillService {
                 ))
             })?;
 
+        Self::apply_downloaded_update(db, &skill, &owner, &name, used_branch, &source)
+    }
+
+    /// 更新落盘段：持写锁执行。目标 SSOT 路径在锁内才解析，
+    /// 避免下载期间发生的存储迁移把新版本写入旧根（而备份/投影解析的是新根）。
+    fn apply_downloaded_update(
+        db: &Arc<Database>,
+        expected: &InstalledSkill,
+        owner: &str,
+        name: &str,
+        used_branch: String,
+        source: &Path,
+    ) -> Result<InstalledSkill, AppError> {
         let _state_guard = skill_state_write_guard();
 
-        let current_skill = db.get_installed_skill(&skill.id)?.ok_or_else(|| {
-            AppError::InvalidInput(format!("Skill no longer installed: {}", skill.id))
+        let current_skill = db.get_installed_skill(&expected.id)?.ok_or_else(|| {
+            AppError::InvalidInput(format!("Skill no longer installed: {}", expected.id))
         })?;
-        if current_skill.directory != skill.directory
-            || current_skill.repo_owner != skill.repo_owner
-            || current_skill.repo_name != skill.repo_name
-            || current_skill.repo_branch != skill.repo_branch
-            || current_skill.installed_at != skill.installed_at
+        if current_skill.directory != expected.directory
+            || current_skill.repo_owner != expected.repo_owner
+            || current_skill.repo_name != expected.repo_name
+            || current_skill.repo_branch != expected.repo_branch
+            || current_skill.installed_at != expected.installed_at
         {
             return Err(AppError::InvalidInput(format!(
                 "Skill changed during update: {}",
-                skill.id
+                expected.id
             )));
         }
         Self::require_valid_directory(&current_skill.directory)?;
         let skill = current_skill;
 
-        let dest = ssot_dir.join(&skill.directory);
+        // 写锁内解析目标 SSOT：下载期间存储位置可能已迁移
+        let dest = Self::get_ssot_dir()?.join(&skill.directory);
 
         let backup_path = Self::create_uninstall_backup(&skill)?;
 
         // SSOT 替换失败时必须先从备份恢复，避免 SSOT 目录丢失
-        if let Err(err) = Self::replace_ssot_dir(&source, &dest) {
+        if let Err(err) = Self::replace_ssot_dir(source, &dest) {
             Self::restore_ssot_from_backup(backup_path.as_ref(), &dest);
             return Err(err);
         }
@@ -1163,7 +1216,7 @@ impl SkillService {
             .as_deref()
             .and_then(Self::extract_doc_path_from_url)
             .unwrap_or_else(|| format!("{}/SKILL.md", skill.directory.trim_end_matches('/')));
-        let readme_url = Self::build_skill_doc_url(&owner, &name, &used_branch, &doc_path);
+        let readme_url = Self::build_skill_doc_url(owner, name, &used_branch, &doc_path);
 
         let updated_metadata = InstalledSkill {
             id: skill.id.clone(),
@@ -1271,8 +1324,20 @@ impl SkillService {
                 continue;
             }
             if fs::rename(&dst, &src).is_err() {
-                let _ = Self::copy_dir_recursive(&dst, &src);
-                let _ = fs::remove_dir_all(&dst);
+                // 跨文件系统回退为复制：只有复制完整成功才删除 dst；
+                // 复制失败（或只拷出部分内容，如旧盘满）时保留 dst——
+                // 它可能是该 skill 唯一完整副本，并清理复制产生的残缺 src。
+                match Self::copy_dir_recursive(&dst, &src) {
+                    Ok(()) => {
+                        let _ = fs::remove_dir_all(&dst);
+                    }
+                    Err(e) => {
+                        log::error!(
+                            "回滚 Skill {directory} 失败：复制回源目录出错，保留目标目录以免数据丢失: {e}"
+                        );
+                        let _ = fs::remove_dir_all(&src);
+                    }
+                }
             }
         }
     }
@@ -2914,7 +2979,7 @@ impl SkillService {
                 updated_at: 0,
             };
 
-            Self::persist_and_sync_new_skill(db, &skill, current_app)?;
+            Self::persist_and_sync_new_skill(db, &skill, current_app, Some(&dest))?;
 
             log::info!(
                 "Skill {} installed from ZIP, enabled for {:?}",
@@ -4537,5 +4602,279 @@ mod tests {
             .join("uninstall-skill")
             .exists());
         assert!(db.get_installed_skill(&skill.id).unwrap().is_some());
+    }
+
+    fn installed_skill_fixture(id: &str, directory: &str) -> InstalledSkill {
+        InstalledSkill {
+            id: id.to_string(),
+            name: directory.to_string(),
+            description: None,
+            directory: directory.to_string(),
+            repo_owner: Some("owner".to_string()),
+            repo_name: Some("repo".to_string()),
+            repo_branch: Some("main".to_string()),
+            readme_url: None,
+            apps: SkillApps::default(),
+            installed_at: 1,
+            content_hash: None,
+            updated_at: 0,
+        }
+    }
+
+    #[test]
+    fn rollback_skill_moves_keeps_dst_when_fallback_copy_fails() {
+        let tmp = tempdir().unwrap();
+
+        // old_root 是一个普通文件：rename 与回退复制都会失败（ENOTDIR），
+        // 模拟跨文件系统回滚时回退复制也失败（如旧盘满）的场景
+        let old_root = tmp.path().join("old-root");
+        fs::write(&old_root, "not a directory").unwrap();
+        let new_root = tmp.path().join("new-root");
+        write_skill(&new_root.join("skill-a"), "Skill A");
+        fs::write(new_root.join("skill-a").join("data.txt"), "precious").unwrap();
+
+        SkillService::rollback_skill_moves(&old_root, &new_root, &["skill-a".to_string()]);
+
+        // 回退复制失败时必须保留 dst：它可能是该 skill 唯一完整副本
+        assert_eq!(
+            fs::read_to_string(new_root.join("skill-a").join("data.txt")).unwrap(),
+            "precious"
+        );
+        assert!(new_root.join("skill-a").join("SKILL.md").exists());
+    }
+
+    #[test]
+    #[serial]
+    fn apply_downloaded_update_lands_in_current_ssot_after_migration_during_download() {
+        let tmp = tempdir().unwrap();
+        let _guard = TestHomeGuard::set(tmp.path());
+        let db = Arc::new(Database::memory().unwrap());
+
+        // 下载开始时存储在 Hub：旧版 skill 位于 Hub SSOT
+        let hub_ssot = SkillService::get_ssot_dir().unwrap();
+        write_skill(&hub_ssot.join("upd-skill"), "Old");
+        let previous = installed_skill_fixture("owner/repo:upd-skill", "upd-skill");
+        db.save_skill(&previous).unwrap();
+
+        // 模拟下载期间完成存储迁移：目录物理移动 + 设置切换
+        let unified_root = config::get_home_dir().join(".agents").join("skills");
+        fs::create_dir_all(&unified_root).unwrap();
+        fs::rename(hub_ssot.join("upd-skill"), unified_root.join("upd-skill")).unwrap();
+        crate::settings::set_storage_location(StorageLocation::Unified).unwrap();
+
+        // 模拟已下载完成的新版本源
+        let download = tmp.path().join("download");
+        write_skill(&download.join("upd-skill"), "New");
+
+        let updated = SkillService::apply_downloaded_update(
+            &db,
+            &previous,
+            "owner",
+            "repo",
+            "main".to_string(),
+            &download.join("upd-skill"),
+        )
+        .expect("update");
+
+        // 新版本落在迁移后的 Unified 根，旧根不被写入新版本
+        let new_content =
+            fs::read_to_string(unified_root.join("upd-skill").join("SKILL.md")).unwrap();
+        assert!(new_content.contains("name: New"));
+        let old_root_file = hub_ssot.join("upd-skill").join("SKILL.md");
+        if old_root_file.exists() {
+            let old_content = fs::read_to_string(&old_root_file).unwrap();
+            assert!(
+                old_content.contains("name: Old"),
+                "新版本绝不能写入迁移前的旧根"
+            );
+        }
+
+        // 新 hash 落库，且与当前 SSOT 内容一致
+        let stored = db.get_installed_skill(&previous.id).unwrap().unwrap();
+        assert_eq!(stored.content_hash, updated.content_hash);
+        assert!(stored.content_hash.is_some());
+    }
+
+    #[test]
+    #[serial]
+    fn finish_install_lands_in_current_ssot_after_migration_during_download() {
+        let tmp = tempdir().unwrap();
+        let _guard = TestHomeGuard::set(tmp.path());
+        let db = Arc::new(Database::memory().unwrap());
+
+        // 下载期间存储从 Hub 迁移到 Unified
+        let hub_ssot = SkillService::get_ssot_dir().unwrap();
+        crate::settings::set_storage_location(StorageLocation::Unified).unwrap();
+
+        let download = tmp.path().join("download");
+        write_skill(&download.join("new-skill"), "New Skill");
+
+        let skill = DiscoverableSkill {
+            key: "owner/repo:new-skill".to_string(),
+            name: "New Skill".to_string(),
+            description: "".to_string(),
+            directory: "new-skill".to_string(),
+            readme_url: None,
+            repo_owner: "owner".to_string(),
+            repo_name: "repo".to_string(),
+            repo_branch: "main".to_string(),
+        };
+
+        let installed = SkillService::finish_install_under_lock(
+            &db,
+            &skill,
+            "new-skill",
+            &AgentType::ClaudeCode,
+            "main".to_string(),
+            None,
+            Some(&download.join("new-skill")),
+        )
+        .expect("install");
+
+        // 新版本落在迁移后的 Unified 根，旧根不被写入
+        let unified = config::get_home_dir()
+            .join(".agents")
+            .join("skills")
+            .join("new-skill");
+        assert!(unified.join("SKILL.md").exists());
+        assert!(!hub_ssot.join("new-skill").exists());
+
+        assert!(db.get_installed_skill(&installed.id).unwrap().is_some());
+        assert!(config::get_claude_skills_dir().join("new-skill").exists());
+    }
+
+    #[test]
+    #[serial]
+    fn persist_and_sync_new_skill_removes_fresh_ssot_dir_on_save_failure() {
+        let tmp = tempdir().unwrap();
+        let _guard = TestHomeGuard::set(tmp.path());
+        let db = Arc::new(Database::memory().unwrap());
+
+        let dest = SkillService::get_ssot_dir().unwrap().join("doomed-skill");
+        write_skill(&dest, "Doomed");
+
+        let mut skill = installed_skill_fixture("owner/repo:doomed-skill", "doomed-skill");
+        skill.apps = SkillApps::only(&AgentType::ClaudeCode);
+
+        // 故障注入：DB 只读，保存必然失败
+        {
+            let conn = db.conn.lock().expect("lock conn");
+            conn.execute("PRAGMA query_only = ON;", [])
+                .expect("enable query_only");
+        }
+
+        let result = SkillService::persist_and_sync_new_skill(
+            &db,
+            &skill,
+            &AgentType::ClaudeCode,
+            Some(&dest),
+        );
+        assert!(result.is_err(), "保存失败必须返回错误");
+        assert!(!dest.exists(), "保存失败时本次新建的 SSOT 目录必须一并删除");
+        assert!(db.get_installed_skill(&skill.id).unwrap().is_none());
+    }
+
+    #[test]
+    #[serial]
+    fn persist_and_sync_new_skill_removes_fresh_ssot_dir_on_sync_failure() {
+        let tmp = tempdir().unwrap();
+        let _guard = TestHomeGuard::set(tmp.path());
+        let db = Arc::new(Database::memory().unwrap());
+        crate::settings::set_sync_method(SyncMethod::Copy).unwrap();
+
+        let dest = SkillService::get_ssot_dir()
+            .unwrap()
+            .join("sync-fail-skill");
+        write_skill(&dest, "SyncFail");
+
+        // 只读 claude 配置目录 → 投影同步必然失败
+        let read_only_root = tmp.path().join("readonly-claude");
+        let skills_dir = read_only_root.join("skills");
+        fs::create_dir_all(&skills_dir).unwrap();
+        for dir in [&read_only_root, &skills_dir] {
+            let mut permissions = std::fs::metadata(dir).unwrap().permissions();
+            permissions.set_readonly(true);
+            fs::set_permissions(dir, permissions).unwrap();
+        }
+        crate::settings::update_settings(crate::settings::AppSettings {
+            claude_code_config_dir: Some(read_only_root.to_string_lossy().to_string()),
+            ..Default::default()
+        })
+        .unwrap();
+
+        let mut skill = installed_skill_fixture("owner/repo:sync-fail-skill", "sync-fail-skill");
+        skill.apps = SkillApps::only(&AgentType::ClaudeCode);
+
+        let result = SkillService::persist_and_sync_new_skill(
+            &db,
+            &skill,
+            &AgentType::ClaudeCode,
+            Some(&dest),
+        );
+        assert!(result.is_err(), "同步失败必须返回错误");
+        assert!(!dest.exists(), "同步失败时本次新建的 SSOT 目录必须一并删除");
+        assert!(db.get_installed_skill(&skill.id).unwrap().is_none());
+
+        // 恢复写权限以便临时目录清理
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            for dir in [&read_only_root, &skills_dir] {
+                let mut permissions = std::fs::metadata(dir).unwrap().permissions();
+                permissions.set_mode(permissions.mode() | 0o200);
+                let _ = fs::set_permissions(dir, permissions);
+            }
+        }
+        crate::settings::reset_settings_store_for_test();
+    }
+
+    #[test]
+    #[serial]
+    fn persist_and_sync_new_skill_preserves_adopted_dir_on_sync_failure() {
+        let tmp = tempdir().unwrap();
+        let _guard = TestHomeGuard::set(tmp.path());
+        let db = Arc::new(Database::memory().unwrap());
+        crate::settings::set_sync_method(SyncMethod::Copy).unwrap();
+
+        let dest = SkillService::get_ssot_dir().unwrap().join("adopted-skill");
+        write_skill(&dest, "Adopted");
+
+        let read_only_root = tmp.path().join("readonly-claude");
+        let skills_dir = read_only_root.join("skills");
+        fs::create_dir_all(&skills_dir).unwrap();
+        for dir in [&read_only_root, &skills_dir] {
+            let mut permissions = std::fs::metadata(dir).unwrap().permissions();
+            permissions.set_readonly(true);
+            fs::set_permissions(dir, permissions).unwrap();
+        }
+        crate::settings::update_settings(crate::settings::AppSettings {
+            claude_code_config_dir: Some(read_only_root.to_string_lossy().to_string()),
+            ..Default::default()
+        })
+        .unwrap();
+
+        let mut skill = installed_skill_fixture("owner/repo:adopted-skill", "adopted-skill");
+        skill.apps = SkillApps::only(&AgentType::ClaudeCode);
+
+        // fresh_ssot_dir 为 None：目录是接管/既有的，回滚时绝不能删除
+        let result =
+            SkillService::persist_and_sync_new_skill(&db, &skill, &AgentType::ClaudeCode, None);
+        assert!(result.is_err(), "同步失败必须返回错误");
+        assert!(
+            dest.join("SKILL.md").exists(),
+            "接管/既有的 SSOT 目录绝不能被回滚删除"
+        );
+        assert!(db.get_installed_skill(&skill.id).unwrap().is_none());
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            for dir in [&read_only_root, &skills_dir] {
+                let mut permissions = std::fs::metadata(dir).unwrap().permissions();
+                permissions.set_mode(permissions.mode() | 0o200);
+                let _ = fs::set_permissions(dir, permissions);
+            }
+        }
+        crate::settings::reset_settings_store_for_test();
     }
 }

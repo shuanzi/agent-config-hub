@@ -314,6 +314,12 @@ pub(crate) fn set_agent_override_dir_inner(
 ) -> Result<(), AppError> {
     let agent = AgentType::from_str(app)?;
 
+    // 在任何文件副作用之前统一规范化 override 文本：与 normalize_paths 的
+    // 规则一致（trim，空白归 None），后续路径解析与持久化只使用该值。
+    let dir = dir
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+
     // 与 migrate_storage_combined 相同的固定锁顺序：skill -> subagent -> prompt
     let _skill_guard = skill_state_write_guard();
     let _subagent_guard = subagent_state_write_guard();
@@ -380,11 +386,20 @@ pub(crate) fn set_agent_override_dir_inner(
     let mut persisted = false;
     let mut new_live_written = false;
     let mut removed_old_live: Option<String> = None;
+    // 新目录已有用户 live 文件时的备份（None 表示原本不存在）
+    let mut new_live_backup: Option<String> = None;
 
     let mut commit = || -> Result<(), AppError> {
         // 搬迁启用中指令的 live 文件
         if let Some(prompt) = &enabled_prompt {
             if new_live_file != old_live_file {
+                // 目标已存在用户自己的 live 文件时先备份内容，供失败回滚恢复
+                if new_live_backup.is_none() && new_live_file.exists() {
+                    new_live_backup = Some(
+                        std::fs::read_to_string(&new_live_file)
+                            .map_err(|e| AppError::io(&new_live_file, e))?,
+                    );
+                }
                 config::write_text_file(&new_live_file, &prompt.content)?;
                 new_live_written = true;
 
@@ -444,7 +459,15 @@ pub(crate) fn set_agent_override_dir_inner(
             let _ = config::write_text_file(&old_live_file, content);
         }
         if new_live_written && new_live_file != old_live_file {
-            let _ = std::fs::remove_file(&new_live_file);
+            match &new_live_backup {
+                // 原本存在用户 live 文件：恢复备份内容而不是删除
+                Some(content) => {
+                    let _ = config::write_text_file(&new_live_file, content);
+                }
+                None => {
+                    let _ = std::fs::remove_file(&new_live_file);
+                }
+            }
         }
         return Err(err);
     }
@@ -926,6 +949,111 @@ mod tests {
 
         // 旧投影原样保留，设置未变更
         assert!(old_skill_projection.exists());
+        assert_eq!(crate::settings::get_settings().claude_code_config_dir, None);
+    }
+
+    #[test]
+    #[serial]
+    fn set_agent_override_dir_restores_preexisting_new_live_on_commit_failure() {
+        let tmp = tempdir().unwrap();
+        let _guard = TestHomeGuard::set(tmp.path());
+        let db = Arc::new(Database::memory().unwrap());
+
+        // 启用一个 claude 指令预设，旧 live 与启用预设内容一致
+        let prompt = crate::services::prompt::Prompt {
+            id: "p1".to_string(),
+            name: "P1".to_string(),
+            content: "enabled instructions".to_string(),
+            description: None,
+            enabled: true,
+            created_at: Some(1),
+            updated_at: Some(1),
+        };
+        db.save_prompt("claude-code", &prompt).unwrap();
+        let old_live = config::get_claude_prompt_file();
+        config::write_text_file(&old_live, "enabled instructions").unwrap();
+
+        // 新目录已经存在用户自己的 live 文件
+        let custom_dir = tmp.path().join("custom-claude");
+        fs::create_dir_all(&custom_dir).unwrap();
+        let new_live = custom_dir.join("CLAUDE.md");
+        fs::write(&new_live, "user's own instructions").unwrap();
+
+        // 故障注入：settings.json 是目录，设置持久化必然失败
+        let settings_path = config::get_hub_dir().join("settings.json");
+        fs::create_dir_all(&settings_path).unwrap();
+
+        let err = set_agent_override_dir_inner(
+            "claude-code",
+            Some(custom_dir.to_string_lossy().to_string()),
+            &db,
+        )
+        .expect_err("persist failure must abort the command");
+        let _ = err;
+
+        // 用户原有的 live 文件内容被恢复，而不是被删除
+        assert_eq!(
+            fs::read_to_string(&new_live).unwrap(),
+            "user's own instructions"
+        );
+        // 旧 live 也被还原
+        assert_eq!(
+            fs::read_to_string(&old_live).unwrap(),
+            "enabled instructions"
+        );
+
+        // 清理目录障碍后读到的设置未变更
+        fs::remove_dir_all(&settings_path).unwrap();
+        crate::settings::reset_settings_store_for_test();
+        assert_eq!(crate::settings::get_settings().claude_code_config_dir, None);
+    }
+
+    #[test]
+    #[serial]
+    fn set_agent_override_dir_normalizes_trailing_whitespace() {
+        let tmp = tempdir().unwrap();
+        let _guard = TestHomeGuard::set(tmp.path());
+        let db = Arc::new(Database::memory().unwrap());
+
+        // 启用一个 claude 指令预设，旧 live 与启用预设内容一致
+        let prompt = crate::services::prompt::Prompt {
+            id: "p1".to_string(),
+            name: "P1".to_string(),
+            content: "enabled instructions".to_string(),
+            description: None,
+            enabled: true,
+            created_at: Some(1),
+            updated_at: Some(1),
+        };
+        db.save_prompt("claude-code", &prompt).unwrap();
+        let old_live = config::get_claude_prompt_file();
+        config::write_text_file(&old_live, "enabled instructions").unwrap();
+
+        // UI 输入带尾随空格：所有副作用都必须落在 trim 后的目录上
+        let custom_dir = tmp.path().join("custom-claude");
+        let custom_str = custom_dir.to_string_lossy().to_string();
+        set_agent_override_dir_inner("claude-code", Some(format!("{custom_str} ")), &db)
+            .expect("set override");
+
+        // live 文件写入 trim 后的目录，带尾随空格的目录从未被创建
+        assert_eq!(
+            fs::read_to_string(custom_dir.join("CLAUDE.md")).unwrap(),
+            "enabled instructions"
+        );
+        assert!(!tmp.path().join("custom-claude ").exists());
+        assert!(!old_live.exists());
+
+        // 持久化的设置与文件副作用指向同一目录
+        assert_eq!(
+            crate::settings::get_settings()
+                .claude_code_config_dir
+                .as_deref(),
+            Some(custom_str.as_str())
+        );
+
+        // 纯空白输入归一为 None（恢复默认目录）
+        set_agent_override_dir_inner("claude-code", Some("   ".to_string()), &db)
+            .expect("clear override");
         assert_eq!(crate::settings::get_settings().claude_code_config_dir, None);
     }
 

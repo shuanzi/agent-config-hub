@@ -6,6 +6,7 @@ import {
   useInstalledSubagents,
   useSubagentRepos,
   useInstallSubagent,
+  useUninstallSubagent,
   useAddSubagentRepo,
   useRemoveSubagentRepo,
 } from '../../hooks/useSubagents';
@@ -36,26 +37,30 @@ export function SubagentsDiscoveryPage({ activeApp }: SubagentsDiscoveryPageProp
   const { data: repos = [] } = useSubagentRepos();
 
   const installMutation = useInstallSubagent();
+  const uninstallMutation = useUninstallSubagent();
   const addRepoMutation = useAddSubagentRepo();
   const removeRepoMutation = useRemoveSubagentRepo();
 
-  const installedKeys = useMemo(() => {
-    if (installedSubagents === undefined) return new Set<string>();
-    // 以完整身份 `{owner}/{repo}:{path}` 标记已安装：同仓库允许存在
-    // a/reviewer.md 与 b/reviewer.md 这类 stem 相同的文件，不能按
-    // directory+repo 折叠。
-    return new Set(installedSubagents.map((s) => s.id.toLowerCase()));
+  // 以完整身份 `{owner}/{repo}:{path}` 标记已安装：同仓库允许存在
+  // a/reviewer.md 与 b/reviewer.md 这类 stem 相同的文件，不能按
+  // directory+repo 折叠。映射到已安装 id 供卸载使用。
+  const installedIdsByKey = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const s of installedSubagents ?? []) {
+      map.set(s.id.toLowerCase(), s.id);
+    }
+    return map;
   }, [installedSubagents]);
 
-  type SubagentItem = DiscoverableSubagent & { installed: boolean };
+  type SubagentItem = DiscoverableSubagent & { installed: boolean; installedId: string | null };
 
   const subagents: SubagentItem[] = useMemo(() => {
     if (discoverableSubagents === undefined) return [];
-    return discoverableSubagents.map((subagent) => ({
-      ...subagent,
-      installed: installedKeys.has(subagent.key.toLowerCase()),
-    }));
-  }, [discoverableSubagents, installedKeys]);
+    return discoverableSubagents.map((subagent) => {
+      const installedId = installedIdsByKey.get(subagent.key.toLowerCase()) ?? null;
+      return { ...subagent, installed: installedId !== null, installedId };
+    });
+  }, [discoverableSubagents, installedIdsByKey]);
 
   const repoOptions = useMemo(() => {
     const repoSet = new Set<string>();
@@ -100,8 +105,17 @@ export function SubagentsDiscoveryPage({ activeApp }: SubagentsDiscoveryPageProp
     }
   };
 
-  const handleUninstall = async (_key: string) => {
-    // 发现面板不提供卸载；引导到已安装面板
+  const handleUninstall = async (key: string) => {
+    const subagent = subagents.find((s) => s.key === key);
+    if (subagent === undefined || subagent.installedId === null) return;
+    setErrorMessage('');
+    try {
+      await uninstallMutation.mutateAsync(subagent.installedId);
+      setErrorMessage(`已卸载 ${subagent.name}。`);
+    } catch (error) {
+      const userError = toUserError(error);
+      setErrorMessage([userError.message, userError.suggestion].filter(Boolean).join('\n'));
+    }
   };
 
   const handleAddRepo = async (repo: Parameters<typeof addRepoMutation.mutateAsync>[0]) => {

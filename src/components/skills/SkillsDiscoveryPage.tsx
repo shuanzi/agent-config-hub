@@ -4,7 +4,12 @@ import type { AgentType, DiscoverableSkill } from '../../types';
 import { useDiscoverableSkills, useInstalledSkills, useSkillRepos } from '../../hooks/useSkills';
 import { SkillCard } from './SkillCard';
 import { RepoManagerPanel } from './RepoManagerPanel';
-import { useInstallSkill, useAddSkillRepo, useRemoveSkillRepo } from '../../hooks/useSkills';
+import {
+  useInstallSkill,
+  useUninstallSkill,
+  useAddSkillRepo,
+  useRemoveSkillRepo,
+} from '../../hooks/useSkills';
 import { toUserError } from '../../lib/errors';
 
 interface SkillsDiscoveryPageProps {
@@ -29,21 +34,21 @@ export function SkillsDiscoveryPage({ activeApp }: SkillsDiscoveryPageProps) {
   const { data: repos = [] } = useSkillRepos();
 
   const installMutation = useInstallSkill();
+  const uninstallMutation = useUninstallSkill();
   const addRepoMutation = useAddSkillRepo();
   const removeRepoMutation = useRemoveSkillRepo();
 
-  const installedKeys = useMemo(() => {
-    if (installedSkills === undefined) return new Set<string>();
-    return new Set(
-      installedSkills.map((s) => {
-        const owner = s.repoOwner?.toLowerCase() ?? '';
-        const name = s.repoName?.toLowerCase() ?? '';
-        return `${s.directory.toLowerCase()}:${owner}:${name}`;
-      }),
-    );
+  const installedIdsByKey = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const s of installedSkills ?? []) {
+      const owner = s.repoOwner?.toLowerCase() ?? '';
+      const name = s.repoName?.toLowerCase() ?? '';
+      map.set(`${s.directory.toLowerCase()}:${owner}:${name}`, s.id);
+    }
+    return map;
   }, [installedSkills]);
 
-  type SkillItem = DiscoverableSkill & { installed: boolean };
+  type SkillItem = DiscoverableSkill & { installed: boolean; installedId: string | null };
 
   const skills: SkillItem[] = useMemo(() => {
     if (discoverableSkills === undefined) return [];
@@ -51,9 +56,10 @@ export function SkillsDiscoveryPage({ activeApp }: SkillsDiscoveryPageProps) {
       const installName =
         skill.directory.split(/[/\\]/).pop()?.toLowerCase() ?? skill.directory.toLowerCase();
       const key = `${installName}:${skill.repoOwner.toLowerCase()}:${skill.repoName.toLowerCase()}`;
-      return { ...skill, installed: installedKeys.has(key) };
+      const installedId = installedIdsByKey.get(key) ?? null;
+      return { ...skill, installed: installedId !== null, installedId };
     });
-  }, [discoverableSkills, installedKeys]);
+  }, [discoverableSkills, installedIdsByKey]);
 
   const repoOptions = useMemo(() => {
     const repoSet = new Set<string>();
@@ -98,8 +104,17 @@ export function SkillsDiscoveryPage({ activeApp }: SkillsDiscoveryPageProps) {
     }
   };
 
-  const handleUninstall = async (_key: string) => {
-    // 发现面板不提供卸载；引导到已安装面板
+  const handleUninstall = async (key: string) => {
+    const skill = skills.find((s) => s.key === key);
+    if (skill === undefined || skill.installedId === null) return;
+    setErrorMessage('');
+    try {
+      await uninstallMutation.mutateAsync(skill.installedId);
+      setErrorMessage(`已卸载 ${skill.name}。`);
+    } catch (error) {
+      const userError = toUserError(error);
+      setErrorMessage([userError.message, userError.suggestion].filter(Boolean).join('\n'));
+    }
   };
 
   const handleAddRepo = async (repo: Parameters<typeof addRepoMutation.mutateAsync>[0]) => {

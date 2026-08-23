@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Search } from 'lucide-react';
 import type { AgentType, Prompt } from '../../types';
 import {
@@ -52,6 +52,15 @@ export function InstructionsPanel({ activeApp }: InstructionsPanelProps) {
   const deleteMutation = useDeletePrompt();
   const enableMutation = useEnablePrompt();
   const importMutation = useImportPromptFromFile();
+
+  // activeApp 切换时组件保持挂载：重置编辑器状态，避免把上一个
+  // Agent 的选中项或草稿保存进新 Agent。
+  useEffect(() => {
+    setSelectedId(null);
+    setIsCreating(false);
+    setDraft(emptyPrompt());
+    setErrorMessage('');
+  }, [activeApp]);
 
   const promptList = useMemo(() => {
     if (!prompts) return [];

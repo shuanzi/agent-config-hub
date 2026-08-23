@@ -107,28 +107,9 @@ fn save_settings_file(settings: &AppSettings) -> Result<(), AppError> {
     let json = serde_json::to_string_pretty(&normalized)
         .map_err(|e| AppError::JsonSerialize { source: e })?;
 
-    #[cfg(unix)]
-    {
-        use std::fs::OpenOptions;
-        use std::io::Write;
-        use std::os::unix::fs::OpenOptionsExt;
-
-        let mut file = OpenOptions::new()
-            .create(true)
-            .write(true)
-            .truncate(true)
-            .mode(0o600)
-            .open(&path)
-            .map_err(|e| AppError::io(&path, e))?;
-        file.write_all(json.as_bytes())
-            .map_err(|e| AppError::io(&path, e))?;
-        Ok(())
-    }
-
-    #[cfg(not(unix))]
-    {
-        fs::write(&path, json).map_err(|e| AppError::io(&path, e))
-    }
+    // 原子写（临时文件 + rename，Unix 上 0600）：写入中断或失败时
+    // 磁盘上的 settings.json 不会被截断成空/残缺文件。
+    crate::config::atomic_write_private(&path, json.as_bytes())
 }
 
 static SETTINGS_STORE: OnceLock<RwLock<AppSettings>> = OnceLock::new();
@@ -337,5 +318,68 @@ mod tests {
         std::env::remove_var(crate::config::ACM_HOME_ENV);
         // Reset the cached store so later tests load from the real home directory.
         let _ = SETTINGS_STORE.set(RwLock::new(AppSettings::load_from_file()));
+    }
+
+    #[test]
+    #[serial]
+    fn save_settings_is_atomic_and_keeps_file_intact_on_write_failure() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::env::set_var(crate::config::ACM_HOME_ENV, tmp.path().as_os_str());
+        reset_settings_store_for_test();
+
+        // 初始保存成功，settings.json 内容完整
+        update_settings(AppSettings {
+            sync_method: SyncMethod::Copy,
+            ..Default::default()
+        })
+        .unwrap();
+        let path = AppSettings::settings_path();
+        let original = fs::read_to_string(&path).unwrap();
+
+        // 故障注入：hub 目录只读，原子写的临时文件创建必然失败
+        let hub = crate::config::get_hub_dir();
+        let mut permissions = fs::metadata(&hub).unwrap().permissions();
+        permissions.set_readonly(true);
+        fs::set_permissions(&hub, permissions).unwrap();
+
+        let result = update_settings(AppSettings {
+            sync_method: SyncMethod::Symlink,
+            ..Default::default()
+        });
+        assert!(result.is_err(), "unwritable hub dir must fail the save");
+
+        // 磁盘上的 settings.json 未被截断，内容保持完整
+        assert_eq!(fs::read_to_string(&path).unwrap(), original);
+        // 内存中的设置也未变更
+        assert_eq!(get_settings().sync_method, SyncMethod::Copy);
+
+        // 失败路径不留下临时文件
+        let leftovers: Vec<_> = fs::read_dir(&hub)
+            .unwrap()
+            .map(|entry| entry.unwrap())
+            .filter(|entry| entry.file_name().to_string_lossy().contains(".tmp."))
+            .map(|entry| entry.path())
+            .collect();
+        assert!(
+            leftovers.is_empty(),
+            "temporary files remain: {leftovers:?}"
+        );
+
+        // 恢复写权限以便临时目录清理
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut permissions = fs::metadata(&hub).unwrap().permissions();
+            permissions.set_mode(permissions.mode() | 0o200);
+            let _ = fs::set_permissions(&hub, permissions);
+        }
+        #[cfg(not(unix))]
+        {
+            let mut permissions = fs::metadata(&hub).unwrap().permissions();
+            permissions.set_readonly(false);
+            let _ = fs::set_permissions(&hub, permissions);
+        }
+        std::env::remove_var(crate::config::ACM_HOME_ENV);
+        reset_settings_store_for_test();
     }
 }

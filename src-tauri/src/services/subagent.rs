@@ -556,6 +556,8 @@ impl SubagentService {
             }
         }
 
+        // 该 dest_file 仅用于决定是否需要下载；真正落盘的目标路径在写锁内重新解析，
+        // 避免下载期间发生的存储迁移把新 subagent 写入旧根。
         let dest_file = Self::ssot_file_path(&ssot_dir, &install_name);
         let mut repo_branch = subagent.repo_branch.clone();
         let mut downloaded_source: Option<(tempfile::TempDir, PathBuf)> = None;
@@ -606,25 +608,45 @@ impl SubagentService {
             }
         }
 
+        Self::finish_install_under_lock(
+            db,
+            subagent,
+            &install_name,
+            current_app,
+            repo_branch,
+            downloaded_source
+                .as_ref()
+                .map(|(_, source)| source.as_path()),
+        )
+    }
+
+    /// 安装落盘段：持写锁执行。目标 SSOT 路径在锁内重新解析，
+    /// 避免下载期间发生的存储迁移把新 subagent 写入旧根。
+    fn finish_install_under_lock(
+        db: &Arc<Database>,
+        subagent: &DiscoverableSubagent,
+        install_name: &str,
+        current_app: &AgentType,
+        repo_branch: String,
+        downloaded_source: Option<&Path>,
+    ) -> Result<InstalledSubagent, AppError> {
         let _state_guard = subagent_state_write_guard();
         if let Some(existing) =
-            Self::reuse_existing_install(db, subagent, &install_name, current_app)?
+            Self::reuse_existing_install(db, subagent, install_name, current_app)?
         {
             return Ok(existing);
         }
 
+        // 写锁内重新解析目标 SSOT：下载期间存储位置可能已迁移
+        let dest_file = Self::ssot_file_path(&Self::get_ssot_dir()?, install_name);
+
         // 磁盘上已有同名文件但 DB 无记录：未托管内容，拒绝冒名接管
-        Self::ensure_no_unmanaged_destination(&dest_file, &install_name)?;
+        Self::ensure_no_unmanaged_destination(&dest_file, install_name)?;
 
         if !dest_file.exists() {
-            let source_file = downloaded_source
-                .as_ref()
-                .map(|(_, source)| source)
-                .ok_or_else(|| {
-                    AppError::Message(
-                        "Subagent file changed during install; please retry".to_string(),
-                    )
-                })?;
+            let source_file = downloaded_source.ok_or_else(|| {
+                AppError::Message("Subagent file changed during install; please retry".to_string())
+            })?;
             config::copy_file(source_file, &dest_file)?;
         }
 
@@ -650,7 +672,7 @@ impl SubagentService {
             } else {
                 Some(subagent.description.clone())
             },
-            directory: install_name.clone(),
+            directory: install_name.to_string(),
             repo_owner: Some(subagent.repo_owner.clone()),
             repo_name: Some(subagent.repo_name.clone()),
             repo_branch: Some(repo_branch),
@@ -661,7 +683,12 @@ impl SubagentService {
             updated_at: 0,
         };
 
-        Self::persist_and_sync_new_subagent(db, &installed_subagent, current_app)?;
+        Self::persist_and_sync_new_subagent(
+            db,
+            &installed_subagent,
+            current_app,
+            Some(&dest_file),
+        )?;
 
         log::info!(
             "Subagent {} 安装成功，已启用 {}",
@@ -672,12 +699,27 @@ impl SubagentService {
         Ok(installed_subagent)
     }
 
+    /// `fresh_ssot_file` 仅当是本次安装新建的 SSOT 文件时传入：
+    /// 回滚时连同该文件一起删除，避免残留"非受管内容"导致下次安装被拒。
+    /// 接管/复用的既有文件绝不删除。
     fn persist_and_sync_new_subagent(
         db: &Arc<Database>,
         subagent: &InstalledSubagent,
         app: &AgentType,
+        fresh_ssot_file: Option<&Path>,
     ) -> Result<(), AppError> {
-        db.save_subagent(subagent)?;
+        let cleanup_fresh_ssot_file = || {
+            if let Some(file) = fresh_ssot_file {
+                if let Err(e) = fs::remove_file(file) {
+                    log::error!("回滚新建 Subagent SSOT 文件失败 {}: {e}", file.display());
+                }
+            }
+        };
+
+        if let Err(error) = db.save_subagent(subagent) {
+            cleanup_fresh_ssot_file();
+            return Err(error);
+        }
         if let Err(error) = Self::sync_to_app_dir(&subagent.directory, app) {
             if let Err(rollback_error) = db.delete_subagent(&subagent.id) {
                 log::error!(
@@ -685,6 +727,7 @@ impl SubagentService {
                     subagent.id
                 );
             }
+            cleanup_fresh_ssot_file();
             return Err(error);
         }
         Ok(())
@@ -1265,8 +1308,6 @@ impl SubagentService {
             enabled: true,
         };
 
-        let ssot_dir = Self::get_ssot_dir()?;
-
         let client = SkillService.download_client();
         let (temp_guard, used_branch) =
             SkillService::download_repo_with_timeout(&client, &skill_repo).await?;
@@ -1292,31 +1333,54 @@ impl SubagentService {
 
         let remote_file = temp_dir.join(&remote_match.path);
 
+        Self::apply_downloaded_update(
+            db,
+            &subagent,
+            &owner,
+            &name,
+            used_branch,
+            &remote_file,
+            &remote_match.path,
+        )
+    }
+
+    /// 更新落盘段：持写锁执行。目标 SSOT 路径在锁内才解析，
+    /// 避免下载期间发生的存储迁移把新版本写入旧根（而备份/投影解析的是新根）。
+    fn apply_downloaded_update(
+        db: &Arc<Database>,
+        expected: &InstalledSubagent,
+        owner: &str,
+        name: &str,
+        used_branch: String,
+        remote_file: &Path,
+        remote_path: &str,
+    ) -> Result<InstalledSubagent, AppError> {
         let _state_guard = subagent_state_write_guard();
 
-        let current_subagent = db.get_installed_subagent(&subagent.id)?.ok_or_else(|| {
-            AppError::InvalidInput(format!("Subagent no longer installed: {}", subagent.id))
+        let current_subagent = db.get_installed_subagent(&expected.id)?.ok_or_else(|| {
+            AppError::InvalidInput(format!("Subagent no longer installed: {}", expected.id))
         })?;
-        if current_subagent.directory != subagent.directory
-            || current_subagent.repo_owner != subagent.repo_owner
-            || current_subagent.repo_name != subagent.repo_name
-            || current_subagent.repo_branch != subagent.repo_branch
-            || current_subagent.installed_at != subagent.installed_at
+        if current_subagent.directory != expected.directory
+            || current_subagent.repo_owner != expected.repo_owner
+            || current_subagent.repo_name != expected.repo_name
+            || current_subagent.repo_branch != expected.repo_branch
+            || current_subagent.installed_at != expected.installed_at
         {
             return Err(AppError::InvalidInput(format!(
                 "Subagent changed during update: {}",
-                subagent.id
+                expected.id
             )));
         }
         SkillService::require_valid_directory(&current_subagent.directory)?;
         let subagent = current_subagent;
 
-        let dest_file = Self::ssot_file_path(&ssot_dir, &subagent.directory);
+        // 写锁内解析目标 SSOT：下载期间存储位置可能已迁移
+        let dest_file = Self::ssot_file_path(&Self::get_ssot_dir()?, &subagent.directory);
 
         let backup_path = Self::create_uninstall_backup(&subagent)?;
 
         // SSOT 替换失败时必须先从备份恢复，避免 SSOT 文件丢失
-        if let Err(err) = Self::replace_ssot_file(&remote_file, &dest_file) {
+        if let Err(err) = Self::replace_ssot_file(remote_file, &dest_file) {
             Self::restore_ssot_from_backup(backup_path.as_ref(), &dest_file, &subagent.directory);
             return Err(err);
         }
@@ -1337,8 +1401,8 @@ impl SubagentService {
             .readme_url
             .as_deref()
             .and_then(SkillService::extract_doc_path_from_url)
-            .unwrap_or_else(|| remote_match.path.trim_start_matches('/').to_string());
-        let readme_url = SkillService::build_skill_doc_url(&owner, &name, &used_branch, &doc_path);
+            .unwrap_or_else(|| remote_path.trim_start_matches('/').to_string());
+        let readme_url = SkillService::build_skill_doc_url(owner, name, &used_branch, &doc_path);
 
         let updated_metadata = InstalledSubagent {
             id: subagent.id.clone(),
@@ -1410,8 +1474,20 @@ impl SubagentService {
                 continue;
             }
             if fs::rename(&dst, &src).is_err() {
-                let _ = config::copy_file(&dst, &src);
-                let _ = fs::remove_file(&dst);
+                // 跨文件系统回退为复制：只有复制完整成功才删除 dst；
+                // 复制失败（或只拷出部分内容，如旧盘满）时保留 dst——
+                // 它可能是该 subagent 唯一完整副本，并清理复制产生的残缺 src。
+                match config::copy_file(&dst, &src) {
+                    Ok(()) => {
+                        let _ = fs::remove_file(&dst);
+                    }
+                    Err(e) => {
+                        log::error!(
+                            "回滚 Subagent {directory} 失败：复制回源目录出错，保留目标文件以免数据丢失: {e}"
+                        );
+                        let _ = fs::remove_file(&src);
+                    }
+                }
             }
         }
     }
@@ -2504,5 +2580,246 @@ mod tests {
             .join("uninstall-agent.md")
             .exists());
         assert!(db.get_installed_subagent(&subagent.id).unwrap().is_some());
+    }
+
+    #[test]
+    fn rollback_subagent_moves_keeps_dst_when_fallback_copy_fails() {
+        let tmp = tempdir().unwrap();
+
+        // old_root 是一个普通文件：rename 与回退复制都会失败（ENOTDIR），
+        // 模拟跨文件系统回滚时回退复制也失败（如旧盘满）的场景
+        let old_root = tmp.path().join("old-root");
+        fs::write(&old_root, "not a directory").unwrap();
+        let new_root = tmp.path().join("new-root");
+        write_subagent(&new_root, "agent-a.md", "Agent A");
+
+        SubagentService::rollback_subagent_moves(&old_root, &new_root, &["agent-a".to_string()]);
+
+        // 回退复制失败时必须保留 dst：它可能是该 subagent 唯一完整副本
+        assert!(fs::read_to_string(new_root.join("agent-a.md"))
+            .unwrap()
+            .contains("name: Agent A"));
+    }
+
+    #[test]
+    #[serial]
+    fn apply_downloaded_update_lands_in_current_ssot_after_migration_during_download() {
+        let tmp = tempdir().unwrap();
+        let _guard = TestHomeGuard::set(tmp.path());
+        let db = Arc::new(Database::memory().unwrap());
+
+        // 下载开始时存储在 Hub：旧版 subagent 位于 Hub SSOT
+        let hub_ssot = SubagentService::get_ssot_dir().unwrap();
+        write_subagent(&hub_ssot, "upd.md", "Old");
+        let previous = installed_subagent("owner/repo:upd.md", "upd");
+        db.save_subagent(&previous).unwrap();
+
+        // 模拟下载期间完成存储迁移：文件物理移动 + 设置切换
+        let unified_root = config::get_home_dir().join(".agents").join("subagents");
+        fs::create_dir_all(&unified_root).unwrap();
+        fs::rename(hub_ssot.join("upd.md"), unified_root.join("upd.md")).unwrap();
+        crate::settings::set_storage_location(StorageLocation::Unified).unwrap();
+
+        // 模拟已下载完成的新版本源
+        let download = tmp.path().join("download");
+        write_subagent(&download, "upd.md", "New");
+
+        let updated = SubagentService::apply_downloaded_update(
+            &db,
+            &previous,
+            "owner",
+            "repo",
+            "main".to_string(),
+            &download.join("upd.md"),
+            "upd.md",
+        )
+        .expect("update");
+
+        // 新版本落在迁移后的 Unified 根，旧根不被写入新版本
+        assert!(fs::read_to_string(unified_root.join("upd.md"))
+            .unwrap()
+            .contains("name: New"));
+        let old_root_file = hub_ssot.join("upd.md");
+        if old_root_file.exists() {
+            assert!(
+                fs::read_to_string(&old_root_file)
+                    .unwrap()
+                    .contains("name: Old"),
+                "新版本绝不能写入迁移前的旧根"
+            );
+        }
+
+        // 新 hash 落库，且与当前 SSOT 内容一致
+        let stored = db.get_installed_subagent(&previous.id).unwrap().unwrap();
+        assert_eq!(stored.content_hash, updated.content_hash);
+        assert!(stored.content_hash.is_some());
+    }
+
+    #[test]
+    #[serial]
+    fn finish_install_lands_in_current_ssot_after_migration_during_download() {
+        let tmp = tempdir().unwrap();
+        let _guard = TestHomeGuard::set(tmp.path());
+        let db = Arc::new(Database::memory().unwrap());
+
+        // 下载期间存储从 Hub 迁移到 Unified
+        let hub_ssot = SubagentService::get_ssot_dir().unwrap();
+        crate::settings::set_storage_location(StorageLocation::Unified).unwrap();
+
+        let download = tmp.path().join("download");
+        write_subagent(&download, "new-agent.md", "New Agent");
+
+        let subagent = discoverable("owner/repo:new-agent.md", "new-agent", "new-agent.md");
+
+        let installed = SubagentService::finish_install_under_lock(
+            &db,
+            &subagent,
+            "new-agent",
+            &AgentType::ClaudeCode,
+            "main".to_string(),
+            Some(&download.join("new-agent.md")),
+        )
+        .expect("install");
+
+        // 新版本落在迁移后的 Unified 根，旧根不被写入
+        let unified = config::get_home_dir()
+            .join(".agents")
+            .join("subagents")
+            .join("new-agent.md");
+        assert!(unified.exists());
+        assert!(!hub_ssot.join("new-agent.md").exists());
+
+        assert!(db.get_installed_subagent(&installed.id).unwrap().is_some());
+        assert!(config::get_claude_agents_dir()
+            .join("new-agent.md")
+            .exists());
+    }
+
+    /// 把 claude agents 目录换成只读目录，使投影同步必然失败；返回需恢复权限的目录。
+    fn make_readonly_claude_agents_dir(tmp: &Path) -> (PathBuf, PathBuf) {
+        let read_only_root = tmp.join("readonly-claude");
+        let agents_dir = read_only_root.join("agents");
+        fs::create_dir_all(&agents_dir).unwrap();
+        for dir in [&read_only_root, &agents_dir] {
+            let mut permissions = std::fs::metadata(dir).unwrap().permissions();
+            permissions.set_readonly(true);
+            fs::set_permissions(dir, permissions).unwrap();
+        }
+        crate::settings::update_settings(crate::settings::AppSettings {
+            claude_code_config_dir: Some(read_only_root.to_string_lossy().to_string()),
+            ..Default::default()
+        })
+        .unwrap();
+        (read_only_root, agents_dir)
+    }
+
+    fn restore_writable(dirs: [&Path; 2]) {
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            for dir in dirs {
+                let mut permissions = std::fs::metadata(dir).unwrap().permissions();
+                permissions.set_mode(permissions.mode() | 0o200);
+                let _ = fs::set_permissions(dir, permissions);
+            }
+        }
+        crate::settings::reset_settings_store_for_test();
+    }
+
+    #[test]
+    #[serial]
+    fn persist_and_sync_new_subagent_removes_fresh_ssot_file_on_save_failure() {
+        let tmp = tempdir().unwrap();
+        let _guard = TestHomeGuard::set(tmp.path());
+        let db = Arc::new(Database::memory().unwrap());
+
+        let dest = write_subagent(
+            &SubagentService::get_ssot_dir().unwrap(),
+            "doomed.md",
+            "Doomed",
+        );
+
+        let mut subagent = installed_subagent("owner/repo:doomed.md", "doomed");
+        subagent.apps = SubagentApps::only(&AgentType::ClaudeCode);
+
+        // 故障注入：DB 只读，保存必然失败
+        {
+            let conn = db.conn.lock().expect("lock conn");
+            conn.execute("PRAGMA query_only = ON;", [])
+                .expect("enable query_only");
+        }
+
+        let result = SubagentService::persist_and_sync_new_subagent(
+            &db,
+            &subagent,
+            &AgentType::ClaudeCode,
+            Some(&dest),
+        );
+        assert!(result.is_err(), "保存失败必须返回错误");
+        assert!(!dest.exists(), "保存失败时本次新建的 SSOT 文件必须一并删除");
+        assert!(db.get_installed_subagent(&subagent.id).unwrap().is_none());
+    }
+
+    #[test]
+    #[serial]
+    fn persist_and_sync_new_subagent_removes_fresh_ssot_file_on_sync_failure() {
+        let tmp = tempdir().unwrap();
+        let _guard = TestHomeGuard::set(tmp.path());
+        let db = Arc::new(Database::memory().unwrap());
+        crate::settings::set_sync_method(SyncMethod::Copy).unwrap();
+
+        let dest = write_subagent(
+            &SubagentService::get_ssot_dir().unwrap(),
+            "sync-fail.md",
+            "SyncFail",
+        );
+        let (read_only_root, agents_dir) = make_readonly_claude_agents_dir(tmp.path());
+
+        let mut subagent = installed_subagent("owner/repo:sync-fail.md", "sync-fail");
+        subagent.apps = SubagentApps::only(&AgentType::ClaudeCode);
+
+        let result = SubagentService::persist_and_sync_new_subagent(
+            &db,
+            &subagent,
+            &AgentType::ClaudeCode,
+            Some(&dest),
+        );
+        assert!(result.is_err(), "同步失败必须返回错误");
+        assert!(!dest.exists(), "同步失败时本次新建的 SSOT 文件必须一并删除");
+        assert!(db.get_installed_subagent(&subagent.id).unwrap().is_none());
+
+        restore_writable([&read_only_root, &agents_dir]);
+    }
+
+    #[test]
+    #[serial]
+    fn persist_and_sync_new_subagent_preserves_adopted_file_on_sync_failure() {
+        let tmp = tempdir().unwrap();
+        let _guard = TestHomeGuard::set(tmp.path());
+        let db = Arc::new(Database::memory().unwrap());
+        crate::settings::set_sync_method(SyncMethod::Copy).unwrap();
+
+        let dest = write_subagent(
+            &SubagentService::get_ssot_dir().unwrap(),
+            "adopted.md",
+            "Adopted",
+        );
+        let (read_only_root, agents_dir) = make_readonly_claude_agents_dir(tmp.path());
+
+        let mut subagent = installed_subagent("owner/repo:adopted.md", "adopted");
+        subagent.apps = SubagentApps::only(&AgentType::ClaudeCode);
+
+        // fresh_ssot_file 为 None：文件是接管/既有的，回滚时绝不能删除
+        let result = SubagentService::persist_and_sync_new_subagent(
+            &db,
+            &subagent,
+            &AgentType::ClaudeCode,
+            None,
+        );
+        assert!(result.is_err(), "同步失败必须返回错误");
+        assert!(dest.exists(), "接管/既有的 SSOT 文件绝不能被回滚删除");
+        assert!(db.get_installed_subagent(&subagent.id).unwrap().is_none());
+
+        restore_writable([&read_only_root, &agents_dir]);
     }
 }
