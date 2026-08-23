@@ -5,7 +5,9 @@ use std::sync::Arc;
 use crate::config;
 use crate::database::Database;
 use crate::error::{format_skill_error, is_structured_error_payload, AppError};
-use crate::services::prompt::{prompt_file_path, prompt_state_write_guard};
+use crate::services::prompt::{
+    prompt_file_path, prompt_state_write_guard, save_live_backup_prompt,
+};
 use crate::services::skill::{skill_state_write_guard, AgentType, SkillService};
 use crate::services::subagent::{subagent_state_write_guard, SubagentService};
 use crate::settings::{
@@ -386,14 +388,16 @@ pub(crate) fn set_agent_override_dir_inner(
     let mut persisted = false;
     let mut new_live_written = false;
     let mut removed_old_live: Option<String> = None;
-    // 新目录已有用户 live 文件时的备份（None 表示原本不存在）
+    // 新目录已有用户 live 文件时的备份（None 表示原本不存在）；失败回滚时
+    // 用于恢复磁盘内容，成功提交时转存为禁用的备份预设
     let mut new_live_backup: Option<String> = None;
 
     let mut commit = || -> Result<(), AppError> {
         // 搬迁启用中指令的 live 文件
         if let Some(prompt) = &enabled_prompt {
             if new_live_file != old_live_file {
-                // 目标已存在用户自己的 live 文件时先备份内容，供失败回滚恢复
+                // 目标已存在用户自己的 live 文件时先备份内容：失败回滚用于恢复，
+                // 成功提交后转存为禁用备份预设
                 if new_live_backup.is_none() && new_live_file.exists() {
                     new_live_backup = Some(
                         std::fs::read_to_string(&new_live_file)
@@ -435,6 +439,13 @@ pub(crate) fn set_agent_override_dir_inner(
             if subagent.apps.is_enabled_for(&agent) {
                 SubagentService::sync_to_app_dir(&subagent.directory, &agent)?;
             }
+        }
+
+        // 被启用预设覆盖的用户原有 live 内容持久化为禁用备份预设
+        // （幂等：内容为空或已存在相同内容的预设时跳过）。失败会走整体回滚，
+        // 用户内容仍由 new_live_backup 恢复到磁盘。
+        if let Some(content) = &new_live_backup {
+            save_live_backup_prompt(db, &agent, content)?;
         }
 
         Ok(())
@@ -1109,5 +1120,107 @@ mod tests {
             permissions.set_mode(permissions.mode() | 0o200);
             let _ = fs::set_permissions(&old_agents_dir, permissions);
         }
+    }
+
+    #[test]
+    #[serial]
+    fn set_agent_override_dir_backs_up_overwritten_live_as_disabled_preset() {
+        let tmp = tempdir().unwrap();
+        let _guard = TestHomeGuard::set(tmp.path());
+        let db = Arc::new(Database::memory().unwrap());
+
+        // 启用一个 claude 指令预设，旧 live 与启用预设内容一致
+        let prompt = crate::services::prompt::Prompt {
+            id: "p1".to_string(),
+            name: "P1".to_string(),
+            content: "enabled instructions".to_string(),
+            description: None,
+            enabled: true,
+            created_at: Some(1),
+            updated_at: Some(1),
+        };
+        db.save_prompt("claude-code", &prompt).unwrap();
+        let old_live = config::get_claude_prompt_file();
+        config::write_text_file(&old_live, "enabled instructions").unwrap();
+
+        // 新目录预置用户自己的 live 文件
+        let custom_dir = tmp.path().join("custom-claude");
+        fs::create_dir_all(&custom_dir).unwrap();
+        let new_live = custom_dir.join("CLAUDE.md");
+        fs::write(&new_live, "user's own instructions").unwrap();
+
+        set_agent_override_dir_inner(
+            "claude-code",
+            Some(custom_dir.to_string_lossy().to_string()),
+            &db,
+        )
+        .expect("set override");
+
+        // 新 live 是启用预设内容
+        assert_eq!(
+            fs::read_to_string(&new_live).unwrap(),
+            "enabled instructions"
+        );
+
+        // 被覆盖的用户内容保存为一个禁用的备份预设
+        let prompts = db.get_prompts("claude-code").unwrap();
+        let backups: Vec<_> = prompts
+            .values()
+            .filter(|p| p.id.starts_with("backup-"))
+            .collect();
+        assert_eq!(backups.len(), 1);
+        assert_eq!(backups[0].content, "user's own instructions");
+        assert!(!backups[0].enabled);
+        // 启用预设不受影响
+        assert!(prompts["p1"].enabled);
+    }
+
+    #[test]
+    #[serial]
+    fn set_agent_override_dir_skips_backup_when_content_already_exists() {
+        let tmp = tempdir().unwrap();
+        let _guard = TestHomeGuard::set(tmp.path());
+        let db = Arc::new(Database::memory().unwrap());
+
+        // 启用预设 + 一个内容与新目录 live 相同的既有预设（去重对象）
+        let prompt = crate::services::prompt::Prompt {
+            id: "p1".to_string(),
+            name: "P1".to_string(),
+            content: "enabled instructions".to_string(),
+            description: None,
+            enabled: true,
+            created_at: Some(1),
+            updated_at: Some(1),
+        };
+        db.save_prompt("claude-code", &prompt).unwrap();
+        let existing = crate::services::prompt::Prompt {
+            id: "existing".to_string(),
+            name: "Existing".to_string(),
+            content: "user's own instructions".to_string(),
+            description: None,
+            enabled: false,
+            created_at: Some(1),
+            updated_at: Some(1),
+        };
+        db.save_prompt("claude-code", &existing).unwrap();
+        let old_live = config::get_claude_prompt_file();
+        config::write_text_file(&old_live, "enabled instructions").unwrap();
+
+        // 新目录预置的用户 live 内容与既有预设一致
+        let custom_dir = tmp.path().join("custom-claude");
+        fs::create_dir_all(&custom_dir).unwrap();
+        fs::write(custom_dir.join("CLAUDE.md"), "user's own instructions").unwrap();
+
+        set_agent_override_dir_inner(
+            "claude-code",
+            Some(custom_dir.to_string_lossy().to_string()),
+            &db,
+        )
+        .expect("set override");
+
+        // 不新增备份预设：预设总数不变，且没有任何 backup-* 预设
+        let prompts = db.get_prompts("claude-code").unwrap();
+        assert_eq!(prompts.len(), 2);
+        assert!(!prompts.keys().any(|id| id.starts_with("backup-")));
     }
 }

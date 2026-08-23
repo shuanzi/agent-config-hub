@@ -7,7 +7,7 @@ export type SubagentCardSubagent = DiscoverableSubagent & { installed?: boolean 
 interface SubagentCardProps {
   subagent: SubagentCardSubagent;
   onInstall: (key: string) => Promise<void>;
-  onUninstall: (key: string) => Promise<void>;
+  onUninstall: (key: string) => void;
 }
 
 export function SubagentCard({ subagent, onInstall, onUninstall }: SubagentCardProps) {
@@ -17,15 +17,6 @@ export function SubagentCard({ subagent, onInstall, onUninstall }: SubagentCardP
     setLoading(true);
     try {
       await onInstall(subagent.key);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleUninstall = async () => {
-    setLoading(true);
-    try {
-      await onUninstall(subagent.key);
     } finally {
       setLoading(false);
     }
@@ -71,9 +62,14 @@ export function SubagentCard({ subagent, onInstall, onUninstall }: SubagentCardP
           <span className="skill-card-badge">README</span>
         )}
         {subagent.installed ? (
-          <button type="button" className="uninstall" onClick={handleUninstall} disabled={loading}>
-            {loading ? <Loader2 size={14} className="spin" /> : <Trash2 size={14} />}
-            {loading ? '卸载中…' : '卸载'}
+          <button
+            type="button"
+            className="uninstall"
+            onClick={() => onUninstall(subagent.key)}
+            disabled={loading}
+          >
+            <Trash2 size={14} />
+            卸载
           </button>
         ) : (
           <button type="button" className="install" onClick={handleInstall} disabled={loading}>

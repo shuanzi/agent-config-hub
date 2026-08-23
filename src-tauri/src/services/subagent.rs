@@ -285,8 +285,10 @@ impl SubagentService {
                 if existing.id == subagent.key {
                     let mut updated = existing.clone();
                     updated.apps.set_enabled_for(current_app, true);
-                    db.save_subagent(&updated)?;
+                    // 先同步投影成功再落库：同步失败时 DB 保持原启用标志，
+                    // 避免出现"已启用但无可用投影"的中间状态
                     Self::sync_to_app_dir(&updated.directory, current_app)?;
+                    db.save_subagent(&updated)?;
                     log::info!(
                         "Subagent {} 已存在，更新 {} 启用状态",
                         updated.name,
@@ -1002,7 +1004,8 @@ impl SubagentService {
         let ssot_dir = Self::get_ssot_dir()?;
 
         let mut projection_failures: Vec<AgentType> = Vec::new();
-        for app in AgentType::all() {
+        // 只清理实际启用的 Agent 投影：未启用 Agent 下的同名路径可能是用户自有内容
+        for app in subagent.apps.enabled_apps() {
             if let Err(e) = Self::remove_from_app(&directory, &app) {
                 log::warn!(
                     "移除 Subagent {} 在 {} 上的投影失败: {e}",
@@ -2213,6 +2216,115 @@ mod tests {
         .expect("returns existing");
         assert!(updated.apps.claude_code);
         assert!(updated.apps.codex);
+    }
+
+    #[test]
+    #[serial]
+    fn reuse_existing_install_sync_failure_keeps_db_flags() {
+        let tmp = tempdir().unwrap();
+        let _guard = TestHomeGuard::set(tmp.path());
+
+        let db = Arc::new(Database::memory().unwrap());
+        write_subagent(
+            &SubagentService::get_ssot_dir().unwrap(),
+            "review.md",
+            "Review",
+        );
+
+        let existing = InstalledSubagent {
+            id: "owner/repo:review.md".to_string(),
+            name: "Existing".to_string(),
+            description: None,
+            directory: "review".to_string(),
+            repo_owner: Some("owner".to_string()),
+            repo_name: Some("repo".to_string()),
+            repo_branch: Some("main".to_string()),
+            readme_url: None,
+            apps: SubagentApps::only(&AgentType::ClaudeCode),
+            installed_at: 1,
+            content_hash: None,
+            updated_at: 0,
+        };
+        db.save_subagent(&existing).unwrap();
+
+        // 故障注入：codex 的 subagents 目录路径被普通文件占用，投影同步必然失败
+        let codex_dir = config::get_codex_agents_dir();
+        fs::create_dir_all(codex_dir.parent().unwrap()).unwrap();
+        fs::write(&codex_dir, "blocked").unwrap();
+
+        let discoverable = DiscoverableSubagent {
+            key: "owner/repo:review.md".to_string(),
+            name: "Existing".to_string(),
+            description: "".to_string(),
+            directory: "review".to_string(),
+            path: "review.md".to_string(),
+            readme_url: None,
+            repo_owner: "owner".to_string(),
+            repo_name: "repo".to_string(),
+            repo_branch: "main".to_string(),
+        };
+
+        SubagentService::reuse_existing_install(&db, &discoverable, "review", &AgentType::Codex)
+            .expect_err("sync failure must surface as an error");
+
+        let stored = db.get_installed_subagent(&existing.id).unwrap().unwrap();
+        assert!(stored.apps.claude_code);
+        assert!(
+            !stored.apps.codex,
+            "同步失败时 codex 的启用标志不得提前落库"
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn uninstall_removes_only_enabled_app_projections() {
+        let tmp = tempdir().unwrap();
+        let _guard = TestHomeGuard::set(tmp.path());
+
+        let db = Arc::new(Database::memory().unwrap());
+        write_subagent(
+            &SubagentService::get_ssot_dir().unwrap(),
+            "scoped-agent.md",
+            "Scoped",
+        );
+
+        let subagent = InstalledSubagent {
+            id: "owner/repo:scoped-agent.md".to_string(),
+            name: "Scoped".to_string(),
+            description: None,
+            directory: "scoped-agent".to_string(),
+            repo_owner: Some("owner".to_string()),
+            repo_name: Some("repo".to_string()),
+            repo_branch: Some("main".to_string()),
+            readme_url: None,
+            apps: SubagentApps::only(&AgentType::ClaudeCode),
+            installed_at: 1,
+            content_hash: None,
+            updated_at: 0,
+        };
+        db.save_subagent(&subagent).unwrap();
+        SubagentService::sync_to_app_dir("scoped-agent", &AgentType::ClaudeCode).unwrap();
+
+        // Codex 下同名的"用户自有"文件，与受管投影无关
+        let codex_owned = config::get_codex_agents_dir().join("scoped-agent.md");
+        fs::create_dir_all(config::get_codex_agents_dir()).unwrap();
+        fs::write(&codex_owned, "user-owned content").unwrap();
+
+        SubagentService::uninstall(&db, &subagent.id).expect("uninstall");
+
+        assert_eq!(
+            fs::read_to_string(&codex_owned).unwrap(),
+            "user-owned content",
+            "卸载不得触碰未启用 Agent 下的同名用户内容"
+        );
+        assert!(!config::get_claude_agents_dir()
+            .join("scoped-agent.md")
+            .exists());
+        assert!(!SubagentService::get_ssot_dir()
+            .unwrap()
+            .join("scoped-agent.md")
+            .exists());
+        assert!(db.get_installed_subagent(&subagent.id).unwrap().is_none());
     }
 
     #[test]

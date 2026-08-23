@@ -7,7 +7,7 @@ export type SkillCardSkill = DiscoverableSkill & { installed?: boolean };
 interface SkillCardProps {
   skill: SkillCardSkill;
   onInstall: (key: string) => Promise<void>;
-  onUninstall: (key: string) => Promise<void>;
+  onUninstall: (key: string) => void;
 }
 
 export function SkillCard({ skill, onInstall, onUninstall }: SkillCardProps) {
@@ -17,15 +17,6 @@ export function SkillCard({ skill, onInstall, onUninstall }: SkillCardProps) {
     setLoading(true);
     try {
       await onInstall(skill.key);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleUninstall = async () => {
-    setLoading(true);
-    try {
-      await onUninstall(skill.key);
     } finally {
       setLoading(false);
     }
@@ -71,9 +62,14 @@ export function SkillCard({ skill, onInstall, onUninstall }: SkillCardProps) {
           <span className="skill-card-badge">README</span>
         )}
         {skill.installed ? (
-          <button type="button" className="uninstall" onClick={handleUninstall} disabled={loading}>
-            {loading ? <Loader2 size={14} className="spin" /> : <Trash2 size={14} />}
-            {loading ? '卸载中…' : '卸载'}
+          <button
+            type="button"
+            className="uninstall"
+            onClick={() => onUninstall(skill.key)}
+            disabled={loading}
+          >
+            <Trash2 size={14} />
+            卸载
           </button>
         ) : (
           <button type="button" className="install" onClick={handleInstall} disabled={loading}>

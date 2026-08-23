@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, cleanup, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, cleanup, waitFor, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
 import type { DiscoverableSubagent, InstalledSubagent } from '../../../src/types';
@@ -67,13 +67,49 @@ describe('SubagentsDiscoveryPage 卸载已安装 Subagent', () => {
     cleanup();
   });
 
-  it('点击卸载会调用卸载接口并更新安装态', async () => {
+  it('点击卸载先弹出确认对话框，不调用卸载接口，安装态不变', async () => {
+    mockApi.getInstalledSubagents.mockResolvedValue([installed]);
+    const Page = await loadPage();
+    render(<Page activeApp="claude-code" />, { wrapper: createWrapper(queryClient) });
+
+    const uninstallButton = await screen.findByRole('button', { name: '卸载' });
+    fireEvent.click(uninstallButton);
+
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByText(/确定要卸载 Reviewer/)).toBeTruthy();
+    expect(mockApi.uninstallSubagent).not.toHaveBeenCalled();
+    // 安装态不变：卡片仍显示卸载按钮
+    expect(screen.getAllByRole('button', { name: '卸载' }).length).toBeGreaterThan(0);
+    expect(screen.queryByRole('button', { name: '安装' })).toBeNull();
+  });
+
+  it('取消确认后不调用卸载接口且安装态不变', async () => {
+    mockApi.getInstalledSubagents.mockResolvedValue([installed]);
+    const Page = await loadPage();
+    render(<Page activeApp="claude-code" />, { wrapper: createWrapper(queryClient) });
+
+    const uninstallButton = await screen.findByRole('button', { name: '卸载' });
+    fireEvent.click(uninstallButton);
+
+    const dialog = await screen.findByRole('dialog');
+    fireEvent.click(within(dialog).getByRole('button', { name: '取消' }));
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(mockApi.uninstallSubagent).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: '卸载' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: '安装' })).toBeNull();
+  });
+
+  it('确认卸载后调用卸载接口并更新安装态', async () => {
     mockApi.getInstalledSubagents.mockResolvedValueOnce([installed]).mockResolvedValue([]);
     const Page = await loadPage();
     render(<Page activeApp="claude-code" />, { wrapper: createWrapper(queryClient) });
 
     const uninstallButton = await screen.findByRole('button', { name: '卸载' });
     fireEvent.click(uninstallButton);
+
+    const dialog = await screen.findByRole('dialog');
+    fireEvent.click(within(dialog).getByRole('button', { name: '卸载' }));
 
     await waitFor(() => expect(mockApi.uninstallSubagent).toHaveBeenCalledTimes(1));
     expect(mockApi.uninstallSubagent.mock.calls[0][0]).toBe('a/b:reviewer.md');
@@ -92,6 +128,9 @@ describe('SubagentsDiscoveryPage 卸载已安装 Subagent', () => {
 
     const uninstallButton = await screen.findByRole('button', { name: '卸载' });
     fireEvent.click(uninstallButton);
+
+    const dialog = await screen.findByRole('dialog');
+    fireEvent.click(within(dialog).getByRole('button', { name: '卸载' }));
 
     await waitFor(() => expect(mockApi.uninstallSubagent).toHaveBeenCalledTimes(1));
     expect(mockApi.uninstallSubagent.mock.calls[0][0]).toBe('a/b:reviewer.md');

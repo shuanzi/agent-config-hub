@@ -24,6 +24,7 @@ export function SkillsDiscoveryPage({ activeApp }: SkillsDiscoveryPageProps) {
   const [filterStatus, setFilterStatus] = useState<StatusFilter>('all');
   const [repoManagerOpen, setRepoManagerOpen] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string>('');
+  const [uninstallTarget, setUninstallTarget] = useState<SkillItem | null>(null);
 
   const {
     data: discoverableSkills,
@@ -104,9 +105,17 @@ export function SkillsDiscoveryPage({ activeApp }: SkillsDiscoveryPageProps) {
     }
   };
 
-  const handleUninstall = async (key: string) => {
+  const handleUninstall = (key: string) => {
     const skill = skills.find((s) => s.key === key);
     if (skill === undefined || skill.installedId === null) return;
+    setErrorMessage('');
+    setUninstallTarget(skill);
+  };
+
+  const handleConfirmUninstall = async () => {
+    const skill = uninstallTarget;
+    if (skill === null || skill.installedId === null) return;
+    setUninstallTarget(null);
     setErrorMessage('');
     try {
       await uninstallMutation.mutateAsync(skill.installedId);
@@ -226,6 +235,35 @@ export function SkillsDiscoveryPage({ activeApp }: SkillsDiscoveryPageProps) {
           onRemove={handleRemoveRepo}
           onClose={() => setRepoManagerOpen(false)}
         />
+      )}
+
+      {uninstallTarget !== null && (
+        <div className="skill-dialog-overlay" onClick={() => setUninstallTarget(null)}>
+          <div
+            className="skill-dialog"
+            onClick={(event) => event.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="uninstall-confirm-title"
+          >
+            <div className="skill-dialog-header">
+              <h3 id="uninstall-confirm-title">确认卸载</h3>
+            </div>
+            <div className="skill-dialog-body">
+              <p style={{ fontSize: 13 }}>
+                确定要卸载 {uninstallTarget.name} 吗？该 Skill 将从所有应用移除。
+              </p>
+            </div>
+            <div className="skill-dialog-footer">
+              <button type="button" onClick={() => setUninstallTarget(null)}>
+                取消
+              </button>
+              <button type="button" className="uninstall" onClick={handleConfirmUninstall}>
+                卸载
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </section>
   );
