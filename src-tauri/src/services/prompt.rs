@@ -5,6 +5,7 @@
 //! 已裁剪：仅支持 claude-code / codex / gemini-cli / opencode。
 
 use std::path::PathBuf;
+use std::sync::{OnceLock, RwLock, RwLockWriteGuard};
 
 use serde::{Deserialize, Serialize};
 
@@ -13,6 +14,18 @@ use crate::error::AppError;
 use crate::services::skill::AgentType;
 use crate::AppState;
 use indexmap::IndexMap;
+
+fn prompt_state_lock() -> &'static RwLock<()> {
+    static LOCK: OnceLock<RwLock<()>> = OnceLock::new();
+    LOCK.get_or_init(|| RwLock::new(()))
+}
+
+fn prompt_state_write_guard() -> RwLockWriteGuard<'static, ()> {
+    prompt_state_lock().write().unwrap_or_else(|poisoned| {
+        log::warn!("Prompt state write lock was poisoned; recovering the protected state");
+        poisoned.into_inner()
+    })
+}
 
 /// 单一指令预设。
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -71,12 +84,33 @@ impl PromptService {
             ));
         }
 
+        let _state_guard = prompt_state_write_guard();
         let is_enabled = prompt.enabled;
-        state.db.save_prompt(app.as_str(), &prompt)?;
 
         if is_enabled {
             let target_path = prompt_file_path(&app);
+            let previous_content = if target_path.exists() {
+                std::fs::read_to_string(&target_path).ok()
+            } else {
+                None
+            };
+
             config::write_text_file(&target_path, &prompt.content)?;
+
+            if let Err(e) = state.db.save_prompt(app.as_str(), &prompt) {
+                // 最佳努力恢复之前的 live 文件内容
+                match previous_content {
+                    Some(content) => {
+                        let _ = config::write_text_file(&target_path, &content);
+                    }
+                    None => {
+                        let _ = std::fs::remove_file(&target_path);
+                    }
+                }
+                return Err(e);
+            }
+        } else {
+            state.db.save_prompt(app.as_str(), &prompt)?;
         }
 
         Ok(())
@@ -84,6 +118,7 @@ impl PromptService {
 
     /// 删除指令预设。已启用的预设不可删除。
     pub fn delete_prompt(state: &AppState, app: AgentType, id: &str) -> Result<(), AppError> {
+        let _state_guard = prompt_state_write_guard();
         let prompts = Self::get_prompts(state, app)?;
         if let Some(prompt) = prompts.get(id) {
             if prompt.enabled {
@@ -99,6 +134,7 @@ impl PromptService {
 
     /// 启用指定预设：先备份 live 文件内容，再互斥启用并原子写入。
     pub fn enable_prompt(state: &AppState, app: AgentType, id: &str) -> Result<(), AppError> {
+        let _state_guard = prompt_state_write_guard();
         let target_path = prompt_file_path(&app);
 
         // 1. 备份当前 live 文件内容（若与已启用预设不同）。
@@ -386,6 +422,28 @@ mod tests {
 
         let result = PromptService::delete_prompt(&state, AgentType::OpenCode, "enabled");
         assert!(result.is_err());
+
+        std::env::remove_var(config::ACM_HOME_ENV);
+    }
+
+    #[test]
+    #[serial]
+    fn upsert_enabled_prompt_writes_live_file_then_db() {
+        let _tmp = setup_temp_home();
+        let state = state();
+
+        let preset = prompt("live", "live body", true);
+        PromptService::upsert_prompt(&state, AgentType::Codex, "live", preset).expect("upsert");
+
+        let live_path = prompt_file_path(&AgentType::Codex);
+        assert_eq!(
+            std::fs::read_to_string(&live_path).expect("read live"),
+            "live body"
+        );
+
+        let prompts = PromptService::get_prompts(&state, AgentType::Codex).expect("get prompts");
+        assert!(prompts["live"].enabled);
+        assert_eq!(prompts["live"].content, "live body");
 
         std::env::remove_var(config::ACM_HOME_ENV);
     }

@@ -337,6 +337,26 @@ impl Default for SkillService {
     }
 }
 
+pub(crate) struct SkillMigrationOutcome {
+    pub result: MigrationResult,
+    pub moved: Vec<String>,
+}
+
+pub(crate) struct SkillMigrationFailure {
+    pub moved: Vec<String>,
+    pub failures: Vec<String>,
+}
+
+impl SkillMigrationFailure {
+    pub(crate) fn into_error(self) -> AppError {
+        AppError::Message(format_skill_error(
+            "MIGRATION_ABORTED",
+            &[("failures", &self.failures.join("; "))],
+            Some("checkPermission"),
+        ))
+    }
+}
+
 impl SkillService {
     pub fn new() -> Self {
         Self
@@ -725,8 +745,30 @@ impl SkillService {
 
         let ssot_dir = Self::get_ssot_dir()?;
 
+        let mut projection_failures: Vec<AgentType> = Vec::new();
         for app in AgentType::all() {
-            let _ = Self::remove_from_app(&directory, &app);
+            if let Err(e) = Self::remove_from_app(&directory, &app) {
+                log::warn!(
+                    "移除 Skill {} 在 {} 上的投影失败: {e}",
+                    skill.name,
+                    app.as_str()
+                );
+                projection_failures.push(app);
+            }
+        }
+        if !projection_failures.is_empty() {
+            return Err(AppError::Message(format_skill_error(
+                "UNINSTALL_PROJECTION_FAILED",
+                &[(
+                    "apps",
+                    &projection_failures
+                        .iter()
+                        .map(|a| a.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                )],
+                Some("checkPermission"),
+            )));
         }
 
         let backup_path =
@@ -1040,7 +1082,7 @@ impl SkillService {
 
         let dest = ssot_dir.join(&skill.directory);
 
-        let _ = Self::create_uninstall_backup(&skill);
+        let backup_path = Self::create_uninstall_backup(&skill)?;
 
         if dest.exists() {
             fs::remove_dir_all(&dest).map_err(|e| AppError::io(&dest, e))?;
@@ -1075,10 +1117,42 @@ impl SkillService {
 
         let updated_skill = Self::persist_updated_skill_metadata(db, &updated_metadata)?;
 
+        let mut sync_failures: Vec<AgentType> = Vec::new();
         for app in updated_skill.apps.enabled_apps() {
             if let Err(e) = Self::sync_to_app_dir(&updated_skill.directory, &app) {
                 log::warn!("同步更新后的 skill 到 {} 失败: {e}", app.as_str());
+                sync_failures.push(app);
             }
+        }
+
+        if !sync_failures.is_empty() {
+            // 最佳努力回滚：从备份恢复 SSOT，还原数据库记录，重新同步
+            if let Some(ref backup) = backup_path {
+                let backup_skill_dir = backup.join("skill");
+                if backup_skill_dir.exists() {
+                    if dest.exists() {
+                        let _ = fs::remove_dir_all(&dest);
+                    }
+                    let _ = Self::copy_dir_recursive(&backup_skill_dir, &dest);
+                }
+            }
+            let _ = db.save_skill(&skill);
+            for app in skill.apps.enabled_apps() {
+                let _ = Self::sync_to_app_dir(&skill.directory, &app);
+            }
+
+            return Err(AppError::Message(format_skill_error(
+                "UPDATE_SYNC_FAILED",
+                &[(
+                    "apps",
+                    &sync_failures
+                        .iter()
+                        .map(|a| a.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                )],
+                Some("checkPermission"),
+            )));
         }
 
         log::info!("Skill {} 更新成功", updated_skill.name);
@@ -1122,6 +1196,113 @@ impl SkillService {
 
     // ========== Storage migration ==========
 
+    pub(crate) fn rollback_skill_moves(old_dir: &Path, new_dir: &Path, moved: &[String]) {
+        for directory in moved {
+            let dst = new_dir.join(directory);
+            let src = old_dir.join(directory);
+            if !dst.exists() {
+                continue;
+            }
+            if src.exists() {
+                log::warn!("无法将 {directory} 回滚：源目录和目标目录均已存在");
+                continue;
+            }
+            if fs::rename(&dst, &src).is_err() {
+                let _ = Self::copy_dir_recursive(&dst, &src);
+                let _ = fs::remove_dir_all(&dst);
+            }
+        }
+    }
+
+    /// 执行实际的文件移动，不持久化设置、不刷新投影。
+    pub(crate) fn migrate_storage_inner(
+        db: &Arc<Database>,
+        target: StorageLocation,
+    ) -> Result<SkillMigrationOutcome, SkillMigrationFailure> {
+        let old_dir = Self::get_ssot_dir().map_err(|e| SkillMigrationFailure {
+            moved: vec![],
+            failures: vec![e.to_string()],
+        })?;
+        let new_dir = match target {
+            StorageLocation::Hub => config::get_hub_skills_dir(),
+            StorageLocation::Unified => config::get_home_dir().join(".agents").join("skills"),
+        };
+        if let Err(e) = fs::create_dir_all(&new_dir) {
+            return Err(SkillMigrationFailure {
+                moved: vec![],
+                failures: vec![e.to_string()],
+            });
+        }
+        if let Err(e) = Self::validate_skill_storage_destination(&new_dir) {
+            return Err(SkillMigrationFailure {
+                moved: vec![],
+                failures: vec![e.to_string()],
+            });
+        }
+
+        let skills = match db.get_all_installed_skills() {
+            Ok(skills) => skills,
+            Err(e) => {
+                return Err(SkillMigrationFailure {
+                    moved: vec![],
+                    failures: vec![e.to_string()],
+                });
+            }
+        };
+
+        let mut result = MigrationResult {
+            migrated_count: 0,
+            skipped_count: 0,
+            errors: vec![],
+        };
+        let mut moved = Vec::new();
+        let mut failures = Vec::new();
+
+        for skill in skills.values() {
+            let directory = match Self::require_valid_directory(&skill.directory) {
+                Ok(directory) => directory,
+                Err(err) => {
+                    failures.push(format!("{}: {err}", skill.directory.escape_debug()));
+                    continue;
+                }
+            };
+            let src = old_dir.join(&directory);
+            let dst = new_dir.join(&directory);
+
+            if !src.exists() {
+                result.skipped_count += 1;
+                continue;
+            }
+            if dst.exists() {
+                failures.push(format!("{}: 目标位置已存在", skill.directory));
+                continue;
+            }
+
+            match fs::rename(&src, &dst) {
+                Ok(()) => {
+                    result.migrated_count += 1;
+                    moved.push(directory);
+                }
+                Err(_) => match Self::copy_dir_recursive(&src, &dst) {
+                    Ok(()) => {
+                        let _ = fs::remove_dir_all(&src);
+                        result.migrated_count += 1;
+                        moved.push(directory);
+                    }
+                    Err(e) => {
+                        failures.push(format!("{}: {e}", skill.directory));
+                    }
+                },
+            }
+        }
+
+        if failures.is_empty() {
+            Ok(SkillMigrationOutcome { result, moved })
+        } else {
+            Err(SkillMigrationFailure { moved, failures })
+        }
+    }
+
     pub fn migrate_storage(
         db: &Arc<Database>,
         target: StorageLocation,
@@ -1141,53 +1322,14 @@ impl SkillService {
             StorageLocation::Hub => config::get_hub_skills_dir(),
             StorageLocation::Unified => config::get_home_dir().join(".agents").join("skills"),
         };
-        fs::create_dir_all(&new_dir).map_err(|e| AppError::io(&new_dir, e))?;
-        Self::validate_skill_storage_destination(&new_dir)?;
 
-        let skills = db.get_all_installed_skills()?;
-        let mut result = MigrationResult {
-            migrated_count: 0,
-            skipped_count: 0,
-            errors: vec![],
+        let outcome = match Self::migrate_storage_inner(db, target) {
+            Ok(outcome) => outcome,
+            Err(failure) => {
+                Self::rollback_skill_moves(&old_dir, &new_dir, &failure.moved);
+                return Err(failure.into_error());
+            }
         };
-
-        for skill in skills.values() {
-            let directory = match Self::require_valid_directory(&skill.directory) {
-                Ok(directory) => directory,
-                Err(err) => {
-                    result
-                        .errors
-                        .push(format!("{}: {err}", skill.directory.escape_debug()));
-                    continue;
-                }
-            };
-            let src = old_dir.join(&directory);
-            let dst = new_dir.join(&directory);
-
-            if !src.exists() {
-                result.skipped_count += 1;
-                continue;
-            }
-            if dst.exists() {
-                result.skipped_count += 1;
-                continue;
-            }
-
-            match fs::rename(&src, &dst) {
-                Ok(()) => {
-                    result.migrated_count += 1;
-                }
-                Err(_) => match Self::copy_dir_recursive(&src, &dst) {
-                    Ok(()) => {
-                        let _ = fs::remove_dir_all(&src);
-                        result.migrated_count += 1;
-                    }
-                    Err(e) => {
-                        result.errors.push(format!("{}: {e}", skill.directory));
-                    }
-                },
-            }
-        }
 
         crate::settings::set_storage_location(target)?;
 
@@ -1197,12 +1339,12 @@ impl SkillService {
 
         log::info!(
             "Skill 存储迁移完成: {} 迁移, {} 跳过, {} 错误",
-            result.migrated_count,
-            result.skipped_count,
-            result.errors.len()
+            outcome.result.migrated_count,
+            outcome.result.skipped_count,
+            outcome.result.errors.len()
         );
 
-        Ok(result)
+        Ok(outcome.result)
     }
 
     // ========== Backups ==========
@@ -1517,6 +1659,19 @@ impl SkillService {
             };
 
             db.save_skill(&skill)?;
+
+            for app in skill.apps.enabled_apps() {
+                if let Err(e) = Self::sync_to_app_dir(&skill.directory, &app) {
+                    if let Err(rollback_error) = db.delete_skill(&skill.id) {
+                        log::error!(
+                            "导入 Skill {} 后同步失败，且回滚数据库记录也失败: {rollback_error}",
+                            skill.id
+                        );
+                    }
+                    return Err(e);
+                }
+            }
+
             imported.push(skill);
         }
 
@@ -1739,7 +1894,10 @@ impl SkillService {
         Self::sync_to_app_unlocked(db, app)
     }
 
-    fn sync_to_app_unlocked(db: &Arc<Database>, app: &AgentType) -> Result<(), AppError> {
+    pub(crate) fn sync_to_app_unlocked(
+        db: &Arc<Database>,
+        app: &AgentType,
+    ) -> Result<(), AppError> {
         let skills = db.get_all_installed_skills()?;
         let ssot_dir = Self::get_ssot_dir()?;
         let app_dir = Self::get_distinct_app_skills_dir(&ssot_dir, app)?;
@@ -3869,5 +4027,194 @@ mod tests {
     fn require_valid_directory_rejects_traversal() {
         assert!(SkillService::require_valid_directory("../etc").is_err());
         assert!(SkillService::require_valid_directory("normal").is_ok());
+    }
+
+    #[test]
+    #[serial]
+    fn migrate_storage_aborts_on_conflict_and_rolls_back() {
+        let tmp = tempdir().unwrap();
+        let _guard = TestHomeGuard::set(tmp.path());
+
+        let db = Arc::new(Database::memory().unwrap());
+
+        for name in ["skill-a", "skill-b"] {
+            write_skill(&SkillService::get_ssot_dir().unwrap().join(name), name);
+            let skill = InstalledSkill {
+                id: format!("owner/repo:{name}"),
+                name: name.to_string(),
+                description: None,
+                directory: name.to_string(),
+                repo_owner: Some("owner".to_string()),
+                repo_name: Some("repo".to_string()),
+                repo_branch: Some("main".to_string()),
+                readme_url: None,
+                apps: SkillApps::default(),
+                installed_at: 1,
+                content_hash: None,
+                updated_at: 0,
+            };
+            db.save_skill(&skill).unwrap();
+        }
+
+        // 在统一目录中预建冲突目录，使 skill-b 迁移失败
+        let conflict_dir = config::get_home_dir()
+            .join(".agents")
+            .join("skills")
+            .join("skill-b");
+        fs::create_dir_all(&conflict_dir).unwrap();
+
+        let result = SkillService::migrate_storage(&db, StorageLocation::Unified);
+        assert!(result.is_err(), "冲突时应中止迁移");
+        let err_string = result.unwrap_err().to_string();
+        assert!(err_string.contains("MIGRATION_ABORTED"));
+
+        // skill-a 应被回滚到原位置
+        assert!(SkillService::get_ssot_dir()
+            .unwrap()
+            .join("skill-a")
+            .exists());
+        assert!(!config::get_home_dir()
+            .join(".agents")
+            .join("skills")
+            .join("skill-a")
+            .exists());
+
+        // 设置保持原值
+        assert_eq!(
+            crate::settings::get_settings().storage_location,
+            StorageLocation::Hub
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn import_from_apps_creates_projections() {
+        let tmp = tempdir().unwrap();
+        let _guard = TestHomeGuard::set(tmp.path());
+
+        let db = Arc::new(Database::memory().unwrap());
+        crate::settings::set_sync_method(SyncMethod::Copy).unwrap();
+        write_skill(&config::get_claude_skills_dir().join("native"), "Native");
+
+        SkillService::import_from_apps(
+            &db,
+            vec![ImportSkillSelection {
+                directory: "native".to_string(),
+                apps: SkillApps::only(&AgentType::ClaudeCode),
+            }],
+        )
+        .expect("import");
+
+        assert!(SkillService::get_ssot_dir()
+            .unwrap()
+            .join("native")
+            .exists());
+        assert!(config::get_claude_skills_dir().join("native").exists());
+        assert!(db.get_installed_skill("local:native").unwrap().is_some());
+    }
+
+    #[test]
+    #[serial]
+    fn import_from_apps_rolls_back_db_row_on_sync_failure() {
+        let tmp = tempdir().unwrap();
+        let _guard = TestHomeGuard::set(tmp.path());
+
+        let db = Arc::new(Database::memory().unwrap());
+        crate::settings::set_sync_method(SyncMethod::Copy).unwrap();
+
+        // 先在可写的覆盖目录中放置源 skill
+        let read_only_root = tmp.path().join("readonly-claude");
+        let skills_dir = read_only_root.join("skills");
+        write_skill(&skills_dir.join("native"), "Native");
+
+        // 再将覆盖目录及其 skills 子目录设为只读，使投影同步必然失败
+        for dir in [&read_only_root, &skills_dir] {
+            let mut permissions = std::fs::metadata(dir).unwrap().permissions();
+            permissions.set_readonly(true);
+            fs::set_permissions(dir, permissions).unwrap();
+        }
+
+        crate::settings::update_settings(crate::settings::AppSettings {
+            claude_code_config_dir: Some(read_only_root.to_string_lossy().to_string()),
+            ..Default::default()
+        })
+        .unwrap();
+
+        let result = SkillService::import_from_apps(
+            &db,
+            vec![ImportSkillSelection {
+                directory: "native".to_string(),
+                apps: SkillApps::only(&AgentType::ClaudeCode),
+            }],
+        );
+        assert!(result.is_err(), "同步失败应返回错误");
+
+        // 数据库记录应被回滚
+        assert!(db.get_installed_skill("local:native").unwrap().is_none());
+
+        // 恢复写权限以便临时目录清理
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            for dir in [&read_only_root, &skills_dir] {
+                let mut permissions = std::fs::metadata(dir).unwrap().permissions();
+                permissions.set_mode(permissions.mode() | 0o200);
+                let _ = fs::set_permissions(dir, permissions);
+            }
+        }
+        crate::settings::reset_settings_store_for_test();
+    }
+
+    #[test]
+    #[serial]
+    fn uninstall_aborts_when_projection_removal_fails() {
+        let tmp = tempdir().unwrap();
+        let _guard = TestHomeGuard::set(tmp.path());
+
+        let db = Arc::new(Database::memory().unwrap());
+        crate::settings::set_sync_method(SyncMethod::Copy).unwrap();
+
+        write_skill(
+            &SkillService::get_ssot_dir()
+                .unwrap()
+                .join("uninstall-skill"),
+            "Uninstall",
+        );
+        let skill = InstalledSkill {
+            id: "owner/repo:uninstall-skill".to_string(),
+            name: "Uninstall".to_string(),
+            description: None,
+            directory: "uninstall-skill".to_string(),
+            repo_owner: Some("owner".to_string()),
+            repo_name: Some("repo".to_string()),
+            repo_branch: Some("main".to_string()),
+            readme_url: None,
+            apps: SkillApps::only(&AgentType::ClaudeCode),
+            installed_at: 1,
+            content_hash: None,
+            updated_at: 0,
+        };
+        db.save_skill(&skill).unwrap();
+        SkillService::sync_to_app_dir("uninstall-skill", &AgentType::ClaudeCode).unwrap();
+
+        // 将 claude skills 目录设为只读，使投影移除失败
+        let claude_skills = config::get_claude_skills_dir();
+        let mut permissions = std::fs::metadata(&claude_skills).unwrap().permissions();
+        permissions.set_readonly(true);
+        fs::set_permissions(&claude_skills, permissions).unwrap();
+
+        let result = SkillService::uninstall(&db, &skill.id);
+        assert!(result.is_err(), "投影移除失败应中止卸载");
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("UNINSTALL_PROJECTION_FAILED"));
+
+        // SSOT 与数据库记录应保持不变
+        assert!(SkillService::get_ssot_dir()
+            .unwrap()
+            .join("uninstall-skill")
+            .exists());
+        assert!(db.get_installed_skill(&skill.id).unwrap().is_some());
     }
 }

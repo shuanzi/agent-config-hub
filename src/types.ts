@@ -106,6 +106,12 @@ export interface MigrationResult {
   errors: string[];
 }
 
+/** mirrors src-tauri/src/commands/settings.rs:MigrationSummary */
+export interface MigrationSummary {
+  skill: MigrationResult;
+  subagent: MigrationResult;
+}
+
 /** mirrors src-tauri/src/services/skill.rs:SkillBackupEntry */
 export interface SkillBackupEntry {
   backupId: string;

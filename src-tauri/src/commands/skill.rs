@@ -3,7 +3,7 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use crate::error::{format_skill_error, AppError};
+use crate::error::{format_skill_error, is_structured_error_payload, AppError};
 use crate::services::skill::{
     AgentType, DiscoverableSkill, ImportSkillSelection, InstalledSkill, MigrationResult,
     SkillBackupEntry, SkillRepo, SkillService, SkillUninstallResult, SkillUpdateInfo,
@@ -13,11 +13,14 @@ use crate::settings::StorageLocation;
 use crate::AppState;
 
 fn map_err(err: AppError) -> String {
-    format_skill_error(
-        "skill/error",
-        &[("message", &err.to_string())],
-        Some("请检查日志或重试。"),
-    )
+    if let AppError::Message(payload) = &err {
+        if is_structured_error_payload(payload) {
+            return payload.clone();
+        }
+    }
+
+    log::warn!("Skill 命令未映射错误: {err:#}");
+    format_skill_error("SKILL_INTERNAL", &[], Some("checkLogs"))
 }
 
 fn parse_app_type(app: &str) -> Result<AgentType, String> {
@@ -188,3 +191,30 @@ pub async fn migrate_skill_storage(
 }
 
 pub struct SkillServiceState(pub Arc<SkillService>);
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::error::format_skill_error;
+
+    #[test]
+    fn map_err_passes_through_structured_errors() {
+        let structured = format_skill_error(
+            "SKILL_DIRECTORY_CONFLICT",
+            &[("directory", "foo")],
+            Some("uninstallFirst"),
+        );
+        let err = AppError::Message(structured.clone());
+        assert_eq!(map_err(err), structured);
+    }
+
+    #[test]
+    fn map_err_masks_io_errors_without_paths() {
+        let io_err = std::io::Error::new(std::io::ErrorKind::PermissionDenied, "no permission");
+        let err = AppError::io(Path::new("/secret/path"), io_err);
+        let mapped = map_err(err);
+        assert!(mapped.contains("SKILL_INTERNAL"));
+        assert!(!mapped.contains("/secret/path"));
+        assert!(!mapped.contains("PermissionDenied"));
+    }
+}

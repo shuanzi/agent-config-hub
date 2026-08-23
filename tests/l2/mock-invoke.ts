@@ -284,6 +284,12 @@ export function setupMockInvoke() {
       case 'migrate_skill_storage':
         return { migratedCount: 0, skippedCount: 0, errors: [] };
 
+      case 'migrate_storage':
+        return {
+          skill: { migratedCount: 0, skippedCount: 0, errors: [] },
+          subagent: { migratedCount: 0, skippedCount: 0, errors: [] },
+        };
+
       case 'install_skills_from_zip':
         return [];
 

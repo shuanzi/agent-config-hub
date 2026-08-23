@@ -1,8 +1,11 @@
 # skill-management Specification
 
 ## Purpose
+
 Skill 的全生命周期管理：从 GitHub 仓库发现 skill，集中安装到单一事实源（SSOT）目录，并按用户开关以 symlink 或 copy 方式投影到各 Agent 的技能目录，支持更新检测、备份恢复、导入与存储迁移。
+
 ## Requirements
+
 ### Requirement: Skill 仓库管理
 
 系统 SHALL 维护一个 skill 来源仓库列表（owner/name/branch/enabled，持久化于本地数据库），支持通过粘贴 GitHub URL 添加（解析为 owner/name，默认分支 main）、列表查看（含每个仓库发现的 skill 数量）与移除。首次启动且列表为空时 SHALL 播种默认仓库集合（至少包含 `anthropics/skills`）。非法仓库坐标 SHALL 被拒绝并返回结构化错误。
@@ -103,4 +106,3 @@ skill 相关操作的失败 SHALL 以 `{code, context, suggestion}` 结构返回
 
 - **WHEN** 仓库下载超时
 - **THEN** 前端呈现"下载超时"的说明与重试建议，而非原始异常文本
-

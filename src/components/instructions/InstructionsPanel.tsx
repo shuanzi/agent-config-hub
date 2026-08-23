@@ -77,6 +77,9 @@ export function InstructionsPanel({ activeApp }: InstructionsPanelProps) {
     setErrorMessage('');
     setIsCreating(false);
     setSelectedId(id);
+    if (prompts && prompts[id]) {
+      setDraft(prompts[id]);
+    }
   };
 
   const handleCreate = () => {
@@ -221,7 +224,7 @@ export function InstructionsPanel({ activeApp }: InstructionsPanelProps) {
                 <input
                   id="prompt-name"
                   type="text"
-                  value={selectedPrompt.name}
+                  value={draft.name}
                   onChange={(event) => handleChange('name', event.target.value)}
                   disabled={pending}
                 />
@@ -231,7 +234,7 @@ export function InstructionsPanel({ activeApp }: InstructionsPanelProps) {
                 <input
                   id="prompt-description"
                   type="text"
-                  value={selectedPrompt.description ?? ''}
+                  value={draft.description ?? ''}
                   onChange={(event) => handleChange('description', event.target.value)}
                   disabled={pending}
                 />
@@ -240,7 +243,7 @@ export function InstructionsPanel({ activeApp }: InstructionsPanelProps) {
                 <label htmlFor="prompt-content">内容</label>
                 <textarea
                   id="prompt-content"
-                  value={selectedPrompt.content}
+                  value={draft.content}
                   onChange={(event) => handleChange('content', event.target.value)}
                   disabled={pending}
                   rows={16}

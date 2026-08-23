@@ -2,8 +2,7 @@ import { useEffect, useState } from 'react';
 import { Loader2 } from 'lucide-react';
 import type { AppSettings, SyncMethod, StorageLocation } from '../../types';
 import { useInstalledSkills } from '../../hooks/useSkills';
-import { useMigrateSkillStorage } from '../../hooks/useSkills';
-import { useSettings, useSetSettings } from '../../hooks/useSettings';
+import { useMigrateStorage, useSettings, useSetSettings } from '../../hooks/useSettings';
 import { toUserError } from '../../lib/errors';
 import './settings.css';
 
@@ -29,7 +28,7 @@ export function SettingsView() {
   const { data: settings, isLoading: settingsLoading } = useSettings();
   const { data: installedSkills } = useInstalledSkills();
   const setSettingsMutation = useSetSettings();
-  const migrateMutation = useMigrateSkillStorage();
+  const migrateMutation = useMigrateStorage();
 
   const [draft, setDraft] = useState<AppSettings | null>(null);
   const [pendingStorage, setPendingStorage] = useState<StorageLocation | null>(null);
@@ -84,14 +83,15 @@ export function SettingsView() {
     setSuccessMessage('');
     try {
       const result = await migrateMutation.mutateAsync(value);
-      if (result.errors.length > 0) {
-        setErrorMessage(`迁移完成 ${result.migratedCount} 项，失败 ${result.errors.length} 项。`);
+      const totalMigrated = result.skill.migratedCount + result.subagent.migratedCount;
+      const errors = [...result.skill.errors, ...result.subagent.errors];
+      if (errors.length > 0) {
+        setErrorMessage(`迁移完成 ${totalMigrated} 项，失败 ${errors.length} 项。`);
       } else {
-        setSuccessMessage(`迁移完成 ${result.migratedCount} 项。`);
+        setSuccessMessage(`迁移完成 ${totalMigrated} 项。`);
       }
       const next = { ...draft, storageLocation: value };
       setDraft(next);
-      await save(next);
     } catch (error) {
       const userError = toUserError(error);
       setErrorMessage([userError.message, userError.suggestion].filter(Boolean).join('\n'));

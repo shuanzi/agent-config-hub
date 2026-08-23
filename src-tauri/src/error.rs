@@ -151,3 +151,12 @@ pub fn format_subagent_error(
 ) -> String {
     format_structured_error(code, context, suggestion)
 }
+
+/// Returns true if `payload` looks like a structured error JSON produced by
+/// `format_structured_error` (i.e. contains `code` and `context`).
+pub fn is_structured_error_payload(payload: &str) -> bool {
+    serde_json::from_str::<serde_json::Value>(payload)
+        .ok()
+        .map(|v| v.get("code").is_some() && v.get("context").is_some())
+        .unwrap_or(false)
+}

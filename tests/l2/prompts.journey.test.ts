@@ -90,4 +90,56 @@ describe('Prompt management journey', () => {
     await waitForStable();
     expect(await livePre.getText()).toContain('second live body');
   });
+
+  it('selects an existing preset, edits it, and persists the change', async () => {
+    await browser.setWindowSize(1280, 900);
+    await browser.url(ENTRY);
+
+    const instructionsTab = await $(
+      "//button[contains(@class,'tab')][normalize-space()='长期指令']",
+    );
+    await instructionsTab.waitForDisplayed();
+    await instructionsTab.click();
+
+    const panel = await $('.instructions-panel');
+    await panel.waitForDisplayed();
+
+    // 创建初始预设
+    const createButton = await panel.$("//button[normalize-space()='新建预设']");
+    await createButton.click();
+
+    const nameInput = await $('#prompt-name');
+    await nameInput.setValue('Editable Prompt');
+
+    const contentInput = await $('#prompt-content');
+    await contentInput.setValue('original body');
+
+    const saveButton = await panel.$("//button[normalize-space()='保存']");
+    await saveButton.click();
+    await waitForStable();
+
+    const row = await $("//li[contains(.,'Editable Prompt')]");
+    await row.waitForDisplayed();
+
+    // 选中并编辑
+    await row.click();
+    await nameInput.setValue('Updated Prompt');
+    await contentInput.setValue('updated body');
+    await saveButton.click();
+    await waitForStable();
+
+    const error = await $('.instructions-error');
+    if (await error.isExisting()) {
+      throw new Error(`Save failed: ${await error.getText()}`);
+    }
+
+    // 列表应反映更新后的名称
+    const updatedRow = await $("//li[contains(.,'Updated Prompt')]");
+    await updatedRow.waitForDisplayed();
+
+    // 重新选中应加载持久化内容
+    await updatedRow.click();
+    expect(await nameInput.getValue()).toBe('Updated Prompt');
+    expect(await contentInput.getValue()).toBe('updated body');
+  });
 });

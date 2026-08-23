@@ -1,8 +1,11 @@
 # hub-settings Specification
 
 ## Purpose
+
 全局设置项的管理与生效语义：投影同步方式、SSOT 存储位置、各 Agent 配置目录 override，这些设置决定 skill / subagent / 长期指令三类能力的实际文件落点。
+
 ## Requirements
+
 ### Requirement: 同步方式设置
 
 系统 SHALL 提供同步方式设置，取值为 `auto`（优先 symlink，失败回退 copy）、`symlink`、`copy`，默认 `auto`。该设置对 skill 与 subagent 的投影生效，修改后对后续同步操作生效；已存在的投影 SHALL 在下次同步（启停、更新、迁移）时按新方式重建。
@@ -29,4 +32,3 @@
 
 - **WHEN** 用户为 codex 设置目录 override 为 `/tmp/custom-codex`
 - **THEN** codex 的技能投影目标变为 `/tmp/custom-codex/skills`，指令文件变为 `/tmp/custom-codex/AGENTS.md`
-

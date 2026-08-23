@@ -155,6 +155,26 @@ impl Default for SubagentService {
     }
 }
 
+pub(crate) struct SubagentMigrationOutcome {
+    pub result: MigrationResult,
+    pub moved: Vec<String>,
+}
+
+pub(crate) struct SubagentMigrationFailure {
+    pub moved: Vec<String>,
+    pub failures: Vec<String>,
+}
+
+impl SubagentMigrationFailure {
+    pub(crate) fn into_error(self) -> AppError {
+        AppError::Message(format_subagent_error(
+            "MIGRATION_ABORTED",
+            &[("failures", &self.failures.join("; "))],
+            Some("checkPermission"),
+        ))
+    }
+}
+
 impl SubagentService {
     pub fn new() -> Self {
         Self
@@ -250,16 +270,39 @@ impl SubagentService {
             let same_repo = existing.repo_owner.as_deref() == Some(&subagent.repo_owner)
                 && existing.repo_name.as_deref() == Some(&subagent.repo_name);
             if same_repo {
-                let mut updated = existing.clone();
-                updated.apps.set_enabled_for(current_app, true);
-                db.save_subagent(&updated)?;
-                Self::sync_to_app_dir(&updated.directory, current_app)?;
-                log::info!(
-                    "Subagent {} 已存在，更新 {} 启用状态",
-                    updated.name,
-                    current_app.as_str()
-                );
-                return Ok(Some(updated));
+                if existing.id == subagent.key {
+                    let mut updated = existing.clone();
+                    updated.apps.set_enabled_for(current_app, true);
+                    db.save_subagent(&updated)?;
+                    Self::sync_to_app_dir(&updated.directory, current_app)?;
+                    log::info!(
+                        "Subagent {} 已存在，更新 {} 启用状态",
+                        updated.name,
+                        current_app.as_str()
+                    );
+                    return Ok(Some(updated));
+                }
+
+                return Err(AppError::Message(format_subagent_error(
+                    "SUBAGENT_DIRECTORY_CONFLICT",
+                    &[
+                        ("directory", install_name),
+                        (
+                            "existingRepo",
+                            &format!(
+                                "{}/{}:{}",
+                                existing.repo_owner.as_deref().unwrap_or("unknown"),
+                                existing.repo_name.as_deref().unwrap_or("unknown"),
+                                existing.id
+                            ),
+                        ),
+                        (
+                            "newRepo",
+                            &format!("{}/{}", subagent.repo_owner, subagent.repo_name),
+                        ),
+                    ],
+                    Some("uninstallFirst"),
+                )));
             }
 
             return Err(AppError::Message(format_subagent_error(
@@ -755,7 +798,10 @@ impl SubagentService {
         Self::sync_to_app_unlocked(db, app)
     }
 
-    fn sync_to_app_unlocked(db: &Arc<Database>, app: &AgentType) -> Result<(), AppError> {
+    pub(crate) fn sync_to_app_unlocked(
+        db: &Arc<Database>,
+        app: &AgentType,
+    ) -> Result<(), AppError> {
         let subagents = db.get_all_installed_subagents()?;
         let ssot_dir = Self::get_ssot_dir()?;
         let app_dir = Self::get_distinct_app_subagents_dir(&ssot_dir, app)?;
@@ -887,8 +933,30 @@ impl SubagentService {
 
         let ssot_dir = Self::get_ssot_dir()?;
 
+        let mut projection_failures: Vec<AgentType> = Vec::new();
         for app in AgentType::all() {
-            let _ = Self::remove_from_app(&directory, &app);
+            if let Err(e) = Self::remove_from_app(&directory, &app) {
+                log::warn!(
+                    "移除 Subagent {} 在 {} 上的投影失败: {e}",
+                    subagent.name,
+                    app.as_str()
+                );
+                projection_failures.push(app);
+            }
+        }
+        if !projection_failures.is_empty() {
+            return Err(AppError::Message(format_subagent_error(
+                "UNINSTALL_PROJECTION_FAILED",
+                &[(
+                    "apps",
+                    &projection_failures
+                        .iter()
+                        .map(|a| a.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                )],
+                Some("checkPermission"),
+            )));
         }
 
         let backup_path = Self::create_uninstall_backup(&subagent)?
@@ -1158,7 +1226,7 @@ impl SubagentService {
 
         let dest_file = Self::ssot_file_path(&ssot_dir, &subagent.directory);
 
-        let _ = Self::create_uninstall_backup(&subagent);
+        let backup_path = Self::create_uninstall_backup(&subagent)?;
 
         if dest_file.exists() {
             fs::remove_file(&dest_file).map_err(|e| AppError::io(&dest_file, e))?;
@@ -1201,10 +1269,39 @@ impl SubagentService {
 
         let updated_subagent = Self::persist_updated_subagent_metadata(db, &updated_metadata)?;
 
+        let mut sync_failures: Vec<AgentType> = Vec::new();
         for app in updated_subagent.apps.enabled_apps() {
             if let Err(e) = Self::sync_to_app_dir(&updated_subagent.directory, &app) {
                 log::warn!("同步更新后的 subagent 到 {} 失败: {e}", app.as_str());
+                sync_failures.push(app);
             }
+        }
+
+        if !sync_failures.is_empty() {
+            if let Some(ref backup) = backup_path {
+                let backup_subagent_file = backup.join(format!("{}.md", subagent.directory));
+                if backup_subagent_file.exists() {
+                    let _ = fs::remove_file(&dest_file);
+                    let _ = config::copy_file(&backup_subagent_file, &dest_file);
+                }
+            }
+            let _ = db.save_subagent(&subagent);
+            for app in subagent.apps.enabled_apps() {
+                let _ = Self::sync_to_app_dir(&subagent.directory, &app);
+            }
+
+            return Err(AppError::Message(format_subagent_error(
+                "UPDATE_SYNC_FAILED",
+                &[(
+                    "apps",
+                    &sync_failures
+                        .iter()
+                        .map(|a| a.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                )],
+                Some("checkPermission"),
+            )));
         }
 
         log::info!("Subagent {} 更新成功", updated_subagent.name);
@@ -1212,6 +1309,113 @@ impl SubagentService {
     }
 
     // ========== Storage migration ==========
+
+    pub(crate) fn rollback_subagent_moves(old_dir: &Path, new_dir: &Path, moved: &[String]) {
+        for directory in moved {
+            let dst = Self::ssot_file_path(new_dir, directory);
+            let src = Self::ssot_file_path(old_dir, directory);
+            if !dst.exists() {
+                continue;
+            }
+            if src.exists() {
+                log::warn!("无法将 {directory} 回滚：源文件和目标文件均已存在");
+                continue;
+            }
+            if fs::rename(&dst, &src).is_err() {
+                let _ = config::copy_file(&dst, &src);
+                let _ = fs::remove_file(&dst);
+            }
+        }
+    }
+
+    /// 执行实际的文件移动，不持久化设置、不刷新投影。
+    pub(crate) fn migrate_storage_inner(
+        db: &Arc<Database>,
+        target: StorageLocation,
+    ) -> Result<SubagentMigrationOutcome, SubagentMigrationFailure> {
+        let old_dir = Self::get_ssot_dir().map_err(|e| SubagentMigrationFailure {
+            moved: vec![],
+            failures: vec![e.to_string()],
+        })?;
+        let new_dir = match target {
+            StorageLocation::Hub => config::get_hub_subagents_dir(),
+            StorageLocation::Unified => config::get_home_dir().join(".agents").join("subagents"),
+        };
+        if let Err(e) = fs::create_dir_all(&new_dir) {
+            return Err(SubagentMigrationFailure {
+                moved: vec![],
+                failures: vec![e.to_string()],
+            });
+        }
+        if let Err(e) = Self::validate_subagent_storage_destination(&new_dir) {
+            return Err(SubagentMigrationFailure {
+                moved: vec![],
+                failures: vec![e.to_string()],
+            });
+        }
+
+        let subagents = match db.get_all_installed_subagents() {
+            Ok(subagents) => subagents,
+            Err(e) => {
+                return Err(SubagentMigrationFailure {
+                    moved: vec![],
+                    failures: vec![e.to_string()],
+                });
+            }
+        };
+
+        let mut result = MigrationResult {
+            migrated_count: 0,
+            skipped_count: 0,
+            errors: vec![],
+        };
+        let mut moved = Vec::new();
+        let mut failures = Vec::new();
+
+        for subagent in subagents.values() {
+            let directory = match SkillService::require_valid_directory(&subagent.directory) {
+                Ok(directory) => directory,
+                Err(err) => {
+                    failures.push(format!("{}: {err}", subagent.directory.escape_debug()));
+                    continue;
+                }
+            };
+            let src = Self::ssot_file_path(&old_dir, &directory);
+            let dst = Self::ssot_file_path(&new_dir, &directory);
+
+            if !src.exists() {
+                result.skipped_count += 1;
+                continue;
+            }
+            if dst.exists() {
+                failures.push(format!("{}: 目标位置已存在", subagent.directory));
+                continue;
+            }
+
+            match fs::rename(&src, &dst) {
+                Ok(()) => {
+                    result.migrated_count += 1;
+                    moved.push(directory);
+                }
+                Err(_) => match config::copy_file(&src, &dst) {
+                    Ok(()) => {
+                        let _ = fs::remove_file(&src);
+                        result.migrated_count += 1;
+                        moved.push(directory);
+                    }
+                    Err(e) => {
+                        failures.push(format!("{}: {e}", subagent.directory));
+                    }
+                },
+            }
+        }
+
+        if failures.is_empty() {
+            Ok(SubagentMigrationOutcome { result, moved })
+        } else {
+            Err(SubagentMigrationFailure { moved, failures })
+        }
+    }
 
     pub fn migrate_storage(
         db: &Arc<Database>,
@@ -1232,53 +1436,14 @@ impl SubagentService {
             StorageLocation::Hub => config::get_hub_subagents_dir(),
             StorageLocation::Unified => config::get_home_dir().join(".agents").join("subagents"),
         };
-        fs::create_dir_all(&new_dir).map_err(|e| AppError::io(&new_dir, e))?;
-        Self::validate_subagent_storage_destination(&new_dir)?;
 
-        let subagents = db.get_all_installed_subagents()?;
-        let mut result = MigrationResult {
-            migrated_count: 0,
-            skipped_count: 0,
-            errors: vec![],
+        let outcome = match Self::migrate_storage_inner(db, target) {
+            Ok(outcome) => outcome,
+            Err(failure) => {
+                Self::rollback_subagent_moves(&old_dir, &new_dir, &failure.moved);
+                return Err(failure.into_error());
+            }
         };
-
-        for subagent in subagents.values() {
-            let directory = match SkillService::require_valid_directory(&subagent.directory) {
-                Ok(directory) => directory,
-                Err(err) => {
-                    result
-                        .errors
-                        .push(format!("{}: {err}", subagent.directory.escape_debug()));
-                    continue;
-                }
-            };
-            let src = Self::ssot_file_path(&old_dir, &directory);
-            let dst = Self::ssot_file_path(&new_dir, &directory);
-
-            if !src.exists() {
-                result.skipped_count += 1;
-                continue;
-            }
-            if dst.exists() {
-                result.skipped_count += 1;
-                continue;
-            }
-
-            match fs::rename(&src, &dst) {
-                Ok(()) => {
-                    result.migrated_count += 1;
-                }
-                Err(_) => match config::copy_file(&src, &dst) {
-                    Ok(()) => {
-                        let _ = fs::remove_file(&src);
-                        result.migrated_count += 1;
-                    }
-                    Err(e) => {
-                        result.errors.push(format!("{}: {e}", subagent.directory));
-                    }
-                },
-            }
-        }
 
         crate::settings::set_storage_location(target)?;
 
@@ -1288,12 +1453,12 @@ impl SubagentService {
 
         log::info!(
             "Subagent 存储迁移完成: {} 迁移, {} 跳过, {} 错误",
-            result.migrated_count,
-            result.skipped_count,
-            result.errors.len()
+            outcome.result.migrated_count,
+            outcome.result.skipped_count,
+            outcome.result.errors.len()
         );
 
-        Ok(result)
+        Ok(outcome.result)
     }
 
     // ========== Backups ==========
@@ -1930,5 +2095,161 @@ mod tests {
             crate::settings::get_settings().storage_location,
             StorageLocation::Unified
         );
+    }
+
+    #[test]
+    #[serial]
+    fn migrate_storage_aborts_on_conflict_and_rolls_back() {
+        let tmp = tempdir().unwrap();
+        let _guard = TestHomeGuard::set(tmp.path());
+
+        let db = Arc::new(Database::memory().unwrap());
+
+        for name in ["agent-a", "agent-b"] {
+            write_subagent(
+                &SubagentService::get_ssot_dir().unwrap(),
+                &format!("{name}.md"),
+                name,
+            );
+            let subagent = InstalledSubagent {
+                id: format!("owner/repo:{name}.md"),
+                name: name.to_string(),
+                description: None,
+                directory: name.to_string(),
+                repo_owner: Some("owner".to_string()),
+                repo_name: Some("repo".to_string()),
+                repo_branch: Some("main".to_string()),
+                readme_url: None,
+                apps: SubagentApps::default(),
+                installed_at: 1,
+                content_hash: None,
+                updated_at: 0,
+            };
+            db.save_subagent(&subagent).unwrap();
+        }
+
+        let conflict_file = config::get_home_dir()
+            .join(".agents")
+            .join("subagents")
+            .join("agent-b.md");
+        fs::create_dir_all(conflict_file.parent().unwrap()).unwrap();
+        fs::write(&conflict_file, "conflict").unwrap();
+
+        let result = SubagentService::migrate_storage(&db, StorageLocation::Unified);
+        assert!(result.is_err(), "冲突时应中止迁移");
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("MIGRATION_ABORTED"));
+
+        assert!(SubagentService::get_ssot_dir()
+            .unwrap()
+            .join("agent-a.md")
+            .exists());
+        assert!(!config::get_home_dir()
+            .join(".agents")
+            .join("subagents")
+            .join("agent-a.md")
+            .exists());
+
+        assert_eq!(
+            crate::settings::get_settings().storage_location,
+            StorageLocation::Hub
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn install_same_repo_different_path_returns_conflict() {
+        let tmp = tempdir().unwrap();
+        let _guard = TestHomeGuard::set(tmp.path());
+
+        let db = Arc::new(Database::memory().unwrap());
+        let existing = InstalledSubagent {
+            id: "owner/repo:team/review.md".to_string(),
+            name: "Existing".to_string(),
+            description: None,
+            directory: "review".to_string(),
+            repo_owner: Some("owner".to_string()),
+            repo_name: Some("repo".to_string()),
+            repo_branch: Some("main".to_string()),
+            readme_url: None,
+            apps: SubagentApps::only(&AgentType::ClaudeCode),
+            installed_at: 1,
+            content_hash: None,
+            updated_at: 0,
+        };
+        db.save_subagent(&existing).unwrap();
+
+        let discoverable = DiscoverableSubagent {
+            key: "owner/repo:personal/review.md".to_string(),
+            name: "New".to_string(),
+            description: "".to_string(),
+            directory: "review".to_string(),
+            path: "personal/review.md".to_string(),
+            readme_url: None,
+            repo_owner: "owner".to_string(),
+            repo_name: "repo".to_string(),
+            repo_branch: "main".to_string(),
+        };
+
+        let err = SubagentService::reuse_existing_install(
+            &db,
+            &discoverable,
+            "review",
+            &AgentType::Codex,
+        )
+        .expect_err("must conflict");
+        assert!(err.to_string().contains("SUBAGENT_DIRECTORY_CONFLICT"));
+    }
+
+    #[test]
+    #[serial]
+    fn uninstall_aborts_when_projection_removal_fails() {
+        let tmp = tempdir().unwrap();
+        let _guard = TestHomeGuard::set(tmp.path());
+
+        let db = Arc::new(Database::memory().unwrap());
+        crate::settings::set_sync_method(SyncMethod::Copy).unwrap();
+
+        write_subagent(
+            &SubagentService::get_ssot_dir().unwrap(),
+            "uninstall-agent.md",
+            "Uninstall",
+        );
+        let subagent = InstalledSubagent {
+            id: "owner/repo:uninstall-agent.md".to_string(),
+            name: "Uninstall".to_string(),
+            description: None,
+            directory: "uninstall-agent".to_string(),
+            repo_owner: Some("owner".to_string()),
+            repo_name: Some("repo".to_string()),
+            repo_branch: Some("main".to_string()),
+            readme_url: None,
+            apps: SubagentApps::only(&AgentType::ClaudeCode),
+            installed_at: 1,
+            content_hash: None,
+            updated_at: 0,
+        };
+        db.save_subagent(&subagent).unwrap();
+        SubagentService::sync_to_app_dir("uninstall-agent", &AgentType::ClaudeCode).unwrap();
+
+        let claude_agents = config::get_claude_agents_dir();
+        let mut permissions = std::fs::metadata(&claude_agents).unwrap().permissions();
+        permissions.set_readonly(true);
+        fs::set_permissions(&claude_agents, permissions).unwrap();
+
+        let result = SubagentService::uninstall(&db, &subagent.id);
+        assert!(result.is_err(), "投影移除失败应中止卸载");
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("UNINSTALL_PROJECTION_FAILED"));
+
+        assert!(SubagentService::get_ssot_dir()
+            .unwrap()
+            .join("uninstall-agent.md")
+            .exists());
+        assert!(db.get_installed_subagent(&subagent.id).unwrap().is_some());
     }
 }

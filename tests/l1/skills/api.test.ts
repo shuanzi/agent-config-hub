@@ -101,4 +101,15 @@ describe('skills API wrappers', () => {
     await api.setSettings(settings);
     expect(mockInvoke).toHaveBeenCalledWith('set_settings_command', { settings });
   });
+
+  it('migrateStorage invokes the combined migrate command', async () => {
+    const api = await loadSettingsApi();
+    mockInvoke.mockResolvedValue({
+      skill: { migratedCount: 1, skippedCount: 0, errors: [] },
+      subagent: { migratedCount: 0, skippedCount: 0, errors: [] },
+    });
+    const result = await api.migrateStorage('unified');
+    expect(mockInvoke).toHaveBeenCalledWith('migrate_storage', { target: 'unified' });
+    expect(result.skill.migratedCount).toBe(1);
+  });
 });

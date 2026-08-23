@@ -23,6 +23,13 @@ const ERROR_MESSAGES: Record<string, string | ((ctx: Record<string, string>) => 
   INVALID_APP_TYPE: (ctx) => `不支持的 Agent 类型：${ctx.app ?? 'unknown'}。`,
   'skill/error': (ctx) => ctx.message ?? 'Skill 操作失败。',
   'settings/error': (ctx) => ctx.message ?? '设置操作失败。',
+  SKILL_INTERNAL: 'Skill 操作失败。',
+  PROMPT_INTERNAL: 'Prompt 操作失败。',
+  SUBAGENT_INTERNAL: 'Subagent 操作失败。',
+  SETTINGS_INTERNAL: '设置操作失败。',
+  MIGRATION_ABORTED: (ctx) => `迁移失败：${ctx.failures ?? ''}`,
+  UPDATE_SYNC_FAILED: (ctx) => `更新后同步失败：${ctx.apps ?? ''}`,
+  UNINSTALL_PROJECTION_FAILED: (ctx) => `移除投影失败：${ctx.apps ?? ''}`,
 };
 
 const SUGGESTION_MESSAGES: Record<string, string> = {
@@ -36,6 +43,7 @@ const SUGGESTION_MESSAGES: Record<string, string> = {
   http403: '服务器返回 403，请检查访问权限。',
   http404: '服务器返回 404，请确认仓库存在。',
   http429: '请求过于频繁，请稍后重试。',
+  checkLogs: '请检查日志或重试。',
 };
 
 /**

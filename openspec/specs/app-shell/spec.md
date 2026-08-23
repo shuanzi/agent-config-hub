@@ -1,8 +1,11 @@
 # app-shell Specification
 
 ## Purpose
+
 应用外壳：以 feature 视图组织三类资产管理与设置，提供当前 Agent 上下文、统一的数据获取/失效约定与结构化错误呈现。
+
 ## Requirements
+
 ### Requirement: 视图导航
 
 系统 SHALL 提供一级视图：Skills（含"发现"与"已安装"子视图）、长期指令、Subagents、设置。默认视图为 Skills 的已安装子视图。每个资产视图 SHALL 提供按名称的实时搜索与状态过滤。
@@ -38,4 +41,3 @@
 
 - **WHEN** 安装因 `SKILL_DIRECTORY_CONFLICT` 失败
 - **THEN** 用户看到目录冲突的说明与处理建议
-

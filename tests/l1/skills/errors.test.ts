@@ -63,4 +63,27 @@ describe('toUserError', () => {
     const userError = toUserError('raw failure text');
     expect(userError.message).toBe('操作失败，请稍后重试。');
   });
+
+  it('passes structured errors through without nesting', () => {
+    const error = new Error(
+      JSON.stringify({
+        code: 'SKILL_DIRECTORY_CONFLICT',
+        context: { directory: 'foo', existingRepo: 'a/b' },
+        suggestion: 'uninstallFirst',
+      }),
+    );
+    const userError = toUserError(error);
+    expect(userError.message).toContain('foo');
+    expect(userError.message).toContain('a/b');
+    expect(userError.suggestion).toContain('请先卸载');
+  });
+
+  it('maps internal domain errors to generic messages', () => {
+    const error = new Error(
+      JSON.stringify({ code: 'SKILL_INTERNAL', context: {}, suggestion: 'checkLogs' }),
+    );
+    const userError = toUserError(error);
+    expect(userError.message).toBe('Skill 操作失败。');
+    expect(userError.suggestion).toBe('请检查日志或重试。');
+  });
 });

@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use crate::error::{format_subagent_error, AppError};
+use crate::error::{format_subagent_error, is_structured_error_payload, AppError};
 use crate::services::skill::{AgentType, SkillService};
 use crate::services::subagent::{
     DiscoverableSubagent, InstalledSubagent, MigrationResult, SubagentBackupEntry, SubagentRepo,
@@ -12,11 +12,14 @@ use crate::settings::StorageLocation;
 use crate::AppState;
 
 fn map_err(err: AppError) -> String {
-    format_subagent_error(
-        "subagent/error",
-        &[("message", &err.to_string())],
-        Some("请检查日志或重试。"),
-    )
+    if let AppError::Message(payload) = &err {
+        if is_structured_error_payload(payload) {
+            return payload.clone();
+        }
+    }
+
+    log::warn!("Subagent 命令未映射错误: {err:#}");
+    format_subagent_error("SUBAGENT_INTERNAL", &[], Some("checkLogs"))
 }
 
 fn parse_app_type(app: &str) -> Result<AgentType, String> {
@@ -162,3 +165,28 @@ pub async fn migrate_subagent_storage(
 }
 
 pub struct SubagentServiceState(pub Arc<SubagentService>);
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::error::format_subagent_error;
+
+    #[test]
+    fn map_err_passes_through_structured_errors() {
+        let structured = format_subagent_error(
+            "SUBAGENT_DIRECTORY_CONFLICT",
+            &[("directory", "foo")],
+            Some("uninstallFirst"),
+        );
+        let err = AppError::Message(structured.clone());
+        assert_eq!(map_err(err), structured);
+    }
+
+    #[test]
+    fn map_err_masks_plain_errors() {
+        let err = AppError::InvalidInput("raw details".to_string());
+        let mapped = map_err(err);
+        assert!(mapped.contains("SUBAGENT_INTERNAL"));
+        assert!(!mapped.contains("raw details"));
+    }
+}

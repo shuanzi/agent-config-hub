@@ -1,8 +1,11 @@
 # instruction-management Specification
 
 ## Purpose
+
 长期指令（CLAUDE.md / AGENTS.md / GEMINI.md 等全局指令文件内容）的预设库管理：用户维护多条指令预设，每个 Agent 互斥激活一条，激活内容原子写入该 Agent 的 live 指令文件。
+
 ## Requirements
+
 ### Requirement: 指令预设 CRUD
 
 系统 SHALL 为每个 Agent 独立维护指令预设集合（id、名称、内容、描述、启用状态、创建/更新时间，持久化于本地数据库），支持新建、编辑、删除。四个一等 Agent（claude-code / codex / gemini-cli / opencode）各自的预设互不影响。
@@ -34,4 +37,3 @@
 
 - **WHEN** 用户查看某 Agent 的 live 内容而该文件不存在
 - **THEN** 系统明确显示"无 live 内容"而非报错
-

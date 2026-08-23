@@ -1,8 +1,11 @@
 # subagent-management Specification
 
 ## Purpose
+
 Subagent 定义文件的全生命周期管理：从 GitHub 仓库发现 subagent（带 frontmatter 的 Markdown 文件），集中安装到 SSOT 目录，并按用户开关以 symlink 或 copy 方式投影到各 Agent 的 subagent 目录。
+
 ## Requirements
+
 ### Requirement: Subagent 仓库管理与发现
 
 系统 SHALL 维护 subagent 来源仓库列表（与 skill 仓库列表相互独立，结构相同：owner/name/branch/enabled），支持添加、查看、移除。发现逻辑 SHALL 复用 skill 的 GitHub 归档下载与安全预算，扫描规则为：递归查找包含 YAML frontmatter（至少含 `name` 字段）的 `.md` 文件，每个文件认定为一个 subagent，描述取自 frontmatter `description`，缺失时回退文件名。发现结果以 `{owner}/{repo}:{path}` 唯一标识并标记安装状态。
@@ -34,4 +37,3 @@ Subagent 定义文件的全生命周期管理：从 GitHub 仓库发现 subagent
 
 - **WHEN** 远端内容 hash 变化且用户执行更新
 - **THEN** SSOT 内容更新，已启用 Agent 的投影同步更新，旧版本可恢复
-
