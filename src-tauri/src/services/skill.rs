@@ -512,7 +512,22 @@ impl SkillService {
                 // 先同步投影成功再落库：同步失败时 DB 保持原启用标志，
                 // 避免出现"已启用但无可用投影"的中间状态
                 Self::sync_to_app_dir(&updated.directory, current_app)?;
-                db.save_skill(&updated)?;
+                if let Err(error) = db.save_skill(&updated) {
+                    // 落库失败：移除本次新建的投影，恢复到操作前状态；
+                    // 操作前已启用的投影先于本次操作存在，保留不动
+                    if !existing.apps.is_enabled_for(current_app) {
+                        if let Err(rollback_error) =
+                            Self::remove_from_app(&updated.directory, current_app)
+                        {
+                            log::error!(
+                                "保存 Skill {} 失败后移除 {} 投影也失败: {rollback_error}",
+                                updated.name,
+                                current_app.as_str()
+                            );
+                        }
+                    }
+                    return Err(error);
+                }
                 log::info!(
                     "Skill {} 已存在，更新 {} 启用状态",
                     updated.name,
@@ -1629,7 +1644,7 @@ impl SkillService {
             scan_sources.push((ssot_dir, "hub".to_string()));
         }
 
-        let mut unmanaged: HashMap<String, UnmanagedSkill> = HashMap::new();
+        let mut unmanaged: HashMap<(String, String), UnmanagedSkill> = HashMap::new();
 
         for (scan_dir, label) in &scan_sources {
             let entries = match fs::read_dir(scan_dir) {
@@ -1652,8 +1667,16 @@ impl SkillService {
                 }
                 let (name, description) = Self::read_skill_name_desc(&skill_md, &dir_name);
 
+                // 按目录名 + 内容身份归并：内容不同的同名目录是互相独立的发现项，
+                // 导入其一不得覆盖其余位置的不同内容；哈希失败时以具体路径兜底，
+                // 绝不把无法确认的内容误并为同一份
+                let identity = Self::compute_dir_hash(&path).unwrap_or_else(|e| {
+                    log::warn!("计算未受管 Skill {} 的内容哈希失败: {e}", path.display());
+                    format!("path:{}", path.display())
+                });
+
                 unmanaged
-                    .entry(dir_name.clone())
+                    .entry((dir_name.clone(), identity))
                     .and_modify(|s| s.found_in.push(label.clone()))
                     .or_insert(UnmanagedSkill {
                         directory: dir_name,
@@ -4004,6 +4027,64 @@ mod tests {
 
     #[test]
     #[serial]
+    fn reuse_existing_install_save_failure_removes_projection() {
+        let tmp = tempdir().unwrap();
+        let _guard = TestHomeGuard::set(tmp.path());
+
+        let db = Arc::new(Database::memory().unwrap());
+        write_skill(
+            &SkillService::get_ssot_dir().unwrap().join("my-skill"),
+            "My Skill",
+        );
+
+        let existing = InstalledSkill {
+            id: "owner/repo:my-skill".to_string(),
+            name: "Existing".to_string(),
+            description: None,
+            directory: "my-skill".to_string(),
+            repo_owner: Some("owner".to_string()),
+            repo_name: Some("repo".to_string()),
+            repo_branch: Some("main".to_string()),
+            readme_url: None,
+            apps: SkillApps::only(&AgentType::ClaudeCode),
+            installed_at: 1,
+            content_hash: None,
+            updated_at: 0,
+        };
+        db.save_skill(&existing).unwrap();
+
+        // 故障注入：DB 只读，保存必然失败
+        {
+            let conn = db.conn.lock().expect("lock conn");
+            conn.execute("PRAGMA query_only = ON;", [])
+                .expect("enable query_only");
+        }
+
+        let discoverable = DiscoverableSkill {
+            key: "owner/repo:my-skill".to_string(),
+            name: "Existing".to_string(),
+            description: "".to_string(),
+            directory: "my-skill".to_string(),
+            readme_url: None,
+            repo_owner: "owner".to_string(),
+            repo_name: "repo".to_string(),
+            repo_branch: "main".to_string(),
+        };
+
+        SkillService::reuse_existing_install(&db, &discoverable, "my-skill", &AgentType::Codex)
+            .expect_err("保存失败必须返回错误");
+
+        assert!(
+            !config::get_codex_skills_dir().join("my-skill").exists(),
+            "保存失败时本次新建的投影必须被移除"
+        );
+        let stored = db.get_installed_skill(&existing.id).unwrap().unwrap();
+        assert!(stored.apps.claude_code);
+        assert!(!stored.apps.codex, "保存失败时 codex 的启用标志不得落库");
+    }
+
+    #[test]
+    #[serial]
     fn uninstall_removes_only_enabled_app_projections() {
         let tmp = tempdir().unwrap();
         let _guard = TestHomeGuard::set(tmp.path());
@@ -4289,6 +4370,53 @@ mod tests {
 
         let unmanaged = SkillService::scan_unmanaged(&db).expect("scan");
         assert!(unmanaged.iter().any(|s| s.directory == "orphan"));
+    }
+
+    #[test]
+    #[serial]
+    fn scan_unmanaged_splits_same_name_with_different_content() {
+        let tmp = tempdir().unwrap();
+        let _guard = TestHomeGuard::set(tmp.path());
+
+        let db = Arc::new(Database::memory().unwrap());
+        write_skill(&config::get_claude_skills_dir().join("shared"), "Alpha");
+        write_skill(&config::get_codex_skills_dir().join("shared"), "Beta");
+
+        let unmanaged = SkillService::scan_unmanaged(&db).expect("scan");
+        let matches: Vec<_> = unmanaged
+            .iter()
+            .filter(|s| s.directory == "shared")
+            .collect();
+        assert_eq!(
+            matches.len(),
+            2,
+            "同名但内容不同的未受管 Skill 必须呈现为两条独立发现项"
+        );
+        assert!(matches
+            .iter()
+            .any(|s| s.found_in == vec!["claude-code".to_string()]));
+        assert!(matches
+            .iter()
+            .any(|s| s.found_in == vec!["codex".to_string()]));
+    }
+
+    #[test]
+    #[serial]
+    fn scan_unmanaged_merges_same_name_with_identical_content() {
+        let tmp = tempdir().unwrap();
+        let _guard = TestHomeGuard::set(tmp.path());
+
+        let db = Arc::new(Database::memory().unwrap());
+        write_skill(&config::get_claude_skills_dir().join("twin"), "Twin");
+        write_skill(&config::get_codex_skills_dir().join("twin"), "Twin");
+
+        let unmanaged = SkillService::scan_unmanaged(&db).expect("scan");
+        let matches: Vec<_> = unmanaged.iter().filter(|s| s.directory == "twin").collect();
+        assert_eq!(matches.len(), 1, "内容一致的同名 Skill 仍合并为一条发现项");
+        let item = matches[0];
+        assert_eq!(item.found_in.len(), 2);
+        assert!(item.found_in.contains(&"claude-code".to_string()));
+        assert!(item.found_in.contains(&"codex".to_string()));
     }
 
     #[test]

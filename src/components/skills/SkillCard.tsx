@@ -8,9 +8,15 @@ interface SkillCardProps {
   skill: SkillCardSkill;
   onInstall: (key: string) => Promise<void>;
   onUninstall: (key: string) => void;
+  uninstallPending?: boolean;
 }
 
-export function SkillCard({ skill, onInstall, onUninstall }: SkillCardProps) {
+export function SkillCard({
+  skill,
+  onInstall,
+  onUninstall,
+  uninstallPending = false,
+}: SkillCardProps) {
   const [loading, setLoading] = useState(false);
 
   const handleInstall = async () => {
@@ -66,10 +72,10 @@ export function SkillCard({ skill, onInstall, onUninstall }: SkillCardProps) {
             type="button"
             className="uninstall"
             onClick={() => onUninstall(skill.key)}
-            disabled={loading}
+            disabled={loading || uninstallPending}
           >
-            <Trash2 size={14} />
-            卸载
+            {uninstallPending ? <Loader2 size={14} className="spin" /> : <Trash2 size={14} />}
+            {uninstallPending ? '卸载中…' : '卸载'}
           </button>
         ) : (
           <button type="button" className="install" onClick={handleInstall} disabled={loading}>

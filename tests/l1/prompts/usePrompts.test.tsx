@@ -3,7 +3,7 @@ import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook, waitFor, act } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
-import type { Prompt } from '../../../src/types';
+import type { AgentType, Prompt } from '../../../src/types';
 
 const mockApi = {
   getPrompts: vi.fn(),
@@ -56,6 +56,34 @@ describe('usePrompts query invalidation', () => {
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(result.current.data).toEqual(prompts);
     expect(mockApi.getPrompts).toHaveBeenCalledTimes(1);
+  });
+
+  it('切换到未缓存的 Agent 时不保留上一个 Agent 的预设数据', async () => {
+    const codexPrompts: Record<string, Prompt> = {
+      'prompt-1': { id: 'prompt-1', name: 'Codex A', content: 'a', enabled: true },
+    };
+    mockApi.getPrompts.mockImplementation((app: AgentType) =>
+      app === 'codex'
+        ? Promise.resolve(codexPrompts)
+        : // gemini-cli 未缓存：请求挂起，模拟加载窗口
+          new Promise<Record<string, Prompt>>(() => {}),
+    );
+
+    const hooks = await loadHooks();
+    const { result, rerender } = renderHook(
+      ({ app }: { app: AgentType }) => hooks.usePrompts(app),
+      {
+        wrapper: createWrapper(queryClient),
+        initialProps: { app: 'codex' },
+      },
+    );
+    await waitFor(() => expect(result.current.data).toEqual(codexPrompts));
+
+    rerender({ app: 'gemini-cli' });
+
+    // 加载窗口内不展示旧 Agent 的预设：无数据且处于加载态
+    expect(result.current.data).toBeUndefined();
+    expect(result.current.isLoading).toBe(true);
   });
 
   it('savePrompt invalidates prompts and current file queries', async () => {

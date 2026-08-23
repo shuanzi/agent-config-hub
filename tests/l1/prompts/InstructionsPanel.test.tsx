@@ -9,6 +9,7 @@ const promptsFixture: Record<string, Prompt> = {
 };
 
 const savePromptMock = vi.fn().mockResolvedValue(undefined);
+const enablePromptMock = vi.fn().mockResolvedValue(undefined);
 
 let promptsByApp: Record<AgentType, Record<string, Prompt>>;
 
@@ -27,7 +28,7 @@ vi.mock('../../../src/hooks/usePrompts', () => ({
   useCurrentPromptFileContent: () => ({ data: null, isLoading: false }),
   useSavePrompt: () => ({ mutateAsync: savePromptMock, isPending: false }),
   useDeletePrompt: () => ({ mutateAsync: vi.fn(), isPending: false }),
-  useEnablePrompt: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useEnablePrompt: () => ({ mutateAsync: enablePromptMock, isPending: false }),
   useImportPromptFromFile: () => ({ mutateAsync: vi.fn(), isPending: false }),
 }));
 
@@ -141,5 +142,37 @@ describe('InstructionsPanel 切换 activeApp 时重置编辑器状态', () => {
     expect(screen.queryByLabelText('内容')).toBeNull();
     expect(screen.getByText('选择左侧预设进行编辑，或新建一条预设。')).toBeTruthy();
     expect(savePromptMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('InstructionsPanel 启用预设后直接保存', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    resetPromptsByApp();
+    savePromptMock.mockResolvedValue(undefined);
+    enablePromptMock.mockResolvedValue(undefined);
+  });
+
+  afterEach(() => {
+    cleanup();
+  });
+
+  it('启用预设后不重选直接保存，提交的 enabled 为 true', async () => {
+    const InstructionsPanel = await loadPanel();
+    render(<InstructionsPanel activeApp="codex" />);
+
+    // 选中未启用的 Beta 并启用
+    fireEvent.click(screen.getByText('Beta'));
+    fireEvent.click(screen.getByRole('button', { name: '启用' }));
+    await waitFor(() => expect(enablePromptMock).toHaveBeenCalledWith({ app: 'codex', id: 'b' }));
+
+    // 不重新选中，直接保存：提交的 draft.enabled 应与缓存同步为 true
+    fireEvent.click(screen.getByText('保存'));
+    await waitFor(() => expect(savePromptMock).toHaveBeenCalledTimes(1));
+    expect(savePromptMock).toHaveBeenCalledWith({
+      app: 'codex',
+      id: 'b',
+      prompt: expect.objectContaining({ enabled: true }),
+    });
   });
 });

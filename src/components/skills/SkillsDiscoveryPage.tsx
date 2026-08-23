@@ -222,6 +222,7 @@ export function SkillsDiscoveryPage({ activeApp }: SkillsDiscoveryPageProps) {
               skill={skill}
               onInstall={handleInstall}
               onUninstall={handleUninstall}
+              uninstallPending={uninstallMutation.isPending}
             />
           ))}
         </div>

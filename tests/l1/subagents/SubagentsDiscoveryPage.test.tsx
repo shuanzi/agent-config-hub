@@ -137,4 +137,32 @@ describe('SubagentsDiscoveryPage 卸载已安装 Subagent', () => {
     await screen.findByText('操作失败，请稍后重试。');
     expect(screen.getByRole('button', { name: '卸载' })).toBeTruthy();
   });
+
+  it('卸载执行期间卸载入口禁用并给出 pending 反馈，不可重复提交', async () => {
+    let resolveUninstall: (value: { backupPath: string }) => void = () => {};
+    mockApi.uninstallSubagent.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveUninstall = resolve;
+        }),
+    );
+    mockApi.getInstalledSubagents.mockResolvedValue([installed]);
+    const Page = await loadPage();
+    render(<Page activeApp="claude-code" />, { wrapper: createWrapper(queryClient) });
+
+    fireEvent.click(await screen.findByRole('button', { name: '卸载' }));
+    const dialog = await screen.findByRole('dialog');
+    fireEvent.click(within(dialog).getByRole('button', { name: '卸载' }));
+    await waitFor(() => expect(mockApi.uninstallSubagent).toHaveBeenCalledTimes(1));
+
+    // mutation pending：卡片卸载按钮禁用并显示 pending 反馈，点击不再触发
+    const pendingButton = await screen.findByRole('button', { name: '卸载中…' });
+    expect(pendingButton).toHaveProperty('disabled', true);
+    fireEvent.click(pendingButton);
+    expect(mockApi.uninstallSubagent).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole('dialog')).toBeNull();
+
+    resolveUninstall({ backupPath: '/tmp/bak' });
+    await screen.findByText('已卸载 Reviewer。');
+  });
 });

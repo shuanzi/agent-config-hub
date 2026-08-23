@@ -12,7 +12,8 @@ export function usePrompts(app: AgentType) {
     queryKey: keys.prompts(app),
     queryFn: () => promptsApi.getPrompts(app),
     staleTime: Infinity,
-    placeholderData: keepPreviousData,
+    // 不用 keepPreviousData：切换到未缓存的 Agent 时，旧 Agent 的预设列表
+    // 会保持可见可点，选中后可能把旧内容保存进新 Agent。切换期间宁可呈加载态。
   });
 }
 

@@ -158,6 +158,9 @@ export function InstructionsPanel({ activeApp }: InstructionsPanelProps) {
     if (!selectedId) return;
     try {
       await enableMutation.mutateAsync({ app: activeApp, id: selectedId });
+      // 缓存已更新为 enabled，但本地 draft 仍是旧的 false；同步草稿，
+      // 避免用户不重新选中直接保存时提交过期的 enabled: false 把预设改回禁用。
+      setDraft((current) => ({ ...current, enabled: true }));
     } catch (error) {
       const userError = toUserError(error);
       setErrorMessage([userError.message, userError.suggestion].filter(Boolean).join('\n'));

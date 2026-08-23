@@ -223,6 +223,7 @@ export function SubagentsDiscoveryPage({ activeApp }: SubagentsDiscoveryPageProp
               subagent={subagent}
               onInstall={handleInstall}
               onUninstall={handleUninstall}
+              uninstallPending={uninstallMutation.isPending}
             />
           ))}
         </div>

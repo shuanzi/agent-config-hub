@@ -288,7 +288,22 @@ impl SubagentService {
                     // 先同步投影成功再落库：同步失败时 DB 保持原启用标志，
                     // 避免出现"已启用但无可用投影"的中间状态
                     Self::sync_to_app_dir(&updated.directory, current_app)?;
-                    db.save_subagent(&updated)?;
+                    if let Err(error) = db.save_subagent(&updated) {
+                        // 落库失败：移除本次新建的投影，恢复到操作前状态；
+                        // 操作前已启用的投影先于本次操作存在，保留不动
+                        if !existing.apps.is_enabled_for(current_app) {
+                            if let Err(rollback_error) =
+                                Self::remove_from_app(&updated.directory, current_app)
+                            {
+                                log::error!(
+                                    "保存 Subagent {} 失败后移除 {} 投影也失败: {rollback_error}",
+                                    updated.name,
+                                    current_app.as_str()
+                                );
+                            }
+                        }
+                        return Err(error);
+                    }
                     log::info!(
                         "Subagent {} 已存在，更新 {} 启用状态",
                         updated.name,
@@ -2273,6 +2288,66 @@ mod tests {
             !stored.apps.codex,
             "同步失败时 codex 的启用标志不得提前落库"
         );
+    }
+
+    #[test]
+    #[serial]
+    fn reuse_existing_install_save_failure_removes_projection() {
+        let tmp = tempdir().unwrap();
+        let _guard = TestHomeGuard::set(tmp.path());
+
+        let db = Arc::new(Database::memory().unwrap());
+        write_subagent(
+            &SubagentService::get_ssot_dir().unwrap(),
+            "review.md",
+            "Review",
+        );
+
+        let existing = InstalledSubagent {
+            id: "owner/repo:review.md".to_string(),
+            name: "Existing".to_string(),
+            description: None,
+            directory: "review".to_string(),
+            repo_owner: Some("owner".to_string()),
+            repo_name: Some("repo".to_string()),
+            repo_branch: Some("main".to_string()),
+            readme_url: None,
+            apps: SubagentApps::only(&AgentType::ClaudeCode),
+            installed_at: 1,
+            content_hash: None,
+            updated_at: 0,
+        };
+        db.save_subagent(&existing).unwrap();
+
+        // 故障注入：DB 只读，保存必然失败
+        {
+            let conn = db.conn.lock().expect("lock conn");
+            conn.execute("PRAGMA query_only = ON;", [])
+                .expect("enable query_only");
+        }
+
+        let discoverable = DiscoverableSubagent {
+            key: "owner/repo:review.md".to_string(),
+            name: "Existing".to_string(),
+            description: "".to_string(),
+            directory: "review".to_string(),
+            path: "review.md".to_string(),
+            readme_url: None,
+            repo_owner: "owner".to_string(),
+            repo_name: "repo".to_string(),
+            repo_branch: "main".to_string(),
+        };
+
+        SubagentService::reuse_existing_install(&db, &discoverable, "review", &AgentType::Codex)
+            .expect_err("保存失败必须返回错误");
+
+        assert!(
+            !config::get_codex_agents_dir().join("review.md").exists(),
+            "保存失败时本次新建的投影必须被移除"
+        );
+        let stored = db.get_installed_subagent(&existing.id).unwrap().unwrap();
+        assert!(stored.apps.claude_code);
+        assert!(!stored.apps.codex, "保存失败时 codex 的启用标志不得落库");
     }
 
     #[test]
