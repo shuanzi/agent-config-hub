@@ -281,14 +281,15 @@ export function setupMockInvoke() {
       case 'update_skill':
         return state.installed.find((s) => s.id === args?.id) ?? {};
 
-      case 'migrate_skill_storage':
-        return { migratedCount: 0, skippedCount: 0, errors: [] };
-
       case 'migrate_storage':
         return {
           skill: { migratedCount: 0, skippedCount: 0, errors: [] },
           subagent: { migratedCount: 0, skippedCount: 0, errors: [] },
+          projectionErrors: [],
         };
+
+      case 'set_agent_override_dir':
+        return undefined;
 
       case 'install_skills_from_zip':
         return [];
@@ -414,9 +415,6 @@ export function setupMockInvoke() {
 
       case 'update_subagent':
         return state.installedSubagents.find((s) => s.id === args?.id) ?? {};
-
-      case 'migrate_subagent_storage':
-        return { migratedCount: 0, skippedCount: 0, errors: [] };
 
       case 'get_prompts': {
         const app = (args?.app as AgentType) ?? 'claude-code';

@@ -1,8 +1,13 @@
 import { useEffect, useState } from 'react';
 import { Loader2 } from 'lucide-react';
-import type { AppSettings, SyncMethod, StorageLocation } from '../../types';
+import type { AgentType, AppSettings, SyncMethod, StorageLocation } from '../../types';
 import { useInstalledSkills } from '../../hooks/useSkills';
-import { useMigrateStorage, useSettings, useSetSettings } from '../../hooks/useSettings';
+import {
+  useMigrateStorage,
+  useSetAgentOverrideDir,
+  useSettings,
+  useSetSettings,
+} from '../../hooks/useSettings';
 import { toUserError } from '../../lib/errors';
 import './settings.css';
 
@@ -17,11 +22,14 @@ const STORAGE_OPTIONS: { value: StorageLocation; label: string }[] = [
   { value: 'unified', label: '统一目录（~/.agents）' },
 ];
 
-const AGENT_FIELDS: { key: keyof AppSettings; label: string }[] = [
-  { key: 'claudeCodeConfigDir', label: 'Claude Code' },
-  { key: 'codexConfigDir', label: 'Codex' },
-  { key: 'geminiCliConfigDir', label: 'Gemini CLI' },
-  { key: 'opencodeConfigDir', label: 'OpenCode' },
+type OverrideKey =
+  'claudeCodeConfigDir' | 'codexConfigDir' | 'geminiCliConfigDir' | 'opencodeConfigDir';
+
+const AGENT_FIELDS: { key: OverrideKey; label: string; app: AgentType }[] = [
+  { key: 'claudeCodeConfigDir', label: 'Claude Code', app: 'claude-code' },
+  { key: 'codexConfigDir', label: 'Codex', app: 'codex' },
+  { key: 'geminiCliConfigDir', label: 'Gemini CLI', app: 'gemini-cli' },
+  { key: 'opencodeConfigDir', label: 'OpenCode', app: 'opencode' },
 ];
 
 export function SettingsView() {
@@ -29,6 +37,7 @@ export function SettingsView() {
   const { data: installedSkills } = useInstalledSkills();
   const setSettingsMutation = useSetSettings();
   const migrateMutation = useMigrateStorage();
+  const overrideMutation = useSetAgentOverrideDir();
 
   const [draft, setDraft] = useState<AppSettings | null>(null);
   const [pendingStorage, setPendingStorage] = useState<StorageLocation | null>(null);
@@ -87,6 +96,10 @@ export function SettingsView() {
       const errors = [...result.skill.errors, ...result.subagent.errors];
       if (errors.length > 0) {
         setErrorMessage(`迁移完成 ${totalMigrated} 项，失败 ${errors.length} 项。`);
+      } else if (result.projectionErrors.length > 0) {
+        setErrorMessage(
+          `迁移完成 ${totalMigrated} 项，但部分 Agent 投影重建失败：${result.projectionErrors.join('；')}`,
+        );
       } else {
         setSuccessMessage(`迁移完成 ${totalMigrated} 项。`);
       }
@@ -98,13 +111,29 @@ export function SettingsView() {
     }
   };
 
-  const handleOverrideChange = (key: keyof AppSettings, value: string) => {
+  const handleOverrideChange = (key: OverrideKey, value: string) => {
     const next = { ...draft, [key]: value || undefined };
     setDraft(next);
   };
 
-  const handleSaveOverrides = () => {
-    void save(draft);
+  // 覆盖路径变更需要搬迁受管投影：逐个 Agent 调用专用命令，
+  // 而不是仅持久化设置（其余字段仍走 set_settings_command）。
+  const handleSaveOverrides = async () => {
+    setErrorMessage('');
+    setSuccessMessage('');
+    try {
+      for (const { key, app } of AGENT_FIELDS) {
+        const previous = settings?.[key] ?? null;
+        const next = draft[key] ?? null;
+        if (previous !== next) {
+          await overrideMutation.mutateAsync({ app, dir: next });
+        }
+      }
+      setSuccessMessage('设置已保存。');
+    } catch (error) {
+      const userError = toUserError(error);
+      setErrorMessage([userError.message, userError.suggestion].filter(Boolean).join('\n'));
+    }
   };
 
   return (
@@ -192,9 +221,9 @@ export function SettingsView() {
             type="button"
             className="primary"
             onClick={handleSaveOverrides}
-            disabled={setSettingsMutation.isPending}
+            disabled={setSettingsMutation.isPending || overrideMutation.isPending}
           >
-            {setSettingsMutation.isPending ? <Loader2 size={14} className="spin" /> : null}
+            {overrideMutation.isPending ? <Loader2 size={14} className="spin" /> : null}
             保存覆盖路径
           </button>
         </div>

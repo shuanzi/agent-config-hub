@@ -7,7 +7,6 @@ import type {
   SubagentBackupEntry,
   SubagentRepo,
   SubagentUpdateInfo,
-  StorageLocation,
 } from '../types';
 import { mergeImportedSubagents } from './useSubagents.helpers';
 
@@ -177,14 +176,6 @@ export function useDeleteSubagentBackup() {
       );
     },
     onSettled: () => queryClient.invalidateQueries({ queryKey: keys.backups }),
-  });
-}
-
-export function useMigrateSubagentStorage() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (target: StorageLocation) => subagentsApi.migrateSubagentStorage(target),
-    onSettled: () => queryClient.invalidateQueries({ queryKey: keys.installed }),
   });
 }
 

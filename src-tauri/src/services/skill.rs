@@ -994,6 +994,29 @@ impl SkillService {
         })
     }
 
+    /// 用 `source` 整体替换 SSOT 目录 `dest`。
+    fn replace_ssot_dir(source: &Path, dest: &Path) -> Result<(), AppError> {
+        if dest.exists() {
+            fs::remove_dir_all(dest).map_err(|e| AppError::io(dest, e))?;
+        }
+        Self::copy_dir_recursive(source, dest)
+    }
+
+    /// 最佳努力：从更新前创建的备份恢复 SSOT 目录。
+    fn restore_ssot_from_backup(backup_path: Option<&PathBuf>, dest: &Path) {
+        let Some(backup) = backup_path else { return };
+        let backup_skill_dir = backup.join("skill");
+        if !backup_skill_dir.exists() {
+            return;
+        }
+        if dest.exists() {
+            let _ = fs::remove_dir_all(dest);
+        }
+        if let Err(e) = Self::copy_dir_recursive(&backup_skill_dir, dest) {
+            log::error!("从备份恢复 SSOT 目录失败 {}: {e}", dest.display());
+        }
+    }
+
     pub async fn update_skill(
         &self,
         db: &Arc<Database>,
@@ -1084,10 +1107,11 @@ impl SkillService {
 
         let backup_path = Self::create_uninstall_backup(&skill)?;
 
-        if dest.exists() {
-            fs::remove_dir_all(&dest).map_err(|e| AppError::io(&dest, e))?;
+        // SSOT 替换失败时必须先从备份恢复，避免 SSOT 目录丢失
+        if let Err(err) = Self::replace_ssot_dir(&source, &dest) {
+            Self::restore_ssot_from_backup(backup_path.as_ref(), &dest);
+            return Err(err);
         }
-        Self::copy_dir_recursive(&source, &dest)?;
 
         let new_hash = Self::compute_dir_hash(&dest).ok();
         let skill_md = dest.join("SKILL.md");
@@ -1127,15 +1151,7 @@ impl SkillService {
 
         if !sync_failures.is_empty() {
             // 最佳努力回滚：从备份恢复 SSOT，还原数据库记录，重新同步
-            if let Some(ref backup) = backup_path {
-                let backup_skill_dir = backup.join("skill");
-                if backup_skill_dir.exists() {
-                    if dest.exists() {
-                        let _ = fs::remove_dir_all(&dest);
-                    }
-                    let _ = Self::copy_dir_recursive(&backup_skill_dir, &dest);
-                }
-            }
+            Self::restore_ssot_from_backup(backup_path.as_ref(), &dest);
             let _ = db.save_skill(&skill);
             for app in skill.apps.enabled_apps() {
                 let _ = Self::sync_to_app_dir(&skill.directory, &app);
@@ -1301,50 +1317,6 @@ impl SkillService {
         } else {
             Err(SkillMigrationFailure { moved, failures })
         }
-    }
-
-    pub fn migrate_storage(
-        db: &Arc<Database>,
-        target: StorageLocation,
-    ) -> Result<MigrationResult, AppError> {
-        let _state_guard = skill_state_write_guard();
-        let current = get_settings().storage_location;
-        if current == target {
-            return Ok(MigrationResult {
-                migrated_count: 0,
-                skipped_count: 0,
-                errors: vec![],
-            });
-        }
-
-        let old_dir = Self::get_ssot_dir()?;
-        let new_dir = match target {
-            StorageLocation::Hub => config::get_hub_skills_dir(),
-            StorageLocation::Unified => config::get_home_dir().join(".agents").join("skills"),
-        };
-
-        let outcome = match Self::migrate_storage_inner(db, target) {
-            Ok(outcome) => outcome,
-            Err(failure) => {
-                Self::rollback_skill_moves(&old_dir, &new_dir, &failure.moved);
-                return Err(failure.into_error());
-            }
-        };
-
-        crate::settings::set_storage_location(target)?;
-
-        for app in AgentType::all() {
-            let _ = Self::sync_to_app_unlocked(db, &app);
-        }
-
-        log::info!(
-            "Skill 存储迁移完成: {} 迁移, {} 跳过, {} 错误",
-            outcome.result.migrated_count,
-            outcome.result.skipped_count,
-            outcome.result.errors.len()
-        );
-
-        Ok(outcome.result)
     }
 
     // ========== Backups ==========
@@ -2820,7 +2792,12 @@ impl SkillService {
 
             let dest = ssot_dir.join(&install_name);
             if dest.exists() {
-                let _ = fs::remove_dir_all(&dest);
+                // 目标目录已存在但数据库无记录：属于未托管内容，绝不覆盖删除
+                return Err(AppError::Message(format_skill_error(
+                    "SKILL_DIRECTORY_CONFLICT",
+                    &[("directory", &install_name), ("existingRepo", "unmanaged")],
+                    Some("importFirst"),
+                )));
             }
             Self::copy_dir_recursive(&skill_dir, &dest)?;
 
@@ -3657,6 +3634,70 @@ mod tests {
 
     #[test]
     #[serial]
+    fn install_from_zip_conflicts_with_unmanaged_ssot_dir() {
+        let tmp = tempdir().unwrap();
+        let _guard = TestHomeGuard::set(tmp.path());
+
+        // 预置未托管的同名 SSOT 目录（数据库中无记录）
+        let dest = SkillService::get_ssot_dir().unwrap().join("my-skill");
+        write_skill(&dest, "Unmanaged");
+        fs::write(dest.join("user-data.txt"), "do not delete").unwrap();
+
+        let holder = tempdir().unwrap();
+        let mut buf = Vec::new();
+        {
+            let mut zip = zip::ZipWriter::new(std::io::Cursor::new(&mut buf));
+            let opts = zip::write::SimpleFileOptions::default();
+            zip.start_file("my-skill/SKILL.md", opts).unwrap();
+            zip.write_all(b"---\nname: My Skill\n---\n").unwrap();
+            zip.finish().unwrap();
+        }
+        let zip_path = holder.path().join("skill.zip");
+        fs::write(&zip_path, &buf).unwrap();
+
+        let db = Arc::new(Database::memory().unwrap());
+        let err = SkillService::install_from_zip(&db, &zip_path, &AgentType::ClaudeCode)
+            .expect_err("must conflict with unmanaged on-disk directory");
+        assert!(err.to_string().contains("SKILL_DIRECTORY_CONFLICT"));
+
+        // 未托管内容保持原样，绝不被删除
+        assert_eq!(
+            fs::read_to_string(dest.join("user-data.txt")).unwrap(),
+            "do not delete"
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn update_replace_failure_restores_ssot_from_backup() {
+        let tmp = tempdir().unwrap();
+        let _guard = TestHomeGuard::set(tmp.path());
+
+        let dest = tmp.path().join("ssot").join("my-skill");
+        write_skill(&dest, "Old");
+        fs::write(dest.join("old.txt"), "old content").unwrap();
+
+        let backup = tmp.path().join("backup");
+        write_skill(&backup.join("skill"), "Old");
+        fs::write(backup.join("skill").join("old.txt"), "old content").unwrap();
+
+        // 源缺失导致复制失败：dest 先被清空，随后必须从备份恢复
+        let missing_source = tmp.path().join("missing-source");
+        let result = SkillService::replace_ssot_dir(&missing_source, &dest);
+        assert!(result.is_err(), "copy from a missing source must fail");
+        assert!(!dest.join("old.txt").exists());
+
+        SkillService::restore_ssot_from_backup(Some(&backup), &dest);
+
+        assert_eq!(
+            fs::read_to_string(dest.join("old.txt")).unwrap(),
+            "old content"
+        );
+        assert!(dest.join("SKILL.md").exists());
+    }
+
+    #[test]
+    #[serial]
     fn install_conflict_rejects_same_name_from_different_repo() {
         let tmp = tempdir().unwrap();
         let _guard = TestHomeGuard::set(tmp.path());
@@ -3946,9 +3987,10 @@ mod tests {
         db.save_skill(&skill).unwrap();
         SkillService::sync_to_app_dir("migrate-skill", &AgentType::ClaudeCode).unwrap();
 
-        let result = SkillService::migrate_storage(&db, StorageLocation::Unified).expect("migrate");
-        assert_eq!(result.migrated_count, 1);
-        assert_eq!(result.skipped_count, 0);
+        let result = crate::commands::migrate_storage_combined(&db, StorageLocation::Unified)
+            .expect("migrate");
+        assert_eq!(result.skill.migrated_count, 1);
+        assert_eq!(result.skill.skipped_count, 0);
 
         let new_ssot = config::get_home_dir()
             .join(".agents")
@@ -4063,7 +4105,7 @@ mod tests {
             .join("skill-b");
         fs::create_dir_all(&conflict_dir).unwrap();
 
-        let result = SkillService::migrate_storage(&db, StorageLocation::Unified);
+        let result = crate::commands::migrate_storage_combined(&db, StorageLocation::Unified);
         assert!(result.is_err(), "冲突时应中止迁移");
         let err_string = result.unwrap_err().to_string();
         assert!(err_string.contains("MIGRATION_ABORTED"));

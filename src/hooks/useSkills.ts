@@ -7,7 +7,6 @@ import type {
   SkillBackupEntry,
   SkillRepo,
   SkillUpdateInfo,
-  StorageLocation,
 } from '../types';
 import { mergeImportedSkills } from './useSkills.helpers';
 
@@ -221,14 +220,6 @@ export function useDeleteSkillBackup() {
       );
     },
     onSettled: () => queryClient.invalidateQueries({ queryKey: keys.backups }),
-  });
-}
-
-export function useMigrateSkillStorage() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (target: StorageLocation) => skillsApi.migrateSkillStorage(target),
-    onSettled: () => queryClient.invalidateQueries({ queryKey: keys.installed }),
   });
 }
 

@@ -4,12 +4,10 @@ import type {
   DiscoverableSkill,
   ImportSkillSelection,
   InstalledSkill,
-  MigrationResult,
   SkillBackupEntry,
   SkillRepo,
   SkillUninstallResult,
   SkillUpdateInfo,
-  StorageLocation,
   UnmanagedSkill,
 } from '../../types';
 
@@ -86,8 +84,4 @@ export async function restoreSkillBackup(
 
 export async function deleteSkillBackup(backupId: string): Promise<void> {
   return invoke('delete_skill_backup', { backupId });
-}
-
-export async function migrateSkillStorage(target: StorageLocation): Promise<MigrationResult> {
-  return invoke('migrate_skill_storage', { target });
 }

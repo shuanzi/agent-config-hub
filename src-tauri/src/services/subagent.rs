@@ -1142,6 +1142,27 @@ impl SubagentService {
             })
     }
 
+    /// 用 `source` 替换 SSOT 文件 `dest`。
+    fn replace_ssot_file(source: &Path, dest: &Path) -> Result<(), AppError> {
+        if dest.exists() {
+            fs::remove_file(dest).map_err(|e| AppError::io(dest, e))?;
+        }
+        config::copy_file(source, dest)
+    }
+
+    /// 最佳努力：从更新前创建的备份恢复 SSOT 文件。
+    fn restore_ssot_from_backup(backup_path: Option<&PathBuf>, dest: &Path, directory: &str) {
+        let Some(backup) = backup_path else { return };
+        let backup_subagent_file = backup.join(format!("{directory}.md"));
+        if !backup_subagent_file.exists() {
+            return;
+        }
+        let _ = fs::remove_file(dest);
+        if let Err(e) = config::copy_file(&backup_subagent_file, dest) {
+            log::error!("从备份恢复 SSOT 文件失败 {}: {e}", dest.display());
+        }
+    }
+
     pub async fn update_subagent(
         &self,
         db: &Arc<Database>,
@@ -1228,10 +1249,11 @@ impl SubagentService {
 
         let backup_path = Self::create_uninstall_backup(&subagent)?;
 
-        if dest_file.exists() {
-            fs::remove_file(&dest_file).map_err(|e| AppError::io(&dest_file, e))?;
+        // SSOT 替换失败时必须先从备份恢复，避免 SSOT 文件丢失
+        if let Err(err) = Self::replace_ssot_file(&remote_file, &dest_file) {
+            Self::restore_ssot_from_backup(backup_path.as_ref(), &dest_file, &subagent.directory);
+            return Err(err);
         }
-        config::copy_file(&remote_file, &dest_file)?;
 
         let new_hash = SkillService::compute_file_hash(&dest_file).ok();
 
@@ -1278,13 +1300,7 @@ impl SubagentService {
         }
 
         if !sync_failures.is_empty() {
-            if let Some(ref backup) = backup_path {
-                let backup_subagent_file = backup.join(format!("{}.md", subagent.directory));
-                if backup_subagent_file.exists() {
-                    let _ = fs::remove_file(&dest_file);
-                    let _ = config::copy_file(&backup_subagent_file, &dest_file);
-                }
-            }
+            Self::restore_ssot_from_backup(backup_path.as_ref(), &dest_file, &subagent.directory);
             let _ = db.save_subagent(&subagent);
             for app in subagent.apps.enabled_apps() {
                 let _ = Self::sync_to_app_dir(&subagent.directory, &app);
@@ -1415,50 +1431,6 @@ impl SubagentService {
         } else {
             Err(SubagentMigrationFailure { moved, failures })
         }
-    }
-
-    pub fn migrate_storage(
-        db: &Arc<Database>,
-        target: StorageLocation,
-    ) -> Result<MigrationResult, AppError> {
-        let _state_guard = subagent_state_write_guard();
-        let current = get_settings().storage_location;
-        if current == target {
-            return Ok(MigrationResult {
-                migrated_count: 0,
-                skipped_count: 0,
-                errors: vec![],
-            });
-        }
-
-        let old_dir = Self::get_ssot_dir()?;
-        let new_dir = match target {
-            StorageLocation::Hub => config::get_hub_subagents_dir(),
-            StorageLocation::Unified => config::get_home_dir().join(".agents").join("subagents"),
-        };
-
-        let outcome = match Self::migrate_storage_inner(db, target) {
-            Ok(outcome) => outcome,
-            Err(failure) => {
-                Self::rollback_subagent_moves(&old_dir, &new_dir, &failure.moved);
-                return Err(failure.into_error());
-            }
-        };
-
-        crate::settings::set_storage_location(target)?;
-
-        for app in AgentType::all() {
-            let _ = Self::sync_to_app_unlocked(db, &app);
-        }
-
-        log::info!(
-            "Subagent 存储迁移完成: {} 迁移, {} 跳过, {} 错误",
-            outcome.result.migrated_count,
-            outcome.result.skipped_count,
-            outcome.result.errors.len()
-        );
-
-        Ok(outcome.result)
     }
 
     // ========== Backups ==========
@@ -2076,10 +2048,10 @@ mod tests {
         db.save_subagent(&subagent).unwrap();
         SubagentService::sync_to_app_dir("migrate-agent", &AgentType::ClaudeCode).unwrap();
 
-        let result =
-            SubagentService::migrate_storage(&db, StorageLocation::Unified).expect("migrate");
-        assert_eq!(result.migrated_count, 1);
-        assert_eq!(result.skipped_count, 0);
+        let result = crate::commands::migrate_storage_combined(&db, StorageLocation::Unified)
+            .expect("migrate");
+        assert_eq!(result.subagent.migrated_count, 1);
+        assert_eq!(result.subagent.skipped_count, 0);
 
         let new_ssot = config::get_home_dir()
             .join(".agents")
@@ -2135,7 +2107,7 @@ mod tests {
         fs::create_dir_all(conflict_file.parent().unwrap()).unwrap();
         fs::write(&conflict_file, "conflict").unwrap();
 
-        let result = SubagentService::migrate_storage(&db, StorageLocation::Unified);
+        let result = crate::commands::migrate_storage_combined(&db, StorageLocation::Unified);
         assert!(result.is_err(), "冲突时应中止迁移");
         assert!(result
             .unwrap_err()
@@ -2156,6 +2128,32 @@ mod tests {
             crate::settings::get_settings().storage_location,
             StorageLocation::Hub
         );
+    }
+
+    #[test]
+    #[serial]
+    fn update_replace_failure_restores_ssot_from_backup() {
+        let tmp = tempdir().unwrap();
+        let _guard = TestHomeGuard::set(tmp.path());
+
+        let dest_file = tmp.path().join("ssot").join("my-agent.md");
+        write_subagent(dest_file.parent().unwrap(), "my-agent.md", "Old");
+
+        let backup = tmp.path().join("backup");
+        write_subagent(&backup, "my-agent.md", "Old");
+
+        // 源缺失导致复制失败：dest 先被删除，随后必须从备份恢复
+        let missing_source = tmp.path().join("missing-source.md");
+        let result = SubagentService::replace_ssot_file(&missing_source, &dest_file);
+        assert!(result.is_err(), "copy from a missing source must fail");
+        assert!(!dest_file.exists());
+
+        SubagentService::restore_ssot_from_backup(Some(&backup), &dest_file, "my-agent");
+
+        assert!(dest_file.exists());
+        assert!(fs::read_to_string(&dest_file)
+            .unwrap()
+            .contains("name: Old"));
     }
 
     #[test]

@@ -5,11 +5,9 @@ use std::sync::Arc;
 
 use crate::error::{format_skill_error, is_structured_error_payload, AppError};
 use crate::services::skill::{
-    AgentType, DiscoverableSkill, ImportSkillSelection, InstalledSkill, MigrationResult,
-    SkillBackupEntry, SkillRepo, SkillService, SkillUninstallResult, SkillUpdateInfo,
-    UnmanagedSkill,
+    AgentType, DiscoverableSkill, ImportSkillSelection, InstalledSkill, SkillBackupEntry,
+    SkillRepo, SkillService, SkillUninstallResult, SkillUpdateInfo, UnmanagedSkill,
 };
-use crate::settings::StorageLocation;
 use crate::AppState;
 
 fn map_err(err: AppError) -> String {
@@ -180,14 +178,6 @@ pub fn restore_skill_backup(
 #[tauri::command]
 pub fn delete_skill_backup(backup_id: String) -> Result<(), String> {
     SkillService::delete_backup(&backup_id).map_err(map_err)
-}
-
-#[tauri::command]
-pub async fn migrate_skill_storage(
-    target: StorageLocation,
-    app_state: tauri::State<'_, AppState>,
-) -> Result<MigrationResult, String> {
-    SkillService::migrate_storage(&app_state.db, target).map_err(map_err)
 }
 
 pub struct SkillServiceState(pub Arc<SkillService>);

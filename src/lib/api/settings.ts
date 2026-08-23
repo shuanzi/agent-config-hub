@@ -1,5 +1,6 @@
 import { invoke } from './invoke';
 import type {
+  AgentType,
   AppSettings,
   MigrationSummary,
   SetSettingRequest,
@@ -16,6 +17,10 @@ export async function setSettings(settings: AppSettings): Promise<void> {
 
 export async function migrateStorage(target: StorageLocation): Promise<MigrationSummary> {
   return invoke('migrate_storage', { target });
+}
+
+export async function setAgentOverrideDir(app: AgentType, dir: string | null): Promise<void> {
+  return invoke('set_agent_override_dir', { app, dir });
 }
 
 export async function getSetting(key: string): Promise<string | undefined> {

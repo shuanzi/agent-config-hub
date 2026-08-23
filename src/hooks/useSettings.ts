@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import * as settingsApi from '../lib/api/settings';
-import type { StorageLocation } from '../types';
+import type { AgentType, StorageLocation } from '../types';
 
 const key = ['settings'] as const;
 
@@ -23,6 +23,19 @@ export function useMigrateStorage() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (target: StorageLocation) => settingsApi.migrateStorage(target),
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: key });
+      void queryClient.invalidateQueries({ queryKey: ['skills', 'installed'] });
+      void queryClient.invalidateQueries({ queryKey: ['subagents', 'installed'] });
+    },
+  });
+}
+
+export function useSetAgentOverrideDir() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ app, dir }: { app: AgentType; dir: string | null }) =>
+      settingsApi.setAgentOverrideDir(app, dir),
     onSettled: () => {
       void queryClient.invalidateQueries({ queryKey: key });
       void queryClient.invalidateQueries({ queryKey: ['skills', 'installed'] });

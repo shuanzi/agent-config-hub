@@ -110,6 +110,7 @@ export interface MigrationResult {
 export interface MigrationSummary {
   skill: MigrationResult;
   subagent: MigrationResult;
+  projectionErrors: string[];
 }
 
 /** mirrors src-tauri/src/services/skill.rs:SkillBackupEntry */

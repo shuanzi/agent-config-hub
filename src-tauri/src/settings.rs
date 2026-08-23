@@ -208,6 +208,27 @@ pub fn set_storage_location(location: StorageLocation) -> Result<(), AppError> {
     mutate_settings(|settings| settings.storage_location = location)
 }
 
+/// 更新单个 Agent 的配置目录覆盖（`app` 为 `AgentType::as_str()` 标识）。
+pub fn set_agent_config_dir_override(app: &str, dir: Option<String>) -> Result<(), AppError> {
+    match app {
+        "claude-code" | "codex" | "gemini-cli" | "opencode" => {}
+        other => {
+            return Err(AppError::InvalidInput(format!(
+                "不支持的 Agent 标识: '{other}'。可选值: claude-code, codex, gemini-cli, opencode。"
+            )))
+        }
+    }
+    mutate_settings(|settings| {
+        let slot = match app {
+            "claude-code" => &mut settings.claude_code_config_dir,
+            "codex" => &mut settings.codex_config_dir,
+            "gemini-cli" => &mut settings.gemini_cli_config_dir,
+            _ => &mut settings.opencode_config_dir,
+        };
+        *slot = dir;
+    })
+}
+
 pub fn get_claude_override_dir() -> Option<PathBuf> {
     settings_store()
         .read()
@@ -277,6 +298,7 @@ mod tests {
     use serial_test::serial;
 
     #[test]
+    #[serial]
     fn resolve_override_path_expands_tilde() {
         let home = crate::config::get_home_dir();
         assert_eq!(resolve_override_path("~/foo"), home.join("foo"));

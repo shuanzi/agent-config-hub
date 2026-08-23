@@ -5,10 +5,9 @@ use std::sync::Arc;
 use crate::error::{format_subagent_error, is_structured_error_payload, AppError};
 use crate::services::skill::{AgentType, SkillService};
 use crate::services::subagent::{
-    DiscoverableSubagent, InstalledSubagent, MigrationResult, SubagentBackupEntry, SubagentRepo,
-    SubagentService, SubagentUninstallResult, SubagentUpdateInfo,
+    DiscoverableSubagent, InstalledSubagent, SubagentBackupEntry, SubagentRepo, SubagentService,
+    SubagentUninstallResult, SubagentUpdateInfo,
 };
-use crate::settings::StorageLocation;
 use crate::AppState;
 
 fn map_err(err: AppError) -> String {
@@ -154,14 +153,6 @@ pub fn restore_subagent_backup(
 #[tauri::command]
 pub fn delete_subagent_backup(backup_id: String) -> Result<(), String> {
     SubagentService::delete_backup(&backup_id).map_err(map_err)
-}
-
-#[tauri::command]
-pub async fn migrate_subagent_storage(
-    target: StorageLocation,
-    app_state: tauri::State<'_, AppState>,
-) -> Result<MigrationResult, String> {
-    SubagentService::migrate_storage(&app_state.db, target).map_err(map_err)
 }
 
 pub struct SubagentServiceState(pub Arc<SubagentService>);

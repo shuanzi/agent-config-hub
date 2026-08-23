@@ -12,7 +12,9 @@ const ERROR_MESSAGES: Record<string, string | ((ctx: Record<string, string>) => 
   DOWNLOAD_FAILED: '下载仓库失败。',
   SKILL_DIR_NOT_FOUND: '未在仓库中找到该 Skill 目录。',
   SKILL_DIRECTORY_CONFLICT: (ctx) =>
-    `目录冲突：${ctx.directory ?? ''} 已被其他仓库占用（${ctx.existingRepo ?? 'unknown'}），请先卸载后再安装。`,
+    ctx.existingRepo === 'unmanaged'
+      ? `目录冲突：${ctx.directory ?? ''} 在目标位置已存在未托管内容，不会被覆盖。`
+      : `目录冲突：${ctx.directory ?? ''} 已被其他仓库占用（${ctx.existingRepo ?? 'unknown'}），请先卸载后再安装。`,
   EMPTY_ARCHIVE: '下载的归档为空。',
   INVALID_REPO_REF: '非法的仓库坐标。',
   INVALID_SKILL_DIRECTORY: '非法的 Skill 目录。',
@@ -39,6 +41,7 @@ const SUGGESTION_MESSAGES: Record<string, string> = {
   checkRepoUrl: '请确认仓库地址与分支是否正确。',
   checkPermission: '请检查文件权限。',
   uninstallFirst: '请先卸载冲突的 Skill，或选择其他目录名。',
+  importFirst: '请先通过「导入」纳管该目录，或手动删除后再安装。',
   checkZipContent: '请检查 ZIP 内容是否包含有效的 SKILL.md。',
   http403: '服务器返回 403，请检查访问权限。',
   http404: '服务器返回 404，请确认仓库存在。',

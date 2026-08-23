@@ -3,12 +3,10 @@ import type {
   AgentType,
   DiscoverableSubagent,
   InstalledSubagent,
-  MigrationResult,
   SubagentBackupEntry,
   SubagentRepo,
   SubagentUninstallResult,
   SubagentUpdateInfo,
-  StorageLocation,
 } from '../../types';
 
 export async function getInstalledSubagents(): Promise<InstalledSubagent[]> {
@@ -71,8 +69,4 @@ export async function restoreSubagentBackup(
 
 export async function deleteSubagentBackup(backupId: string): Promise<void> {
   return invoke('delete_subagent_backup', { backupId });
-}
-
-export async function migrateSubagentStorage(target: StorageLocation): Promise<MigrationResult> {
-  return invoke('migrate_subagent_storage', { target });
 }

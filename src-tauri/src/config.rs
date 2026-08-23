@@ -412,6 +412,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial]
     fn get_hub_dir_uses_acm_home_override() {
         let tmp = tempfile::tempdir().unwrap();
         std::env::set_var(ACM_HOME_ENV, tmp.path().as_os_str());
