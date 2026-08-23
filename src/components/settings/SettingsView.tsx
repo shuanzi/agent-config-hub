@@ -6,7 +6,7 @@ import {
   useMigrateStorage,
   useSetAgentOverrideDir,
   useSettings,
-  useSetSettings,
+  useSetSyncMethod,
 } from '../../hooks/useSettings';
 import { toUserError } from '../../lib/errors';
 import './settings.css';
@@ -35,7 +35,7 @@ const AGENT_FIELDS: { key: OverrideKey; label: string; app: AgentType }[] = [
 export function SettingsView() {
   const { data: settings, isLoading: settingsLoading } = useSettings();
   const { data: installedSkills } = useInstalledSkills();
-  const setSettingsMutation = useSetSettings();
+  const syncMethodMutation = useSetSyncMethod();
   const migrateMutation = useMigrateStorage();
   const overrideMutation = useSetAgentOverrideDir();
 
@@ -59,22 +59,19 @@ export function SettingsView() {
     );
   }
 
-  const save = async (next: AppSettings) => {
+  // 同步方式是单字段保存路径：不提交整个 draft，避免把未保存的
+  // 覆盖路径编辑一并持久化（storageLocation/覆盖字段由后端强制走专用命令）。
+  const handleSyncChange = async (value: SyncMethod) => {
     setErrorMessage('');
     setSuccessMessage('');
     try {
-      await setSettingsMutation.mutateAsync(next);
+      await syncMethodMutation.mutateAsync(value);
+      setDraft({ ...draft, syncMethod: value });
       setSuccessMessage('设置已保存。');
     } catch (error) {
       const userError = toUserError(error);
       setErrorMessage([userError.message, userError.suggestion].filter(Boolean).join('\n'));
     }
-  };
-
-  const handleSyncChange = (value: SyncMethod) => {
-    const next = { ...draft, syncMethod: value };
-    setDraft(next);
-    void save(next);
   };
 
   const handleStorageSelect = (value: StorageLocation) => {
@@ -96,10 +93,6 @@ export function SettingsView() {
       const errors = [...result.skill.errors, ...result.subagent.errors];
       if (errors.length > 0) {
         setErrorMessage(`迁移完成 ${totalMigrated} 项，失败 ${errors.length} 项。`);
-      } else if (result.projectionErrors.length > 0) {
-        setErrorMessage(
-          `迁移完成 ${totalMigrated} 项，但部分 Agent 投影重建失败：${result.projectionErrors.join('；')}`,
-        );
       } else {
         setSuccessMessage(`迁移完成 ${totalMigrated} 项。`);
       }
@@ -116,8 +109,8 @@ export function SettingsView() {
     setDraft(next);
   };
 
-  // 覆盖路径变更需要搬迁受管投影：逐个 Agent 调用专用命令，
-  // 而不是仅持久化设置（其余字段仍走 set_settings_command）。
+  // 覆盖路径变更需要搬迁受管投影：逐个 Agent 调用专用命令
+  // （set_settings_command 会在后端拒绝 storageLocation/覆盖字段的变更）。
   const handleSaveOverrides = async () => {
     setErrorMessage('');
     setSuccessMessage('');
@@ -150,7 +143,7 @@ export function SettingsView() {
                 draft.syncMethod === option.value ? 'settings-option active' : 'settings-option'
               }
               onClick={() => handleSyncChange(option.value)}
-              disabled={setSettingsMutation.isPending}
+              disabled={syncMethodMutation.isPending}
             >
               {option.label}
             </button>
@@ -175,7 +168,7 @@ export function SettingsView() {
                   : 'settings-option'
               }
               onClick={() => handleStorageSelect(option.value)}
-              disabled={migrateMutation.isPending || setSettingsMutation.isPending}
+              disabled={migrateMutation.isPending || syncMethodMutation.isPending}
             >
               {option.label}
             </button>
@@ -221,7 +214,7 @@ export function SettingsView() {
             type="button"
             className="primary"
             onClick={handleSaveOverrides}
-            disabled={setSettingsMutation.isPending || overrideMutation.isPending}
+            disabled={syncMethodMutation.isPending || overrideMutation.isPending}
           >
             {overrideMutation.isPending ? <Loader2 size={14} className="spin" /> : null}
             保存覆盖路径

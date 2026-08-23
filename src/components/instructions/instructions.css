@@ -70,6 +70,21 @@
   padding: 8px;
 }
 
+.instructions-filter-bar {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.instructions-filter-bar input {
+  width: 100%;
+  min-width: 0;
+}
+
+.instructions-filter-bar select {
+  flex-shrink: 0;
+}
+
 .instructions-detail-pane {
   overflow-y: auto;
   padding: 16px;

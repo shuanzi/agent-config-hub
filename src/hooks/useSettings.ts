@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import * as settingsApi from '../lib/api/settings';
-import type { AgentType, StorageLocation } from '../types';
+import type { AgentType, StorageLocation, SyncMethod } from '../types';
 
 const key = ['settings'] as const;
 
@@ -15,6 +15,14 @@ export function useSetSettings() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: settingsApi.setSettings,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: key }),
+  });
+}
+
+export function useSetSyncMethod() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (method: SyncMethod) => settingsApi.setSyncMethod(method),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: key }),
   });
 }

@@ -5,6 +5,7 @@ import type {
   MigrationSummary,
   SetSettingRequest,
   StorageLocation,
+  SyncMethod,
 } from '../../types';
 
 export async function getSettings(): Promise<AppSettings> {
@@ -13,6 +14,10 @@ export async function getSettings(): Promise<AppSettings> {
 
 export async function setSettings(settings: AppSettings): Promise<void> {
   return invoke('set_settings_command', { settings });
+}
+
+export async function setSyncMethod(method: SyncMethod): Promise<void> {
+  return invoke('set_sync_method_command', { method });
 }
 
 export async function migrateStorage(target: StorageLocation): Promise<MigrationSummary> {

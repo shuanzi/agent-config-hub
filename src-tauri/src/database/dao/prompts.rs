@@ -57,6 +57,15 @@ impl Database {
     /// 保存指令预设（添加或更新）。
     pub fn save_prompt(&self, app_type: &str, prompt: &Prompt) -> Result<(), AppError> {
         let conn = lock_conn!(self.conn);
+        Self::save_prompt_with_conn(&conn, app_type, prompt)
+    }
+
+    /// 在已有连接上保存指令预设（供事务批量写入使用）。
+    pub(crate) fn save_prompt_with_conn(
+        conn: &rusqlite::Connection,
+        app_type: &str,
+        prompt: &Prompt,
+    ) -> Result<(), AppError> {
         conn.execute(
             "INSERT OR REPLACE INTO prompts (
                 id, app_type, name, content, description, enabled, created_at, updated_at

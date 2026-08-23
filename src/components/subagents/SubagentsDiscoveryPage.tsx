@@ -41,25 +41,20 @@ export function SubagentsDiscoveryPage({ activeApp }: SubagentsDiscoveryPageProp
 
   const installedKeys = useMemo(() => {
     if (installedSubagents === undefined) return new Set<string>();
-    return new Set(
-      installedSubagents.map((s) => {
-        const owner = s.repoOwner?.toLowerCase() ?? '';
-        const name = s.repoName?.toLowerCase() ?? '';
-        return `${s.directory.toLowerCase()}:${owner}:${name}`;
-      }),
-    );
+    // 以完整身份 `{owner}/{repo}:{path}` 标记已安装：同仓库允许存在
+    // a/reviewer.md 与 b/reviewer.md 这类 stem 相同的文件，不能按
+    // directory+repo 折叠。
+    return new Set(installedSubagents.map((s) => s.id.toLowerCase()));
   }, [installedSubagents]);
 
   type SubagentItem = DiscoverableSubagent & { installed: boolean };
 
   const subagents: SubagentItem[] = useMemo(() => {
     if (discoverableSubagents === undefined) return [];
-    return discoverableSubagents.map((subagent) => {
-      const installName =
-        subagent.directory.split(/[/\\]/).pop()?.toLowerCase() ?? subagent.directory.toLowerCase();
-      const key = `${installName}:${subagent.repoOwner.toLowerCase()}:${subagent.repoName.toLowerCase()}`;
-      return { ...subagent, installed: installedKeys.has(key) };
-    });
+    return discoverableSubagents.map((subagent) => ({
+      ...subagent,
+      installed: installedKeys.has(subagent.key.toLowerCase()),
+    }));
   }, [discoverableSubagents, installedKeys]);
 
   const repoOptions = useMemo(() => {

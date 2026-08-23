@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { Search } from 'lucide-react';
 import type { AgentType, Prompt } from '../../types';
 import {
   usePrompts,
@@ -42,6 +43,8 @@ export function InstructionsPanel({ activeApp }: InstructionsPanelProps) {
   const [draft, setDraft] = useState<Prompt>(emptyPrompt());
   const [errorMessage, setErrorMessage] = useState('');
   const [showLiveContent, setShowLiveContent] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'enabled' | 'disabled'>('all');
 
   const { data: prompts, isLoading } = usePrompts(activeApp);
   const { data: liveContent, isLoading: isLoadingLive } = useCurrentPromptFileContent(activeApp);
@@ -59,6 +62,24 @@ export function InstructionsPanel({ activeApp }: InstructionsPanelProps) {
       return a.id.localeCompare(b.id);
     });
   }, [prompts]);
+
+  const filteredPromptList = useMemo(() => {
+    let result = promptList;
+    if (statusFilter === 'enabled') {
+      result = result.filter(([, prompt]) => prompt.enabled);
+    } else if (statusFilter === 'disabled') {
+      result = result.filter(([, prompt]) => !prompt.enabled);
+    }
+    const query = searchQuery.trim().toLowerCase();
+    if (query) {
+      result = result.filter(([id, prompt]) =>
+        [prompt.name, prompt.description ?? '', id].some((value) =>
+          value.toLowerCase().includes(query),
+        ),
+      );
+    }
+    return result;
+  }, [promptList, searchQuery, statusFilter]);
 
   const selectedPrompt = useMemo(() => {
     if (isCreating) return draft;
@@ -177,6 +198,39 @@ export function InstructionsPanel({ activeApp }: InstructionsPanelProps) {
 
       <div className="instructions-body">
         <div className="instructions-list-pane">
+          <div className="instructions-filter-bar">
+            <div style={{ position: 'relative' }}>
+              <Search
+                size={14}
+                style={{
+                  position: 'absolute',
+                  left: 8,
+                  top: '50%',
+                  transform: 'translateY(-50%)',
+                }}
+              />
+              <input
+                id="instructions-search"
+                type="text"
+                placeholder="搜索预设名称"
+                value={searchQuery}
+                onChange={(event) => setSearchQuery(event.target.value)}
+                style={{ paddingLeft: 28 }}
+              />
+            </div>
+            <select
+              id="instructions-status-filter"
+              aria-label="状态过滤"
+              value={statusFilter}
+              onChange={(event) =>
+                setStatusFilter(event.target.value as 'all' | 'enabled' | 'disabled')
+              }
+            >
+              <option value="all">全部状态</option>
+              <option value="enabled">已启用</option>
+              <option value="disabled">未启用</option>
+            </select>
+          </div>
           {isLoading ? (
             <div className="state-loading">加载中…</div>
           ) : promptList.length === 0 ? (
@@ -184,9 +238,13 @@ export function InstructionsPanel({ activeApp }: InstructionsPanelProps) {
               <p>尚无指令预设。</p>
               <p className="state-empty-hint">点击“新建预设”或“从 live 文件导入”。</p>
             </div>
+          ) : filteredPromptList.length === 0 ? (
+            <div className="state-empty">
+              <p>没有匹配的预设。</p>
+            </div>
           ) : (
             <ul className="asset-list">
-              {promptList.map(([id, prompt]) => (
+              {filteredPromptList.map(([id, prompt]) => (
                 <li
                   key={id}
                   className={`asset-row ${selectedId === id ? 'asset-row-selected' : ''}`}

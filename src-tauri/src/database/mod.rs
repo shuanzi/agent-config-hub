@@ -84,6 +84,20 @@ impl Database {
             .map_err(|e| AppError::Database(format!("设置 user_version 失败: {e}")))?;
         Ok(())
     }
+
+    /// 在单个 SQLite 事务中执行 `f`；任一写失败即整体回滚。
+    pub(crate) fn transact<T>(
+        &self,
+        f: impl FnOnce(&Connection) -> Result<T, AppError>,
+    ) -> Result<T, AppError> {
+        let mut conn = lock_conn!(self.conn);
+        let tx = conn
+            .transaction()
+            .map_err(|e| AppError::Database(e.to_string()))?;
+        let result = f(&tx)?;
+        tx.commit().map_err(|e| AppError::Database(e.to_string()))?;
+        Ok(result)
+    }
 }
 
 #[cfg(test)]

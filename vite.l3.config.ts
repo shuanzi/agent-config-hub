@@ -24,6 +24,12 @@ export default defineConfig({
     strictPort: true,
   },
   envPrefix: ['VITE_', 'TAURI_'],
+  define: {
+    // L3 harness 页在真实 Tauri webview 中运行，无法读取构建机路径；
+    // 由本配置文件的位置解析仓库内的 fixture 路径并在构建期注入，
+    // 保证干净检出/CI 下也能正确定位。
+    __L3_SMOKE_FIXTURE_ZIP__: JSON.stringify(resolve(here, 'fixtures/l3/l3-smoke-skills.zip')),
+  },
   build: {
     target: 'es2022',
     outDir: 'dist',

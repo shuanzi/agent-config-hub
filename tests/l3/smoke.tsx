@@ -10,8 +10,10 @@ import type { InstalledSkill, Prompt, SkillRepo } from '../../src/types';
 // 初始化 WDIO Tauri plugin 前端侧（提供 execute/mock 所需的 __wdio_original_core__）。
 void initWdioPlugin();
 
-const FIXTURE_ZIP =
-  '/Users/xiquandai/.codex/worktrees/39d9/agent_config_hub/fixtures/l3/l3-smoke-skills.zip';
+// 由 vite.l3.config.ts 的 define 在构建期注入（从仓库根解析 fixture 路径，
+// 不再硬编码本机 worktree 路径）。
+declare const __L3_SMOKE_FIXTURE_ZIP__: string;
+const FIXTURE_ZIP = __L3_SMOKE_FIXTURE_ZIP__;
 
 interface SmokeResult {
   settings?: { storageLocation: string; syncMethod: string };

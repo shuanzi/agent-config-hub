@@ -248,6 +248,18 @@ impl SubagentService {
         ssot_dir.join(format!("{directory}.md"))
     }
 
+    /// 目标位置已存在但数据库无记录：属于未托管内容，绝不覆盖/冒名记录。
+    fn ensure_no_unmanaged_destination(dest: &Path, install_name: &str) -> Result<(), AppError> {
+        if dest.exists() || SkillService::is_symlink(dest) {
+            return Err(AppError::Message(format_subagent_error(
+                "SUBAGENT_DIRECTORY_CONFLICT",
+                &[("directory", install_name), ("existingRepo", "unmanaged")],
+                Some("importFirst"),
+            )));
+        }
+        Ok(())
+    }
+
     // ========== Installed subagent queries ==========
 
     pub fn get_all_installed(db: &Arc<Database>) -> Result<Vec<InstalledSubagent>, AppError> {
@@ -601,6 +613,9 @@ impl SubagentService {
             return Ok(existing);
         }
 
+        // 磁盘上已有同名文件但 DB 无记录：未托管内容，拒绝冒名接管
+        Self::ensure_no_unmanaged_destination(&dest_file, &install_name)?;
+
         if !dest_file.exists() {
             let source_file = downloaded_source
                 .as_ref()
@@ -835,16 +850,26 @@ impl SubagentService {
             }
         }
 
+        let mut sync_failures: Vec<String> = Vec::new();
         for subagent in subagents.values() {
             if subagent.apps.is_enabled_for(app) {
                 if let Err(err) = Self::sync_to_app_dir(&subagent.directory, app) {
                     log::warn!(
-                        "同步 subagent {} 到 {} 失败，跳过该条: {err}",
+                        "同步 subagent {} 到 {} 失败: {err}",
                         subagent.directory,
                         app.as_str()
                     );
+                    sync_failures.push(subagent.directory.clone());
                 }
             }
+        }
+
+        if !sync_failures.is_empty() {
+            return Err(AppError::Message(format_subagent_error(
+                "PROJECTION_SYNC_FAILED",
+                &[("app", app.as_str()), ("items", &sync_failures.join(", "))],
+                Some("checkPermission"),
+            )));
         }
 
         Ok(())
@@ -1011,6 +1036,29 @@ impl SubagentService {
         }
     }
 
+    /// 按完整身份 `{owner}/{repo}:{path}` 匹配远程候选。
+    ///
+    /// 不能用 stem 推导的 `directory` 匹配：同一仓库可能同时存在
+    /// `a/reviewer.md` 与 `b/reviewer.md`，stem 匹配会更新错文件。
+    fn remote_match_for_installed<'a>(
+        remote: &'a [DiscoverableSubagent],
+        installed: &InstalledSubagent,
+    ) -> Option<&'a DiscoverableSubagent> {
+        let installed_path = installed
+            .id
+            .split_once(':')
+            .map(|(_, path)| path)
+            .unwrap_or(&installed.directory);
+        remote
+            .iter()
+            .find(|rs| rs.key.eq_ignore_ascii_case(&installed.id))
+            .or_else(|| {
+                remote
+                    .iter()
+                    .find(|rs| rs.path.eq_ignore_ascii_case(installed_path))
+            })
+    }
+
     // ========== Updates ==========
 
     pub async fn check_updates(
@@ -1077,9 +1125,7 @@ impl SubagentService {
             let _state_guard = subagent_state_read_guard();
 
             for subagent in group_subagents {
-                let remote_match = remote_subagents
-                    .iter()
-                    .find(|rs| rs.directory.eq_ignore_ascii_case(&subagent.directory));
+                let remote_match = Self::remote_match_for_installed(&remote_subagents, subagent);
 
                 let remote_file = match remote_match {
                     Some(rs) => temp_dir.join(&rs.path),
@@ -1163,6 +1209,28 @@ impl SubagentService {
         }
     }
 
+    /// 持久化更新后的元数据；失败时从备份恢复 SSOT、还原数据库记录并重新同步投影，
+    /// 避免磁盘上是新版本而 DB 保留旧哈希/元数据的分叉状态。
+    fn persist_subagent_update_or_restore(
+        db: &Arc<Database>,
+        previous: &InstalledSubagent,
+        updated_metadata: &InstalledSubagent,
+        backup_path: Option<&PathBuf>,
+        dest: &Path,
+    ) -> Result<InstalledSubagent, AppError> {
+        match Self::persist_updated_subagent_metadata(db, updated_metadata) {
+            Ok(updated) => Ok(updated),
+            Err(err) => {
+                Self::restore_ssot_from_backup(backup_path, dest, &previous.directory);
+                let _ = db.save_subagent(previous);
+                for app in previous.apps.enabled_apps() {
+                    let _ = Self::sync_to_app_dir(&previous.directory, &app);
+                }
+                Err(err)
+            }
+        }
+    }
+
     pub async fn update_subagent(
         &self,
         db: &Arc<Database>,
@@ -1213,9 +1281,7 @@ impl SubagentService {
         };
         Self::scan_dir_recursive_static(temp_dir, temp_dir, &resolved_repo, &mut remote_subagents)?;
 
-        let remote_match = remote_subagents
-            .iter()
-            .find(|rs| rs.directory.eq_ignore_ascii_case(&subagent.directory))
+        let remote_match = Self::remote_match_for_installed(&remote_subagents, &subagent)
             .ok_or_else(|| {
                 AppError::Message(format_subagent_error(
                     "SUBAGENT_FILE_NOT_FOUND",
@@ -1289,7 +1355,13 @@ impl SubagentService {
             updated_at: chrono::Utc::now().timestamp(),
         };
 
-        let updated_subagent = Self::persist_updated_subagent_metadata(db, &updated_metadata)?;
+        let updated_subagent = Self::persist_subagent_update_or_restore(
+            db,
+            &subagent,
+            &updated_metadata,
+            backup_path.as_ref(),
+            &dest_file,
+        )?;
 
         let mut sync_failures: Vec<AgentType> = Vec::new();
         for app in updated_subagent.apps.enabled_apps() {
@@ -1345,37 +1417,46 @@ impl SubagentService {
     }
 
     /// 执行实际的文件移动，不持久化设置、不刷新投影。
+    ///
+    /// `failures` 只携带稳定标识（目录名/阶段名），原始错误（可能含绝对路径）
+    /// 只写日志，绝不进入跨 IPC 的结构化错误负载。
     pub(crate) fn migrate_storage_inner(
         db: &Arc<Database>,
         target: StorageLocation,
     ) -> Result<SubagentMigrationOutcome, SubagentMigrationFailure> {
-        let old_dir = Self::get_ssot_dir().map_err(|e| SubagentMigrationFailure {
-            moved: vec![],
-            failures: vec![e.to_string()],
+        let old_dir = Self::get_ssot_dir().map_err(|e| {
+            log::warn!("读取 Subagent SSOT 目录失败: {e}");
+            SubagentMigrationFailure {
+                moved: vec![],
+                failures: vec!["resolveSourceDir".to_string()],
+            }
         })?;
         let new_dir = match target {
             StorageLocation::Hub => config::get_hub_subagents_dir(),
             StorageLocation::Unified => config::get_home_dir().join(".agents").join("subagents"),
         };
         if let Err(e) = fs::create_dir_all(&new_dir) {
+            log::warn!("创建 Subagent 迁移目标目录失败: {e}");
             return Err(SubagentMigrationFailure {
                 moved: vec![],
-                failures: vec![e.to_string()],
+                failures: vec!["createTargetDir".to_string()],
             });
         }
         if let Err(e) = Self::validate_subagent_storage_destination(&new_dir) {
+            log::warn!("Subagent 迁移目标校验失败: {e}");
             return Err(SubagentMigrationFailure {
                 moved: vec![],
-                failures: vec![e.to_string()],
+                failures: vec!["validateDestination".to_string()],
             });
         }
 
         let subagents = match db.get_all_installed_subagents() {
             Ok(subagents) => subagents,
             Err(e) => {
+                log::warn!("读取已安装 Subagent 列表失败: {e}");
                 return Err(SubagentMigrationFailure {
                     moved: vec![],
-                    failures: vec![e.to_string()],
+                    failures: vec!["readInstalled".to_string()],
                 });
             }
         };
@@ -1392,7 +1473,8 @@ impl SubagentService {
             let directory = match SkillService::require_valid_directory(&subagent.directory) {
                 Ok(directory) => directory,
                 Err(err) => {
-                    failures.push(format!("{}: {err}", subagent.directory.escape_debug()));
+                    log::warn!("跳过非法 directory 的迁移: {err}");
+                    failures.push(subagent.directory.escape_debug().to_string());
                     continue;
                 }
             };
@@ -1404,7 +1486,7 @@ impl SubagentService {
                 continue;
             }
             if dst.exists() {
-                failures.push(format!("{}: 目标位置已存在", subagent.directory));
+                failures.push(directory);
                 continue;
             }
 
@@ -1420,7 +1502,8 @@ impl SubagentService {
                         moved.push(directory);
                     }
                     Err(e) => {
-                        failures.push(format!("{}: {e}", subagent.directory));
+                        log::warn!("迁移 Subagent {directory} 失败: {e}");
+                        failures.push(directory);
                     }
                 },
             }
@@ -1705,6 +1788,178 @@ mod tests {
         )
         .expect("write subagent md");
         path
+    }
+
+    fn installed_subagent(id: &str, directory: &str) -> InstalledSubagent {
+        InstalledSubagent {
+            id: id.to_string(),
+            name: directory.to_string(),
+            description: None,
+            directory: directory.to_string(),
+            repo_owner: Some("owner".to_string()),
+            repo_name: Some("repo".to_string()),
+            repo_branch: Some("main".to_string()),
+            readme_url: None,
+            apps: SubagentApps::default(),
+            installed_at: 1,
+            content_hash: None,
+            updated_at: 0,
+        }
+    }
+
+    fn discoverable(key: &str, directory: &str, path: &str) -> DiscoverableSubagent {
+        DiscoverableSubagent {
+            key: key.to_string(),
+            name: directory.to_string(),
+            description: String::new(),
+            directory: directory.to_string(),
+            path: path.to_string(),
+            readme_url: None,
+            repo_owner: "owner".to_string(),
+            repo_name: "repo".to_string(),
+            repo_branch: "main".to_string(),
+        }
+    }
+
+    #[test]
+    fn remote_match_uses_full_source_path_not_stem() {
+        // 同一仓库存在 a/reviewer.md 与 b/reviewer.md：stem 相同，身份不同
+        let remote = vec![
+            discoverable("owner/repo:a/reviewer.md", "reviewer", "a/reviewer.md"),
+            discoverable("owner/repo:b/reviewer.md", "reviewer", "b/reviewer.md"),
+        ];
+
+        let installed = installed_subagent("owner/repo:b/reviewer.md", "reviewer");
+        let matched = SubagentService::remote_match_for_installed(&remote, &installed)
+            .expect("must match by full path");
+        assert_eq!(matched.path, "b/reviewer.md");
+
+        let installed = installed_subagent("owner/repo:a/reviewer.md", "reviewer");
+        let matched = SubagentService::remote_match_for_installed(&remote, &installed)
+            .expect("must match by full path");
+        assert_eq!(matched.path, "a/reviewer.md");
+
+        // 完整身份在远程不存在时不得回退到 stem 匹配（避免更新错文件）
+        let installed = installed_subagent("owner/repo:c/reviewer.md", "reviewer");
+        assert!(SubagentService::remote_match_for_installed(&remote, &installed).is_none());
+    }
+
+    #[test]
+    #[serial]
+    fn migration_aborted_payload_hides_raw_paths() {
+        let tmp = tempdir().unwrap();
+        let _guard = TestHomeGuard::set(tmp.path());
+
+        // 故障注入：统一目录目标已存在且是普通文件，create_dir_all 的原始错误含绝对路径
+        let target = config::get_home_dir().join(".agents").join("subagents");
+        fs::create_dir_all(target.parent().unwrap()).unwrap();
+        fs::write(&target, "not a directory").unwrap();
+
+        let db = Arc::new(Database::memory().unwrap());
+        let failure = match SubagentService::migrate_storage_inner(&db, StorageLocation::Unified) {
+            Err(failure) => failure,
+            Ok(_) => panic!("unwritable destination must abort"),
+        };
+        let payload = failure.into_error().to_string();
+
+        assert!(payload.contains("MIGRATION_ABORTED"));
+        assert!(payload.contains("createTargetDir"));
+        assert!(
+            !payload.contains(tmp.path().to_string_lossy().as_ref()),
+            "payload must not leak absolute paths: {payload}"
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn install_repo_subagent_rejects_unmanaged_on_disk_destination() {
+        let tmp = tempdir().unwrap();
+        let _guard = TestHomeGuard::set(tmp.path());
+
+        // 未托管的同名文件（数据库无记录）
+        let dest = write_subagent(
+            &SubagentService::get_ssot_dir().unwrap(),
+            "review.md",
+            "Unmanaged",
+        );
+
+        let err = SubagentService::ensure_no_unmanaged_destination(&dest, "review")
+            .expect_err("unmanaged on-disk destination must conflict");
+        let payload = err.to_string();
+        assert!(payload.contains("SUBAGENT_DIRECTORY_CONFLICT"));
+        assert!(payload.contains("unmanaged"));
+        assert!(payload.contains("importFirst"));
+
+        assert!(dest.exists(), "unmanaged file must stay untouched");
+    }
+
+    #[test]
+    #[serial]
+    fn persist_subagent_update_or_restore_reverts_ssot_and_db_on_persist_failure() {
+        let tmp = tempdir().unwrap();
+        let _guard = TestHomeGuard::set(tmp.path());
+        let db = Arc::new(Database::memory().unwrap());
+
+        let previous = installed_subagent("owner/repo:upd.md", "upd");
+        db.save_subagent(&previous).unwrap();
+
+        // 旧 SSOT 文件与更新前备份
+        let dest = write_subagent(&SubagentService::get_ssot_dir().unwrap(), "upd.md", "Old");
+        let backup = tmp.path().join("backup");
+        write_subagent(&backup, "upd.md", "Old");
+
+        // 模拟 SSOT 替换已成功：dest 现在是新版本
+        fs::write(&dest, "---\nname: New\ndescription: new\n---\n").unwrap();
+
+        // 故障注入：DB 只读，元数据持久化必然失败
+        {
+            let conn = db.conn.lock().expect("lock conn");
+            conn.execute("PRAGMA query_only = ON;", [])
+                .expect("enable query_only");
+        }
+
+        let updated_metadata = InstalledSubagent {
+            name: "New".to_string(),
+            content_hash: Some("newhash".to_string()),
+            ..previous.clone()
+        };
+        let result = SubagentService::persist_subagent_update_or_restore(
+            &db,
+            &previous,
+            &updated_metadata,
+            Some(&backup),
+            &dest,
+        );
+        assert!(result.is_err(), "persist failure must propagate");
+
+        // SSOT 从备份恢复为旧版本
+        assert!(
+            fs::read_to_string(&dest).unwrap().contains("name: Old"),
+            "SSOT must be restored from backup"
+        );
+        // DB 保留旧记录（无部分写入的新元数据）
+        let stored = db.get_installed_subagent(&previous.id).unwrap().unwrap();
+        assert_eq!(stored.name, "upd");
+        assert_eq!(stored.content_hash, None);
+    }
+
+    #[test]
+    #[serial]
+    fn sync_to_app_unlocked_aggregates_per_subagent_failures() {
+        let tmp = tempdir().unwrap();
+        let _guard = TestHomeGuard::set(tmp.path());
+        let db = Arc::new(Database::memory().unwrap());
+
+        // DB 记录为 claude 启用，但 SSOT 文件不存在 → 该项同步必然失败
+        let mut ghost = installed_subagent("owner/repo:ghost.md", "ghost");
+        ghost.apps = SubagentApps::only(&AgentType::ClaudeCode);
+        db.save_subagent(&ghost).unwrap();
+
+        let err = SubagentService::sync_to_app_unlocked(&db, &AgentType::ClaudeCode)
+            .expect_err("per-subagent failures must surface instead of being swallowed");
+        let payload = err.to_string();
+        assert!(payload.contains("PROJECTION_SYNC_FAILED"));
+        assert!(payload.contains("ghost"));
     }
 
     #[test]

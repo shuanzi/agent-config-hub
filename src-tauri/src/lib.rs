@@ -93,6 +93,7 @@ pub fn run() {
     let builder = builder.invoke_handler(tauri::generate_handler![
         get_settings_command,
         set_settings_command,
+        set_sync_method_command,
         get_setting_command,
         set_setting_command,
         set_agent_override_dir,
@@ -138,6 +139,7 @@ pub fn run() {
     let builder = builder.invoke_handler(tauri::generate_handler![
         get_settings_command,
         set_settings_command,
+        set_sync_method_command,
         get_setting_command,
         set_setting_command,
         set_agent_override_dir,

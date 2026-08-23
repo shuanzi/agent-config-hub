@@ -10,6 +10,7 @@ use std::sync::{OnceLock, RwLock, RwLockWriteGuard};
 use serde::{Deserialize, Serialize};
 
 use crate::config;
+use crate::database::Database;
 use crate::error::AppError;
 use crate::services::skill::AgentType;
 use crate::AppState;
@@ -20,7 +21,7 @@ fn prompt_state_lock() -> &'static RwLock<()> {
     LOCK.get_or_init(|| RwLock::new(()))
 }
 
-fn prompt_state_write_guard() -> RwLockWriteGuard<'static, ()> {
+pub(crate) fn prompt_state_write_guard() -> RwLockWriteGuard<'static, ()> {
     prompt_state_lock().write().unwrap_or_else(|poisoned| {
         log::warn!("Prompt state write lock was poisoned; recovering the protected state");
         poisoned.into_inner()
@@ -132,17 +133,18 @@ impl PromptService {
         Ok(())
     }
 
-    /// 启用指定预设：先备份 live 文件内容，再互斥启用并原子写入。
+    /// 启用指定预设：先计算 live 备份，写入 live 文件，再在单个事务中持久化全部变更。
+    /// 事务失败时回滚全部 DB 写入并恢复之前的 live 文件内容。
     pub fn enable_prompt(state: &AppState, app: AgentType, id: &str) -> Result<(), AppError> {
         let _state_guard = prompt_state_write_guard();
         let target_path = prompt_file_path(&app);
 
-        // 1. 备份当前 live 文件内容（若与已启用预设不同）。
+        let mut prompts = state.db.get_prompts(app.as_str())?;
+
+        // 1. 备份当前 live 文件内容（仅内存计算，统一在事务中落库）。
         if target_path.exists() {
             if let Ok(live_content) = std::fs::read_to_string(&target_path) {
                 if !live_content.trim().is_empty() {
-                    let mut prompts = state.db.get_prompts(app.as_str())?;
-
                     if let Some((enabled_id, enabled_prompt)) = prompts
                         .iter_mut()
                         .find(|(_, p)| p.enabled)
@@ -153,7 +155,6 @@ impl PromptService {
                             enabled_prompt.content = live_content;
                             enabled_prompt.updated_at = Some(timestamp);
                             log::info!("备份 live 内容到已启用预设: {enabled_id}");
-                            state.db.save_prompt(app.as_str(), enabled_prompt)?;
                         }
                     } else {
                         let content_exists = prompts
@@ -175,30 +176,48 @@ impl PromptService {
                                 updated_at: Some(timestamp),
                             };
                             log::info!("创建 live 内容备份: {backup_id}");
-                            state.db.save_prompt(app.as_str(), &backup_prompt)?;
+                            prompts.insert(backup_id, backup_prompt);
                         }
                     }
                 }
             }
         }
 
-        // 2. 禁用该 Agent 的全部预设。
-        let mut prompts = state.db.get_prompts(app.as_str())?;
-        for prompt in prompts.values_mut() {
-            prompt.enabled = false;
-        }
-
-        // 3. 启用目标预设并写入 live 文件。
-        if let Some(prompt) = prompts.get_mut(id) {
-            prompt.enabled = true;
-            config::write_text_file(&target_path, &prompt.content)?;
-        } else {
+        // 2. 校验目标预设存在，并互斥启用。
+        if !prompts.contains_key(id) {
             return Err(AppError::InvalidInput(format!("指令预设 {id} 不存在")));
         }
+        let new_live_content = prompts[id].content.clone();
+        for prompt in prompts.values_mut() {
+            prompt.enabled = prompt.id == id;
+        }
 
-        // 4. 持久化所有变更。
-        for prompt in prompts.values() {
-            state.db.save_prompt(app.as_str(), prompt)?;
+        // 3. 写入 live 文件（记录之前的内容以便失败时恢复）。
+        let previous_content = if target_path.exists() {
+            std::fs::read_to_string(&target_path).ok()
+        } else {
+            None
+        };
+        config::write_text_file(&target_path, &new_live_content)?;
+
+        // 4. 在单个事务中持久化所有变更；失败时事务整体回滚，并恢复 live 文件。
+        let persist_result = state.db.transact(|conn| {
+            for prompt in prompts.values() {
+                Database::save_prompt_with_conn(conn, app.as_str(), prompt)?;
+            }
+            Ok(())
+        });
+        if let Err(e) = persist_result {
+            // 最佳努力恢复之前的 live 文件内容
+            match previous_content {
+                Some(content) => {
+                    let _ = config::write_text_file(&target_path, &content);
+                }
+                None => {
+                    let _ = std::fs::remove_file(&target_path);
+                }
+            }
+            return Err(e);
         }
 
         Ok(())
@@ -444,6 +463,85 @@ mod tests {
         let prompts = PromptService::get_prompts(&state, AgentType::Codex).expect("get prompts");
         assert!(prompts["live"].enabled);
         assert_eq!(prompts["live"].content, "live body");
+
+        std::env::remove_var(config::ACM_HOME_ENV);
+    }
+
+    #[test]
+    fn prompt_writes_inside_transact_roll_back_together_on_failure() {
+        let state = state();
+        PromptService::upsert_prompt(&state, AgentType::Codex, "a", prompt("a", "a", false))
+            .expect("save a");
+
+        let result = state.db.transact(|conn| {
+            crate::Database::save_prompt_with_conn(conn, "codex", &prompt("b", "b", false))?;
+            crate::Database::save_prompt_with_conn(conn, "codex", &prompt("a", "a2", true))?;
+            // 模拟事务中途失败：任何一次写失败都应导致整体回滚
+            Err::<(), AppError>(AppError::Database("forced failure".to_string()))
+        });
+        assert!(
+            result.is_err(),
+            "closure failure must abort the transaction"
+        );
+
+        let prompts = PromptService::get_prompts(&state, AgentType::Codex).expect("get prompts");
+        assert!(
+            !prompts.contains_key("b"),
+            "rolled-back write must not be visible"
+        );
+        assert_eq!(prompts["a"].content, "a", "existing row must be untouched");
+        assert!(!prompts["a"].enabled);
+    }
+
+    #[test]
+    #[serial]
+    fn enable_prompt_rolls_back_db_and_live_file_when_persist_fails() {
+        let _tmp = setup_temp_home();
+        let state = state();
+
+        PromptService::upsert_prompt(
+            &state,
+            AgentType::Codex,
+            "first",
+            prompt("first", "first body", false),
+        )
+        .expect("save first");
+        PromptService::upsert_prompt(
+            &state,
+            AgentType::Codex,
+            "second",
+            prompt("second", "second body", false),
+        )
+        .expect("save second");
+        PromptService::enable_prompt(&state, AgentType::Codex, "first").expect("enable first");
+
+        let live_path = prompt_file_path(&AgentType::Codex);
+        assert_eq!(
+            std::fs::read_to_string(&live_path).expect("read live"),
+            "first body"
+        );
+
+        // 故障注入：连接进入只读模式，事务内的写必然失败
+        {
+            let conn = state.db.conn.lock().expect("lock conn");
+            conn.execute("PRAGMA query_only = ON;", [])
+                .expect("enable query_only");
+        }
+
+        let result = PromptService::enable_prompt(&state, AgentType::Codex, "second");
+        assert!(result.is_err(), "persist failure must abort enable");
+
+        // live 文件恢复到之前的启用内容
+        assert_eq!(
+            std::fs::read_to_string(&live_path).expect("read live"),
+            "first body",
+            "live file must be restored to the previous content"
+        );
+
+        // DB 状态保持启用 first（事务整体回滚，无部分写入）
+        let prompts = PromptService::get_prompts(&state, AgentType::Codex).expect("get prompts");
+        assert!(prompts["first"].enabled);
+        assert!(!prompts["second"].enabled);
 
         std::env::remove_var(config::ACM_HOME_ENV);
     }
