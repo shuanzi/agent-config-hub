@@ -125,6 +125,7 @@ export interface SkillBackupEntry {
 export interface ImportSkillSelection {
   directory: string;
   apps: SkillApps;
+  sourcePath?: string;
 }
 
 // ========== Prompt DTOs ==========

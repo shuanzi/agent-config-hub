@@ -190,17 +190,23 @@ export function InstalledSubagentsPanel({ activeApp }: InstalledSubagentsPanelPr
     );
     if (applicable.length === 0) return;
     let success = 0;
+    const failures: string[] = [];
     for (const update of applicable) {
       try {
         await updateSubagentMutation.mutateAsync(update.id);
         success += 1;
       } catch (error) {
         const userError = toUserError(error);
-        setErrorMessage(`${update.name}: ${userError.message}`);
+        failures.push(`${update.name}: ${userError.message}`);
       }
     }
+    const messages: string[] = [];
     if (success > 0) {
-      setErrorMessage(`成功更新 ${success} 个 Subagent。`);
+      messages.push(`成功更新 ${success} 个 Subagent。`);
+    }
+    messages.push(...failures);
+    if (messages.length > 0) {
+      setErrorMessage(messages.join('\n'));
     }
   };
 

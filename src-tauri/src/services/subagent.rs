@@ -975,6 +975,7 @@ impl SubagentService {
             .get_installed_subagent(id)?
             .ok_or_else(|| AppError::InvalidInput(format!("Subagent not found: {id}")))?;
 
+        let was_enabled = subagent.apps.is_enabled_for(app);
         subagent.apps.set_enabled_for(app, enabled);
 
         if enabled {
@@ -983,7 +984,25 @@ impl SubagentService {
             Self::remove_from_app(&subagent.directory, app)?;
         }
 
-        db.update_subagent_apps(id, &subagent.apps)?;
+        if let Err(error) = db.update_subagent_apps(id, &subagent.apps) {
+            // 落库失败：撤销刚才的投影变更，恢复到操作前状态；
+            // 撤销失败仅记日志，不掩盖原始的落库错误
+            if was_enabled != enabled {
+                let rollback_result = if enabled {
+                    Self::remove_from_app(&subagent.directory, app)
+                } else {
+                    Self::sync_to_app_dir(&subagent.directory, app)
+                };
+                if let Err(rollback_error) = rollback_result {
+                    log::error!(
+                        "Subagent {} 落库失败后撤销 {} 的投影变更也失败: {rollback_error}",
+                        subagent.name,
+                        app.as_str()
+                    );
+                }
+            }
+            return Err(error);
+        }
 
         log::info!(
             "Subagent {} 的 {} 状态已更新为 {}",
@@ -1667,7 +1686,8 @@ impl SubagentService {
     pub fn restore_from_backup(
         db: &Arc<Database>,
         backup_id: &str,
-        current_app: &AgentType,
+        // 恢复以备份中记录的启用状态为准；current_app 仅保留以维持命令层签名
+        _current_app: &AgentType,
     ) -> Result<InstalledSubagent, AppError> {
         let _state_guard = subagent_state_write_guard();
         let backup_path = Self::backup_path_for_id(backup_id)?;
@@ -1710,7 +1730,7 @@ impl SubagentService {
         let mut restored_subagent = metadata.subagent;
         restored_subagent.directory = directory;
         restored_subagent.installed_at = chrono::Utc::now().timestamp();
-        restored_subagent.apps = SubagentApps::only(current_app);
+        // 保留备份中记录的 apps 启用标志：恢复多 Agent 启用状态，而非仅 UI 当前 Agent
         restored_subagent.updated_at = 0;
         restored_subagent.content_hash = SkillService::compute_file_hash(&restore_path).ok();
 
@@ -1719,10 +1739,13 @@ impl SubagentService {
             return Err(err);
         }
 
-        if let Err(err) = Self::sync_to_app_dir(&restored_subagent.directory, current_app) {
-            let _ = db.delete_subagent(&restored_subagent.id);
-            let _ = fs::remove_file(&restore_path);
-            return Err(err);
+        // 为所有启用的 Agent 重建投影
+        for app in restored_subagent.apps.enabled_apps() {
+            if let Err(err) = Self::sync_to_app_dir(&restored_subagent.directory, &app) {
+                let _ = db.delete_subagent(&restored_subagent.id);
+                let _ = fs::remove_file(&restore_path);
+                return Err(err);
+            }
         }
 
         log::info!(
@@ -2523,16 +2546,145 @@ mod tests {
         let restored = SubagentService::restore_from_backup(&db, &backup_id, &AgentType::Codex)
             .expect("restore");
         assert_eq!(restored.directory, "restore-agent");
-        assert!(restored.apps.codex);
-        assert!(!restored.apps.claude_code);
+        // 恢复以备份中记录的启用标志为准，而非仅 UI 当前 Agent
+        assert!(restored.apps.claude_code);
+        assert!(!restored.apps.codex);
 
         assert!(SubagentService::get_ssot_dir()
             .unwrap()
             .join("restore-agent.md")
             .exists());
-        assert!(config::get_codex_agents_dir()
+        assert!(config::get_claude_agents_dir()
             .join("restore-agent.md")
             .exists());
+    }
+
+    #[test]
+    #[serial]
+    fn restore_from_backup_restores_all_enabled_apps() {
+        let tmp = tempdir().unwrap();
+        let _guard = TestHomeGuard::set(tmp.path());
+
+        let db = Arc::new(Database::memory().unwrap());
+        write_subagent(
+            &SubagentService::get_ssot_dir().unwrap(),
+            "multi-agent.md",
+            "Multi",
+        );
+
+        // 卸载前对 ClaudeCode 与 Codex 两个 Agent 启用
+        let mut subagent = installed_subagent("owner/repo:multi-agent.md", "multi-agent");
+        subagent.apps = SubagentApps::only(&AgentType::ClaudeCode);
+        subagent.apps.set_enabled_for(&AgentType::Codex, true);
+        db.save_subagent(&subagent).unwrap();
+        SubagentService::sync_to_app_dir("multi-agent", &AgentType::ClaudeCode).unwrap();
+        SubagentService::sync_to_app_dir("multi-agent", &AgentType::Codex).unwrap();
+
+        let result = SubagentService::uninstall(&db, &subagent.id).expect("uninstall");
+        let backup_id = result
+            .backup_path
+            .unwrap()
+            .split('/')
+            .next_back()
+            .unwrap()
+            .to_string();
+
+        let restored =
+            SubagentService::restore_from_backup(&db, &backup_id, &AgentType::ClaudeCode)
+                .expect("restore");
+
+        // apps 标志与卸载前一致
+        assert!(restored.apps.claude_code);
+        assert!(restored.apps.codex);
+        assert!(!restored.apps.gemini_cli);
+        let stored = db.get_installed_subagent(&subagent.id).unwrap().unwrap();
+        assert!(stored.apps.claude_code);
+        assert!(stored.apps.codex);
+
+        // 各启用 Agent 的投影均重建
+        assert!(config::get_claude_agents_dir()
+            .join("multi-agent.md")
+            .exists());
+        assert!(config::get_codex_agents_dir()
+            .join("multi-agent.md")
+            .exists());
+    }
+
+    #[test]
+    #[serial]
+    fn toggle_app_enable_rolls_back_projection_on_db_failure() {
+        let tmp = tempdir().unwrap();
+        let _guard = TestHomeGuard::set(tmp.path());
+
+        let db = Arc::new(Database::memory().unwrap());
+        write_subagent(
+            &SubagentService::get_ssot_dir().unwrap(),
+            "toggle-agent.md",
+            "Toggle",
+        );
+
+        let mut subagent = installed_subagent("owner/repo:toggle-agent.md", "toggle-agent");
+        subagent.apps = SubagentApps::default();
+        db.save_subagent(&subagent).unwrap();
+
+        // 故障注入：DB 只读，update_subagent_apps 必然失败
+        {
+            let conn = db.conn.lock().expect("lock conn");
+            conn.execute("PRAGMA query_only = ON;", [])
+                .expect("enable query_only");
+        }
+
+        SubagentService::toggle_app(&db, &subagent.id, &AgentType::ClaudeCode, true)
+            .expect_err("落库失败必须返回错误");
+
+        // 启用方向：新建的投影必须被撤销，DB 保持禁用
+        assert!(
+            !config::get_claude_agents_dir()
+                .join("toggle-agent.md")
+                .exists(),
+            "落库失败时本次新建的投影必须被移除"
+        );
+        let stored = db.get_installed_subagent(&subagent.id).unwrap().unwrap();
+        assert!(!stored.apps.claude_code, "落库失败时启用标志不得改变");
+    }
+
+    #[test]
+    #[serial]
+    fn toggle_app_disable_restores_projection_on_db_failure() {
+        let tmp = tempdir().unwrap();
+        let _guard = TestHomeGuard::set(tmp.path());
+
+        let db = Arc::new(Database::memory().unwrap());
+        write_subagent(
+            &SubagentService::get_ssot_dir().unwrap(),
+            "toggle-agent.md",
+            "Toggle",
+        );
+
+        let mut subagent = installed_subagent("owner/repo:toggle-agent.md", "toggle-agent");
+        subagent.apps = SubagentApps::only(&AgentType::ClaudeCode);
+        db.save_subagent(&subagent).unwrap();
+        SubagentService::sync_to_app_dir("toggle-agent", &AgentType::ClaudeCode).unwrap();
+
+        // 故障注入：DB 只读，update_subagent_apps 必然失败
+        {
+            let conn = db.conn.lock().expect("lock conn");
+            conn.execute("PRAGMA query_only = ON;", [])
+                .expect("enable query_only");
+        }
+
+        SubagentService::toggle_app(&db, &subagent.id, &AgentType::ClaudeCode, false)
+            .expect_err("落库失败必须返回错误");
+
+        // 禁用方向：已删除的投影必须被恢复，DB 保持启用
+        assert!(
+            config::get_claude_agents_dir()
+                .join("toggle-agent.md")
+                .exists(),
+            "落库失败时被删除的投影必须恢复"
+        );
+        let stored = db.get_installed_subagent(&subagent.id).unwrap().unwrap();
+        assert!(stored.apps.claude_code, "落库失败时启用标志不得改变");
     }
 
     #[test]

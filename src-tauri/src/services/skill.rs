@@ -255,6 +255,9 @@ struct SkillBackupMetadata {
 #[serde(rename_all = "camelCase")]
 pub struct ImportSkillSelection {
     pub directory: String,
+    /// 发现项的精确来源路径：同名不同内容的条目仅按 directory 无法区分。
+    #[serde(default)]
+    pub source_path: Option<String>,
     #[serde(default)]
     pub apps: SkillApps,
 }
@@ -1517,7 +1520,8 @@ impl SkillService {
     pub fn restore_from_backup(
         db: &Arc<Database>,
         backup_id: &str,
-        current_app: &AgentType,
+        // 恢复以备份中记录的启用状态为准；current_app 仅保留以维持命令层签名
+        _current_app: &AgentType,
     ) -> Result<InstalledSkill, AppError> {
         let _state_guard = skill_state_write_guard();
         let backup_path = Self::backup_path_for_id(backup_id)?;
@@ -1558,7 +1562,7 @@ impl SkillService {
         let mut restored_skill = metadata.skill;
         restored_skill.directory = directory;
         restored_skill.installed_at = chrono::Utc::now().timestamp();
-        restored_skill.apps = SkillApps::only(current_app);
+        // 保留备份中记录的 apps 启用标志：恢复多 Agent 启用状态，而非仅 UI 当前 Agent
         restored_skill.updated_at = 0;
 
         Self::copy_dir_recursive(&backup_skill_dir, &restore_path)?;
@@ -1570,8 +1574,9 @@ impl SkillService {
             return Err(err);
         }
 
-        if !restored_skill.apps.is_empty() {
-            if let Err(err) = Self::sync_to_app_dir(&restored_skill.directory, current_app) {
+        // 为所有启用的 Agent 重建投影
+        for app in restored_skill.apps.enabled_apps() {
+            if let Err(err) = Self::sync_to_app_dir(&restored_skill.directory, &app) {
                 let _ = db.delete_skill(&restored_skill.id);
                 let _ = fs::remove_dir_all(&restore_path);
                 return Err(err);
@@ -1601,6 +1606,7 @@ impl SkillService {
             .get_installed_skill(id)?
             .ok_or_else(|| AppError::InvalidInput(format!("Skill not found: {id}")))?;
 
+        let was_enabled = skill.apps.is_enabled_for(app);
         skill.apps.set_enabled_for(app, enabled);
 
         if enabled {
@@ -1609,7 +1615,25 @@ impl SkillService {
             Self::remove_from_app(&skill.directory, app)?;
         }
 
-        db.update_skill_apps(id, &skill.apps)?;
+        if let Err(error) = db.update_skill_apps(id, &skill.apps) {
+            // 落库失败：撤销刚才的投影变更，恢复到操作前状态；
+            // 撤销失败仅记日志，不掩盖原始的落库错误
+            if was_enabled != enabled {
+                let rollback_result = if enabled {
+                    Self::remove_from_app(&skill.directory, app)
+                } else {
+                    Self::sync_to_app_dir(&skill.directory, app)
+                };
+                if let Err(rollback_error) = rollback_result {
+                    log::error!(
+                        "Skill {} 落库失败后撤销 {} 的投影变更也失败: {rollback_error}",
+                        skill.name,
+                        app.as_str()
+                    );
+                }
+            }
+            return Err(error);
+        }
 
         log::info!(
             "Skill {} 的 {} 状态已更新为 {}",
@@ -1727,13 +1751,29 @@ impl SkillService {
             };
 
             let mut source_path: Option<PathBuf> = None;
-            for (base, label) in &search_sources {
-                let skill_path = base.join(&dir_name);
-                if skill_path.exists() {
-                    if source_path.is_none() {
-                        source_path = Some(skill_path);
+            // 前端回传发现项的 source_path 时优先精确匹配来源：
+            // 同名不同内容的发现项仅按 directory 会错取扫描顺序中的第一个，
+            // 导致选第二条却导入第一条、并在投影时覆盖另一来源的内容
+            if let Some(hint) = selection.source_path.as_deref() {
+                let candidate = PathBuf::from(hint);
+                let matches_directory = candidate
+                    .file_name()
+                    .is_some_and(|name| name == dir_name.as_str());
+                if matches_directory && candidate.is_dir() {
+                    source_path = Some(candidate);
+                } else {
+                    log::warn!("导入 '{dir_name}' 的 source_path 无效（{hint}），回退为按目录扫描");
+                }
+            }
+            if source_path.is_none() {
+                for (base, label) in &search_sources {
+                    let skill_path = base.join(&dir_name);
+                    if skill_path.exists() {
+                        if source_path.is_none() {
+                            source_path = Some(skill_path);
+                        }
+                        log::debug!("Skill '{dir_name}' found in source '{label}'");
                     }
-                    log::debug!("Skill '{dir_name}' found in source '{label}'");
                 }
             }
 
@@ -4279,19 +4319,77 @@ mod tests {
             .unwrap()
             .to_string();
 
+        // current_app 与备份启用状态不同：恢复以备份中记录的启用标志为准
         let restored =
             SkillService::restore_from_backup(&db, &backup_id, &AgentType::Codex).expect("restore");
         assert_eq!(restored.directory, "restore-skill");
-        assert!(restored.apps.codex);
-        assert!(!restored.apps.claude_code);
+        assert!(restored.apps.claude_code);
+        assert!(!restored.apps.codex);
 
         assert!(SkillService::get_ssot_dir()
             .unwrap()
             .join("restore-skill")
             .exists());
-        assert!(config::get_codex_skills_dir()
+        assert!(config::get_claude_skills_dir()
             .join("restore-skill")
             .exists());
+    }
+
+    #[test]
+    #[serial]
+    fn restore_from_backup_restores_all_enabled_apps() {
+        let tmp = tempdir().unwrap();
+        let _guard = TestHomeGuard::set(tmp.path());
+
+        let db = Arc::new(Database::memory().unwrap());
+        write_skill(
+            &SkillService::get_ssot_dir().unwrap().join("multi-skill"),
+            "Multi",
+        );
+
+        // 卸载前对 ClaudeCode 与 Codex 两个 Agent 启用
+        let mut skill = InstalledSkill {
+            id: "owner/repo:multi-skill".to_string(),
+            name: "Multi".to_string(),
+            description: None,
+            directory: "multi-skill".to_string(),
+            repo_owner: Some("owner".to_string()),
+            repo_name: Some("repo".to_string()),
+            repo_branch: Some("main".to_string()),
+            readme_url: None,
+            apps: SkillApps::only(&AgentType::ClaudeCode),
+            installed_at: 1,
+            content_hash: None,
+            updated_at: 0,
+        };
+        skill.apps.set_enabled_for(&AgentType::Codex, true);
+        db.save_skill(&skill).unwrap();
+        SkillService::sync_to_app_dir("multi-skill", &AgentType::ClaudeCode).unwrap();
+        SkillService::sync_to_app_dir("multi-skill", &AgentType::Codex).unwrap();
+
+        let result = SkillService::uninstall(&db, &skill.id).expect("uninstall");
+        let backup_id = result
+            .backup_path
+            .unwrap()
+            .split('/')
+            .next_back()
+            .unwrap()
+            .to_string();
+
+        let restored = SkillService::restore_from_backup(&db, &backup_id, &AgentType::ClaudeCode)
+            .expect("restore");
+
+        // apps 标志与卸载前一致
+        assert!(restored.apps.claude_code);
+        assert!(restored.apps.codex);
+        assert!(!restored.apps.gemini_cli);
+        let stored = db.get_installed_skill(&skill.id).unwrap().unwrap();
+        assert!(stored.apps.claude_code);
+        assert!(stored.apps.codex);
+
+        // 各启用 Agent 的投影均重建
+        assert!(config::get_claude_skills_dir().join("multi-skill").exists());
+        assert!(config::get_codex_skills_dir().join("multi-skill").exists());
     }
 
     #[test]
@@ -4432,6 +4530,7 @@ mod tests {
             &db,
             vec![ImportSkillSelection {
                 directory: "native".to_string(),
+                source_path: None,
                 apps: SkillApps::only(&AgentType::ClaudeCode),
             }],
         )
@@ -4443,6 +4542,186 @@ mod tests {
             .unwrap()
             .join("native")
             .exists());
+    }
+
+    #[test]
+    #[serial]
+    fn import_from_apps_prefers_exact_source_path() {
+        let tmp = tempdir().unwrap();
+        let _guard = TestHomeGuard::set(tmp.path());
+
+        let db = Arc::new(Database::memory().unwrap());
+        // 同名不同内容的两条发现项：claude 下为 Alpha，codex 下为 Beta
+        write_skill(&config::get_claude_skills_dir().join("shared"), "Alpha");
+        write_skill(&config::get_codex_skills_dir().join("shared"), "Beta");
+        let claude_path = config::get_claude_skills_dir().join("shared");
+        let codex_path = config::get_codex_skills_dir().join("shared");
+
+        // 选第二条（codex 的 Beta）导入：SSOT 必须是该来源内容，
+        // 而不是扫描顺序中的第一个（claude 的 Alpha）
+        let imported = SkillService::import_from_apps(
+            &db,
+            vec![ImportSkillSelection {
+                directory: "shared".to_string(),
+                source_path: Some(codex_path.to_string_lossy().to_string()),
+                apps: SkillApps::default(),
+            }],
+        )
+        .expect("import codex variant");
+        assert_eq!(imported.len(), 1);
+        let ssot_md = fs::read_to_string(
+            SkillService::get_ssot_dir()
+                .unwrap()
+                .join("shared")
+                .join("SKILL.md"),
+        )
+        .unwrap();
+        assert!(
+            ssot_md.contains("name: Beta"),
+            "source_path 指定的来源内容必须进入 SSOT: {ssot_md}"
+        );
+
+        // 两个来源保持原样，互不覆盖
+        assert!(fs::read_to_string(claude_path.join("SKILL.md"))
+            .unwrap()
+            .contains("name: Alpha"));
+        assert!(fs::read_to_string(codex_path.join("SKILL.md"))
+            .unwrap()
+            .contains("name: Beta"));
+
+        // 再选第一条（claude 的 Alpha）导入：同样以各自来源内容为准
+        SkillService::uninstall(&db, &imported[0].id).expect("uninstall first import");
+        let imported = SkillService::import_from_apps(
+            &db,
+            vec![ImportSkillSelection {
+                directory: "shared".to_string(),
+                source_path: Some(claude_path.to_string_lossy().to_string()),
+                apps: SkillApps::default(),
+            }],
+        )
+        .expect("import claude variant");
+        assert_eq!(imported.len(), 1);
+        let ssot_md = fs::read_to_string(
+            SkillService::get_ssot_dir()
+                .unwrap()
+                .join("shared")
+                .join("SKILL.md"),
+        )
+        .unwrap();
+        assert!(
+            ssot_md.contains("name: Alpha"),
+            "source_path 指定的来源内容必须进入 SSOT: {ssot_md}"
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn import_from_apps_without_source_path_uses_first_match() {
+        let tmp = tempdir().unwrap();
+        let _guard = TestHomeGuard::set(tmp.path());
+
+        let db = Arc::new(Database::memory().unwrap());
+        write_skill(&config::get_claude_skills_dir().join("shared"), "Alpha");
+        write_skill(&config::get_codex_skills_dir().join("shared"), "Beta");
+
+        // 旧调用不带 source_path：保持按目录取第一个匹配来源的行为（claude 先于 codex）
+        let imported = SkillService::import_from_apps(
+            &db,
+            vec![ImportSkillSelection {
+                directory: "shared".to_string(),
+                source_path: None,
+                apps: SkillApps::default(),
+            }],
+        )
+        .expect("import");
+        assert_eq!(imported.len(), 1);
+        let ssot_md = fs::read_to_string(
+            SkillService::get_ssot_dir()
+                .unwrap()
+                .join("shared")
+                .join("SKILL.md"),
+        )
+        .unwrap();
+        assert!(
+            ssot_md.contains("name: Alpha"),
+            "不带 source_path 时必须维持旧的首个匹配行为: {ssot_md}"
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn toggle_app_enable_rolls_back_projection_on_db_failure() {
+        let tmp = tempdir().unwrap();
+        let _guard = TestHomeGuard::set(tmp.path());
+
+        let db = Arc::new(Database::memory().unwrap());
+        write_skill(
+            &SkillService::get_ssot_dir().unwrap().join("toggle-skill"),
+            "Toggle",
+        );
+
+        let mut skill = installed_skill_fixture("owner/repo:toggle-skill", "toggle-skill");
+        skill.apps = SkillApps::default();
+        db.save_skill(&skill).unwrap();
+
+        // 故障注入：DB 只读，update_skill_apps 必然失败
+        {
+            let conn = db.conn.lock().expect("lock conn");
+            conn.execute("PRAGMA query_only = ON;", [])
+                .expect("enable query_only");
+        }
+
+        SkillService::toggle_app(&db, &skill.id, &AgentType::ClaudeCode, true)
+            .expect_err("落库失败必须返回错误");
+
+        // 启用方向：新建的投影必须被撤销，DB 保持禁用
+        assert!(
+            !config::get_claude_skills_dir()
+                .join("toggle-skill")
+                .exists(),
+            "落库失败时本次新建的投影必须被移除"
+        );
+        let stored = db.get_installed_skill(&skill.id).unwrap().unwrap();
+        assert!(!stored.apps.claude_code, "落库失败时启用标志不得改变");
+    }
+
+    #[test]
+    #[serial]
+    fn toggle_app_disable_restores_projection_on_db_failure() {
+        let tmp = tempdir().unwrap();
+        let _guard = TestHomeGuard::set(tmp.path());
+
+        let db = Arc::new(Database::memory().unwrap());
+        write_skill(
+            &SkillService::get_ssot_dir().unwrap().join("toggle-skill"),
+            "Toggle",
+        );
+
+        let mut skill = installed_skill_fixture("owner/repo:toggle-skill", "toggle-skill");
+        skill.apps = SkillApps::only(&AgentType::ClaudeCode);
+        db.save_skill(&skill).unwrap();
+        SkillService::sync_to_app_dir("toggle-skill", &AgentType::ClaudeCode).unwrap();
+
+        // 故障注入：DB 只读，update_skill_apps 必然失败
+        {
+            let conn = db.conn.lock().expect("lock conn");
+            conn.execute("PRAGMA query_only = ON;", [])
+                .expect("enable query_only");
+        }
+
+        SkillService::toggle_app(&db, &skill.id, &AgentType::ClaudeCode, false)
+            .expect_err("落库失败必须返回错误");
+
+        // 禁用方向：已删除的投影必须被恢复，DB 保持启用
+        assert!(
+            config::get_claude_skills_dir()
+                .join("toggle-skill")
+                .join("SKILL.md")
+                .exists(),
+            "落库失败时被删除的投影必须恢复"
+        );
+        let stored = db.get_installed_skill(&skill.id).unwrap().unwrap();
+        assert!(stored.apps.claude_code, "落库失败时启用标志不得改变");
     }
 
     #[test]
@@ -4723,6 +5002,7 @@ mod tests {
             &db,
             vec![ImportSkillSelection {
                 directory: "native".to_string(),
+                source_path: None,
                 apps: SkillApps::only(&AgentType::ClaudeCode),
             }],
         )
@@ -4767,6 +5047,7 @@ mod tests {
             &db,
             vec![ImportSkillSelection {
                 directory: "native".to_string(),
+                source_path: None,
                 apps: SkillApps::only(&AgentType::ClaudeCode),
             }],
         );

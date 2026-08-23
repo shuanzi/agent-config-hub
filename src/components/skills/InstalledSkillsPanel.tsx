@@ -8,7 +8,13 @@ import {
   ArchiveRestore,
   Loader2,
 } from 'lucide-react';
-import type { AgentType, InstalledSkill, SkillApps, UnmanagedSkill } from '../../types';
+import type {
+  AgentType,
+  ImportSkillSelection,
+  InstalledSkill,
+  SkillApps,
+  UnmanagedSkill,
+} from '../../types';
 import {
   useInstalledSkills,
   useToggleSkillApp,
@@ -210,17 +216,23 @@ export function InstalledSkillsPanel({ activeApp }: InstalledSkillsPanelProps) {
     );
     if (applicable.length === 0) return;
     let success = 0;
+    const failures: string[] = [];
     for (const update of applicable) {
       try {
         await updateSkillMutation.mutateAsync(update.id);
         success += 1;
       } catch (error) {
         const userError = toUserError(error);
-        setErrorMessage(`${update.name}: ${userError.message}`);
+        failures.push(`${update.name}: ${userError.message}`);
       }
     }
+    const messages: string[] = [];
     if (success > 0) {
-      setErrorMessage(`成功更新 ${success} 个 Skill。`);
+      messages.push(`成功更新 ${success} 个 Skill。`);
+    }
+    messages.push(...failures);
+    if (messages.length > 0) {
+      setErrorMessage(messages.join('\n'));
     }
   };
 
@@ -239,7 +251,7 @@ export function InstalledSkillsPanel({ activeApp }: InstalledSkillsPanelProps) {
     }
   };
 
-  const handleImport = async (selections: { directory: string; apps: SkillApps }[]) => {
+  const handleImport = async (selections: ImportSkillSelection[]) => {
     setErrorMessage('');
     try {
       await importMutation.mutateAsync(selections);
@@ -454,14 +466,17 @@ function ImportDialog({
   onClose,
 }: {
   skills: UnmanagedSkill[];
-  onImport: (selections: { directory: string; apps: SkillApps }[]) => void;
+  onImport: (selections: ImportSkillSelection[]) => void;
   onClose: () => void;
 }) {
-  const [selected, setSelected] = useState<Set<string>>(new Set(skills.map((s) => s.directory)));
+  // 同名不同来源的发现项需用 directory + path（扫描拆条后各自指向本组来源）复合 key 区分。
+  const selectionKey = (skill: UnmanagedSkill) => `${skill.directory}::${skill.path}`;
+
+  const [selected, setSelected] = useState<Set<string>>(new Set(skills.map(selectionKey)));
   const [appsBySkill, setAppsBySkill] = useState<Record<string, SkillApps>>(() => {
     const initial: Record<string, SkillApps> = {};
     for (const skill of skills) {
-      initial[skill.directory] = {
+      initial[selectionKey(skill)] = {
         claudeCode: skill.foundIn.includes('claude-code'),
         codex: skill.foundIn.includes('codex'),
         geminiCli: skill.foundIn.includes('gemini-cli'),
@@ -471,36 +486,39 @@ function ImportDialog({
     return initial;
   });
 
-  const toggleSelect = (directory: string) => {
+  const toggleSelect = (key: string) => {
     const next = new Set(selected);
-    if (next.has(directory)) {
-      next.delete(directory);
+    if (next.has(key)) {
+      next.delete(key);
     } else {
-      next.add(directory);
+      next.add(key);
     }
     setSelected(next);
   };
 
-  const toggleApp = (directory: string, app: AgentType, enabled: boolean) => {
+  const toggleApp = (key: string, app: AgentType, enabled: boolean) => {
     setAppsBySkill((prev) => ({
       ...prev,
-      [directory]: {
-        ...prev[directory],
+      [key]: {
+        ...prev[key],
         [mapAppField(app)]: enabled,
       },
     }));
   };
 
   const handleImport = () => {
-    const selections = Array.from(selected).map((directory) => ({
-      directory,
-      apps: appsBySkill[directory] ?? {
-        claudeCode: false,
-        codex: false,
-        geminiCli: false,
-        opencode: false,
-      },
-    }));
+    const selections = skills
+      .filter((skill) => selected.has(selectionKey(skill)))
+      .map((skill) => ({
+        directory: skill.directory,
+        sourcePath: skill.path,
+        apps: appsBySkill[selectionKey(skill)] ?? {
+          claudeCode: false,
+          codex: false,
+          geminiCli: false,
+          opencode: false,
+        },
+      }));
     onImport(selections);
   };
 
@@ -518,11 +536,11 @@ function ImportDialog({
         </div>
         <div className="skill-dialog-body">
           {skills.map((skill) => (
-            <div key={skill.directory} className="skill-import-item">
+            <div key={selectionKey(skill)} className="skill-import-item">
               <input
                 type="checkbox"
-                checked={selected.has(skill.directory)}
-                onChange={() => toggleSelect(skill.directory)}
+                checked={selected.has(selectionKey(skill))}
+                onChange={() => toggleSelect(selectionKey(skill))}
               />
               <div className="skill-import-item-info">
                 <div className="skill-import-item-name">{skill.name}</div>
@@ -535,8 +553,10 @@ function ImportDialog({
                     <label key={app} className="skill-toggle">
                       <input
                         type="checkbox"
-                        checked={appsBySkill[skill.directory]?.[mapAppField(app)] ?? false}
-                        onChange={(event) => toggleApp(skill.directory, app, event.target.checked)}
+                        checked={appsBySkill[selectionKey(skill)]?.[mapAppField(app)] ?? false}
+                        onChange={(event) =>
+                          toggleApp(selectionKey(skill), app, event.target.checked)
+                        }
                       />
                       {agentLabels[app]}
                     </label>
