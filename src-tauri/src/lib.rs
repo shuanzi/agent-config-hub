@@ -1,51 +1,185 @@
-//! Agent Config Manager — Tauri 装配（ARC-01/ARC-03）。
+//! Agent Config Manager — Tauri assembly.
 //!
-//! FE-01 只注册 `frontend_gateway_read` 一个生产 command；不引入 fs/shell/
-//! Keychain 等任何插件。`test-harness` feature 额外编译 wdio WebDriver
-//! plugin 与测试 command（L3 专用构建，生产二进制物理不含）。
+//! cc-switch-style module layout (ADR-0020): SQLite-backed `AppState` plus
+//! per-feature command groups (settings / skill / prompt / subagent).
 
-pub mod catalog;
-pub mod core;
-pub mod domain;
-pub mod ipc;
-pub mod wire;
+mod commands;
+mod config;
+mod database;
+mod error;
+mod services;
+mod settings;
 
-/// 进程启动记点（PF-01 L3 冷启动：process start → first trusted snapshot）。
+use std::sync::Arc;
+
+use crate::services::skill::SkillService;
+use crate::services::subagent::SubagentService;
+
+pub use commands::*;
+pub use config::{
+    get_claude_agents_dir, get_claude_config_dir, get_claude_prompt_file, get_claude_skills_dir,
+    get_codex_agents_dir, get_codex_config_dir, get_codex_prompt_file, get_codex_skills_dir,
+    get_gemini_agents_dir, get_gemini_config_dir, get_gemini_prompt_file, get_gemini_skills_dir,
+    get_hub_dir, get_opencode_agents_dir, get_opencode_config_dir, get_opencode_prompt_file,
+    get_opencode_skills_dir, read_json_file, write_json_file,
+};
+pub use database::Database;
+pub use error::AppError;
+pub use services::prompt::{Prompt, PromptService};
+
+/// Shared application state exposed to Tauri commands.
+pub struct AppState {
+    pub db: Arc<Database>,
+}
+
+impl AppState {
+    pub fn new(db: Arc<Database>) -> Self {
+        Self { db }
+    }
+}
+
+/// Process startup timestamp (PF-01 L3 cold-start anchor).
 static PROCESS_START: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
 
-/// main 入口第一行调用；重复调用无副作用（只有首次记点生效）。
+/// Records the process start time; idempotent.
 pub fn note_process_start() {
     let _ = PROCESS_START.set(std::time::Instant::now());
 }
 
-/// 距进程启动记点的 elapsed millis；未记点时返回 None。
+/// Elapsed milliseconds since process start, if recorded.
 pub fn process_start_elapsed_millis() -> Option<u64> {
     PROCESS_START
         .get()
         .map(|start| start.elapsed().as_millis() as u64)
 }
 
+#[cfg(feature = "test-harness")]
+#[tauri::command]
+async fn test_fx01_cold_start_millis() -> Result<u64, String> {
+    Ok(process_start_elapsed_millis().unwrap_or(0))
+}
+
 pub fn run() {
-    let gateway_core = core::GatewayCore::new(catalog::Catalog::from_env());
+    let db = match Database::init() {
+        Ok(db) => Arc::new(db),
+        Err(e) => {
+            eprintln!("Failed to initialize database: {e}");
+            std::process::exit(1);
+        }
+    };
+
+    if let Err(e) = db.init_default_skill_repos() {
+        log::warn!("初始化默认 Skill 仓库失败: {e}");
+    }
+
+    let app_state = AppState::new(db);
+    let skill_service_state = SkillServiceState(Arc::new(SkillService::new()));
+    let subagent_service_state = SubagentServiceState(Arc::new(SubagentService::new()));
 
     #[allow(unused_mut)]
-    let mut builder = tauri::Builder::default().manage(gateway_core);
+    let mut builder = tauri::Builder::default()
+        .manage(app_state)
+        .manage(skill_service_state)
+        .manage(subagent_service_state);
 
     #[cfg(feature = "test-harness")]
     {
         builder = builder
-            .manage(ipc::Fx01ExternalChangeCounter::default())
+            .plugin(tauri_plugin_wdio::init())
             .plugin(tauri_plugin_wdio_webdriver::init());
     }
 
     #[cfg(not(feature = "test-harness"))]
-    let builder = builder.invoke_handler(tauri::generate_handler![ipc::frontend_gateway_read]);
+    let builder = builder.invoke_handler(tauri::generate_handler![
+        get_settings_command,
+        set_settings_command,
+        set_sync_method_command,
+        get_setting_command,
+        set_setting_command,
+        set_agent_override_dir,
+        migrate_storage,
+        get_installed_skills,
+        discover_available_skills,
+        install_skill,
+        uninstall_skill,
+        toggle_skill_app,
+        check_skill_updates,
+        update_skill,
+        get_skill_repos,
+        add_skill_repo,
+        remove_skill_repo,
+        scan_unmanaged_skills,
+        import_skills_from_apps,
+        install_skills_from_zip,
+        get_skill_backups,
+        restore_skill_backup,
+        delete_skill_backup,
+        get_installed_subagents,
+        discover_available_subagents,
+        install_subagent,
+        uninstall_subagent,
+        toggle_subagent_app,
+        check_subagent_updates,
+        update_subagent,
+        get_subagent_repos,
+        add_subagent_repo,
+        remove_subagent_repo,
+        get_subagent_backups,
+        restore_subagent_backup,
+        delete_subagent_backup,
+        get_prompts,
+        upsert_prompt,
+        delete_prompt,
+        enable_prompt,
+        import_prompt_from_file,
+        get_current_prompt_file_content,
+    ]);
 
     #[cfg(feature = "test-harness")]
     let builder = builder.invoke_handler(tauri::generate_handler![
-        ipc::frontend_gateway_read,
-        ipc::test_fx01_external_change,
-        ipc::test_fx01_cold_start_millis
+        get_settings_command,
+        set_settings_command,
+        set_sync_method_command,
+        get_setting_command,
+        set_setting_command,
+        set_agent_override_dir,
+        migrate_storage,
+        test_fx01_cold_start_millis,
+        get_installed_skills,
+        discover_available_skills,
+        install_skill,
+        uninstall_skill,
+        toggle_skill_app,
+        check_skill_updates,
+        update_skill,
+        get_skill_repos,
+        add_skill_repo,
+        remove_skill_repo,
+        scan_unmanaged_skills,
+        import_skills_from_apps,
+        install_skills_from_zip,
+        get_skill_backups,
+        restore_skill_backup,
+        delete_skill_backup,
+        get_installed_subagents,
+        discover_available_subagents,
+        install_subagent,
+        uninstall_subagent,
+        toggle_subagent_app,
+        check_subagent_updates,
+        update_subagent,
+        get_subagent_repos,
+        add_subagent_repo,
+        remove_subagent_repo,
+        get_subagent_backups,
+        restore_subagent_backup,
+        delete_subagent_backup,
+        get_prompts,
+        upsert_prompt,
+        delete_prompt,
+        enable_prompt,
+        import_prompt_from_file,
+        get_current_prompt_file_content,
     ]);
 
     builder

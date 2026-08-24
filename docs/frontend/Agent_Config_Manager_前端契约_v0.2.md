@@ -1,6 +1,6 @@
 # Agent Config Manager：前端契约 v0.2
 
-> 状态：**已验收；Frozen**
+> 状态：**已验收；Frozen**；**Superseded（2026-08-22，由 v0.3 取代；原文保留不改写）**
 >
 > 用户验收与冻结日期：`2026-08-10`（Asia/Shanghai）
 >

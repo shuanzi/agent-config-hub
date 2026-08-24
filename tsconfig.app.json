@@ -19,13 +19,5 @@
     "exactOptionalPropertyTypes": false,
     "types": ["vite/client"]
   },
-  "include": [
-    "src",
-    "fixtures",
-    "tests/contract",
-    "tests/l1",
-    "tests/l2",
-    "tests/l3",
-    "performance"
-  ]
+  "include": ["src", "fixtures", "tests/l1", "tests/l2", "tests/l3", "performance"]
 }

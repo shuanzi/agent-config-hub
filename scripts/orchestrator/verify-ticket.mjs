@@ -3,7 +3,8 @@
  * verify:ticket（票据关闭入口，ARC-06c §3.17）。
  *
  * 封闭 registry：FE-01 = toolchain(L0) + static(L0) + rust(L1) + frontend(L1)
- *   + ui(L2) + tauri(L3) + perf(PF-01)。未知 ticket id 退出 1。
+ *   + ui(L2) + tauri(L3)。PF-01 性能采样已显式降级、不在 registry 内
+ *   （见 performance/README.md）。未知 ticket id 退出 1。
  * 顺序执行；前序失败仍跑完后续独立步骤，但总体 fail。
  *
  * 状态模型：step 退出码映射 0=pass / 2=inconclusive / 其余=fail；
@@ -102,13 +103,9 @@ const TICKET_REGISTRY = {
       args: ['scripts/orchestrator/test-tauri.mjs'],
       timeoutMs: 2_400_000,
     },
-    {
-      id: 'perf',
-      layer: 'PF',
-      cmd: 'node',
-      args: ['scripts/orchestrator/perf.mjs', 'PF-01'],
-      timeoutMs: 2_400_000,
-    },
+    // PF-01 性能采样已显式降级：旧采样绑定已删除的 gateway/perf-catalog 实现，
+    // 待按 cc-switch 式新列表实现重新校准后恢复（见 performance/README.md 与
+    // OpenSpec change adopt-ccswitch-asset-management tasks 7.1）。
   ],
 };
 

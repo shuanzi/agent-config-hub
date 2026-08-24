@@ -1,6 +1,8 @@
 # Agent Config Manager：技术方案 v0.1 影响复核 addendum（2026-08-10）
 
-> 状态：已完成 OpenSpec `adopt-selected-b2-ui-baseline` task 1.8 的最小影响复核；本文件不改写或覆盖已验收的技术方案 v0.1。
+> 状态：Superseded（2026-08-22，随技术方案 v0.1 一并由 v0.3 与 ADR-0020 取代；原文保留不改写）
+>
+> 历史状态：已完成 OpenSpec `adopt-selected-b2-ui-baseline` task 1.8 的最小影响复核；本文件不改写或覆盖已验收的技术方案 v0.1。
 >
 > 复核日期：`2026-08-10`（Asia/Shanghai）
 >

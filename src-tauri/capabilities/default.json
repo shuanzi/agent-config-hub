@@ -1,7 +1,11 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "FE-01 最小权限集：main WebView 只允许监听/取消监听 Tauri event（adapter observe 所需）。自定义 command 不经 capability 授权面；未引入 fs/shell/Keychain/数据库等任何插件，WebView 无任何原生能力权限。",
+  "description": "Phase 4 前端 command 权限：main WebView 可调用 settings 与 skill 全部自定义 command，保留事件监听能力。",
   "windows": ["main"],
-  "permissions": ["core:event:allow-listen", "core:event:allow-unlisten"]
+  "permissions": [
+    "core:default",
+    "core:event:allow-listen",
+    "core:event:allow-unlisten"
+  ]
 }

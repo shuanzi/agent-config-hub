@@ -1,6 +1,6 @@
 # ADR-0011：以 Rust wire DTO 作为 IPC schema 事实源
 
-> 状态：Accepted
+> 状态：Superseded（2026-08-22，由 ADR-0020 取代）
 >
 > 决策日期：2026-07-27
 >

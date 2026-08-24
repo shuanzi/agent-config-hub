@@ -1,79 +1,146 @@
-import { useSyncExternalStore } from 'react';
-import type { WorkspaceSession } from './session/WorkspaceSession';
-import { TopNav } from './ui/TopNav';
-import { Toolbar } from './ui/Toolbar';
-import { AssetList } from './ui/AssetList';
-import { DetailPanel } from './ui/DetailPanel';
-import { reasonCodeExplanation } from './ui/labels';
+import { useMemo, useState } from 'react';
+import type { AgentType } from './types';
+import { InstalledSkillsPanel } from './components/skills/InstalledSkillsPanel';
+import { SkillsDiscoveryPage } from './components/skills/SkillsDiscoveryPage';
+import { InstalledSubagentsPanel } from './components/subagents/InstalledSubagentsPanel';
+import { SubagentsDiscoveryPage } from './components/subagents/SubagentsDiscoveryPage';
+import { InstructionsPanel } from './components/instructions/InstructionsPanel';
+import { SettingsView } from './components/settings/SettingsView';
 
-/**
- * 工作台根组件：只 dispatch 可见用户动作并从 session snapshot 渲染。
- * 五态可见区分：loading 保留骨架 / ready / empty 解释范围 / stale 过期提示 /
- * failed 稳定原因 + 重试。
- */
-export function App({ session }: { session: WorkspaceSession }) {
-  const state = useSyncExternalStore(
-    (listener) => session.subscribe(listener),
-    () => session.getSnapshot(),
-  );
-  const { loadState } = state;
+type View = 'skills' | 'instructions' | 'subagents' | 'settings';
+type SkillsSubView = 'installed' | 'discovery';
+type SubagentsSubView = 'installed' | 'discovery';
+
+const viewLabels: Record<View, string> = {
+  skills: 'Skills',
+  instructions: '长期指令',
+  subagents: 'Subagents',
+  settings: '设置',
+};
+
+const agentLabels: Record<AgentType, string> = {
+  'claude-code': 'Claude Code',
+  codex: 'Codex',
+  'gemini-cli': 'Gemini CLI',
+  opencode: 'OpenCode',
+};
+
+const AGENTS: AgentType[] = ['claude-code', 'codex', 'gemini-cli', 'opencode'];
+
+export function App() {
+  const [currentView, setCurrentView] = useState<View>('skills');
+  const [skillsSubView, setSkillsSubView] = useState<SkillsSubView>('installed');
+  const [subagentsSubView, setSubagentsSubView] = useState<SubagentsSubView>('installed');
+  const [activeApp, setActiveApp] = useState<AgentType>('claude-code');
+
+  const title = useMemo(() => {
+    if (currentView === 'subagents') {
+      return subagentsSubView === 'installed' ? '已安装 Subagents' : '发现 Subagents';
+    }
+    if (currentView === 'skills') {
+      return skillsSubView === 'installed' ? '已安装 Skills' : '发现 Skills';
+    }
+    return viewLabels[currentView];
+  }, [currentView, skillsSubView, subagentsSubView]);
 
   return (
     <div className="workbench">
-      <TopNav session={session} state={state} />
-      <Toolbar session={session} state={state} />
-      <div className="workbench-main">
-        <div className="list-pane">
-          {loadState.kind === 'loading' && (
-            <div className="state-loading" aria-busy="true" aria-label="正在加载资产列表">
-              <div className="skeleton-row" />
-              <div className="skeleton-row" />
-              <div className="skeleton-row" />
-              <p>正在加载资产…</p>
-            </div>
-          )}
-          {loadState.kind === 'failed' && (
-            <div role="alert" className="state-failed">
-              <p>资产列表读取失败：{reasonCodeExplanation(loadState.reasonCode)}</p>
-              <p className="reason-code">原因码：{loadState.reasonCode}</p>
-              {loadState.recoveryAction?.kind === 'retryRead' && (
-                <button
-                  type="button"
-                  onClick={() => session.dispatch({ kind: 'retryFailedRead', target: 'list' })}
-                >
-                  重试
-                </button>
-              )}
-            </div>
-          )}
-          {loadState.kind === 'empty' && (
-            <div className="state-empty">
-              <p>当前范围内没有匹配的资产。</p>
-              <p className="state-empty-hint">
-                范围：
-                {state.searchScope === 'allAssets' ? '全部资产' : '当前资产类型'}
-                {state.searchText.trim() !== '' && ` · 搜索：“${state.searchText}”`}
-                。可调整搜索词、范围或筛选条件。
-              </p>
-            </div>
-          )}
-          {(loadState.kind === 'ready' || loadState.kind === 'stale') && (
-            <>
-              {loadState.kind === 'stale' && (
-                <div role="status" className="state-stale">
-                  <span aria-hidden="true">⚠ </span>
-                  索引已过期，结果可能不是最新。最近更新：
-                  <time dateTime={loadState.list.indexUpdatedAt}>
-                    {loadState.list.indexUpdatedAt}
-                  </time>
-                </div>
-              )}
-              <AssetList session={session} state={state} list={loadState.list} />
-            </>
-          )}
+      <header className="app-header">
+        <div className="app-header-brand">
+          <h1 className="app-title">Agent Config Manager</h1>
+          <span className="app-header-page-title" aria-live="polite">
+            {title}
+          </span>
         </div>
-        <DetailPanel session={session} state={state} />
-      </div>
+        <nav className="top-nav" aria-label="主导航">
+          <div className="tablist">
+            {(Object.keys(viewLabels) as View[]).map((view) => (
+              <button
+                key={view}
+                type="button"
+                className={currentView === view ? 'tab tab-selected' : 'tab'}
+                onClick={() => setCurrentView(view)}
+                aria-current={currentView === view ? 'page' : undefined}
+              >
+                {viewLabels[view]}
+              </button>
+            ))}
+          </div>
+        </nav>
+        <div className="agent-selector">
+          <label htmlFor="active-app">当前 Agent</label>
+          <select
+            id="active-app"
+            value={activeApp}
+            onChange={(event) => setActiveApp(event.target.value as AgentType)}
+          >
+            {AGENTS.map((app) => (
+              <option key={app} value={app}>
+                {agentLabels[app]}
+              </option>
+            ))}
+          </select>
+        </div>
+      </header>
+
+      <main className="workbench-main app-shell-main">
+        {currentView === 'skills' && (
+          <div className="skills-view">
+            <div className="sub-tabs">
+              <button
+                type="button"
+                className={skillsSubView === 'installed' ? 'sub-tab active' : 'sub-tab'}
+                onClick={() => setSkillsSubView('installed')}
+              >
+                已安装
+              </button>
+              <button
+                type="button"
+                className={skillsSubView === 'discovery' ? 'sub-tab active' : 'sub-tab'}
+                onClick={() => setSkillsSubView('discovery')}
+              >
+                发现
+              </button>
+            </div>
+            <div className="skills-view-content">
+              {skillsSubView === 'installed' ? (
+                <InstalledSkillsPanel activeApp={activeApp} />
+              ) : (
+                <SkillsDiscoveryPage activeApp={activeApp} />
+              )}
+            </div>
+          </div>
+        )}
+        {currentView === 'instructions' && <InstructionsPanel activeApp={activeApp} />}
+        {currentView === 'subagents' && (
+          <div className="subagents-view">
+            <div className="sub-tabs">
+              <button
+                type="button"
+                className={subagentsSubView === 'installed' ? 'sub-tab active' : 'sub-tab'}
+                onClick={() => setSubagentsSubView('installed')}
+              >
+                已安装
+              </button>
+              <button
+                type="button"
+                className={subagentsSubView === 'discovery' ? 'sub-tab active' : 'sub-tab'}
+                onClick={() => setSubagentsSubView('discovery')}
+              >
+                发现
+              </button>
+            </div>
+            <div className="subagents-view-content">
+              {subagentsSubView === 'installed' ? (
+                <InstalledSubagentsPanel activeApp={activeApp} />
+              ) : (
+                <SubagentsDiscoveryPage activeApp={activeApp} />
+              )}
+            </div>
+          </div>
+        )}
+        {currentView === 'settings' && <SettingsView />}
+      </main>
     </div>
   );
 }

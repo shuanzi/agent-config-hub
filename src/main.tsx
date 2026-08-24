@@ -1,41 +1,48 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
-import { createGateway } from './gateway';
-import { WorkspaceSession } from './session/WorkspaceSession';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { App } from './App';
 import './ui/workbench.css';
 
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: Infinity,
+      refetchOnWindowFocus: false,
+    },
+  },
+});
+
 const query = new URLSearchParams(window.location.search);
 
-/**
- * Throwaway 原型入口：只在显式的开发 query 下挂载。
- * 生产默认路径继续使用正式的 FrontendGateway + WorkspaceSession。
- */
-if (import.meta.env.DEV && query.get('prototype') === 'full-ui') {
-  const { FullUiMock } = await import('./prototypes/full-ui-mock/FullUiMock');
+async function bootstrap(): Promise<void> {
+  if (import.meta.env.DEV && query.get('prototype') === 'full-ui') {
+    const { FullUiMock } = await import('./prototypes/full-ui-mock/FullUiMock');
+    const container = document.getElementById('root');
+    if (container === null) {
+      throw new Error('缺少 #root 挂载点');
+    }
+    createRoot(container).render(
+      <StrictMode>
+        <QueryClientProvider client={queryClient}>
+          <FullUiMock />
+        </QueryClientProvider>
+      </StrictMode>,
+    );
+    return;
+  }
+
   const container = document.getElementById('root');
   if (container === null) {
     throw new Error('缺少 #root 挂载点');
   }
   createRoot(container).render(
     <StrictMode>
-      <FullUiMock />
+      <QueryClientProvider client={queryClient}>
+        <App />
+      </QueryClientProvider>
     </StrictMode>,
   );
-} else {
-  void bootstrap();
 }
 
-async function bootstrap(): Promise<void> {
-  const gateway = await createGateway();
-  const session = new WorkspaceSession(gateway);
-  const container = document.getElementById('root');
-  if (container === null) {
-    throw new Error('缺少 #root 挂载点');
-  }
-  createRoot(container).render(
-    <StrictMode>
-      <App session={session} />
-    </StrictMode>,
-  );
-}
+void bootstrap();

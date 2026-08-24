@@ -22,12 +22,6 @@ import { join } from 'node:path';
 const OUTPUT_DIR = process.env.PF01_OUTPUT_DIR;
 const METRIC = 'pf01.l3.cold_start.first_snapshot';
 
-declare global {
-  interface Window {
-    __TAURI__?: { core: { invoke: (command: string) => Promise<unknown> } };
-  }
-}
-
 let sample: number | null = null;
 
 describe('PF-01 L3 冷启动采样（test-harness）', () => {
@@ -37,7 +31,7 @@ describe('PF-01 L3 冷启动采样（test-harness）', () => {
     await $('[role="option"]').waitForDisplayed({ timeout: 60000 });
     const ms = await browser.execute(async () => {
       const tauri = window.__TAURI__;
-      if (tauri === undefined) return null;
+      if (tauri?.core?.invoke === undefined) return null;
       return (await tauri.core.invoke('test_fx01_cold_start_millis')) as number | null;
     });
     if (typeof ms !== 'number') {

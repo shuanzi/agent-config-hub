@@ -1,6 +1,6 @@
 # Agent Config Manager：MVP 产品决策基线 v0.2
 
-> 状态：**Frozen（已验收）**
+> 状态：**Frozen（已验收）**；**Superseded（2026-08-22，由 v0.3 取代；原文保留不改写）**
 >
 > 用户验收：**2026-08-09，用户在本 Codex task 中明确回复“验收 v0.2”**
 >
