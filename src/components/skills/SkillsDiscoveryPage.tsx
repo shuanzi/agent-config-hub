@@ -43,6 +43,9 @@ export function SkillsDiscoveryPage({ activeApp }: SkillsDiscoveryPageProps) {
     const map = new Map<string, string>();
     for (const s of installedSkills ?? []) {
       map.set(s.id.toLowerCase(), s.id);
+      if (s.readmeUrl) {
+        map.set(`readme:${s.readmeUrl.toLowerCase()}`, s.id);
+      }
     }
     return map;
   }, [installedSkills]);
@@ -52,7 +55,12 @@ export function SkillsDiscoveryPage({ activeApp }: SkillsDiscoveryPageProps) {
   const skills: SkillItem[] = useMemo(() => {
     if (discoverableSkills === undefined) return [];
     return discoverableSkills.map((skill) => {
-      const installedId = installedIdsByKey.get(skill.key.toLowerCase()) ?? null;
+      const installedId =
+        installedIdsByKey.get(skill.key.toLowerCase()) ??
+        (skill.readmeUrl
+          ? installedIdsByKey.get(`readme:${skill.readmeUrl.toLowerCase()}`)
+          : null) ??
+        null;
       return { ...skill, installed: installedId !== null, installedId };
     });
   }, [discoverableSkills, installedIdsByKey]);

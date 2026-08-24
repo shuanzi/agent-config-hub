@@ -106,6 +106,46 @@ describe('SkillsDiscoveryPage 卸载已安装 Skill', () => {
     expect(within(uninstalledCard!).getByRole('button', { name: '安装' })).toBeTruthy();
   });
 
+  it('lock 导入的嵌套 Skill 按 README URL 关联并保留卸载 id', async () => {
+    const readmeUrl = 'https://github.com/owner/repo/blob/feature/new-thing/skills/foo/SKILL.md';
+    mockApi.discoverAvailableSkills.mockResolvedValue([
+      {
+        ...discoverable,
+        key: 'owner/repo:skills/foo',
+        name: 'Foo',
+        directory: 'skills/foo',
+        repoOwner: 'owner',
+        repoName: 'repo',
+        repoBranch: 'feature/new-thing',
+        readmeUrl,
+      },
+    ]);
+    mockApi.getInstalledSkills.mockResolvedValue([
+      {
+        ...installed,
+        id: 'owner/repo:foo',
+        name: 'Foo',
+        directory: 'foo',
+        repoOwner: 'owner',
+        repoName: 'repo',
+        repoBranch: 'feature/new-thing',
+        readmeUrl,
+      },
+    ]);
+    const Page = await loadPage();
+    render(<Page activeApp="claude-code" />, { wrapper: createWrapper(queryClient) });
+
+    const card = (await screen.findByRole('heading', { name: 'Foo' })).closest('article');
+    expect(card).not.toBeNull();
+    fireEvent.click(within(card!).getByRole('button', { name: '卸载' }));
+
+    const dialog = await screen.findByRole('dialog');
+    fireEvent.click(within(dialog).getByRole('button', { name: '卸载' }));
+
+    await waitFor(() => expect(mockApi.uninstallSkill).toHaveBeenCalledTimes(1));
+    expect(mockApi.uninstallSkill.mock.calls[0][0]).toBe('owner/repo:foo');
+  });
+
   it('取消确认后不调用卸载接口且安装态不变', async () => {
     mockApi.getInstalledSkills.mockResolvedValue([installed]);
     const Page = await loadPage();
