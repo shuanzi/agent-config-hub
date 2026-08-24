@@ -131,6 +131,57 @@ describe('InstalledSkillsPanel 导入同目录不同来源的本地 Skill', () =
       },
     ]);
   });
+
+  it('directory 大小写不同（Foo / foo）也视为同一组：默认只勾第一条并互斥', async () => {
+    mockApi.scanUnmanagedSkills.mockResolvedValue([
+      {
+        directory: 'Foo',
+        name: 'FooSkill',
+        foundIn: ['claude-code'],
+        path: '/agents/claude/skills/Foo',
+      },
+      {
+        directory: 'foo',
+        name: 'FooSkill',
+        foundIn: ['codex'],
+        path: '/agents/codex/skills/foo',
+      },
+    ] satisfies UnmanagedSkill[]);
+    const Panel = await loadPanel();
+    render(<Panel activeApp="claude-code" />, { wrapper: createWrapper(queryClient) });
+
+    fireEvent.click(await screen.findByRole('button', { name: /导入本地/ }));
+    const dialog = await screen.findByRole('dialog');
+
+    const firstItem = screen.getByText('/agents/claude/skills/Foo').closest('.skill-import-item');
+    const secondItem = screen.getByText('/agents/codex/skills/foo').closest('.skill-import-item');
+    expect(firstItem).not.toBeNull();
+    expect(secondItem).not.toBeNull();
+    const firstCheckbox = within(firstItem as HTMLElement).getAllByRole('checkbox')[0];
+    const secondCheckbox = within(secondItem as HTMLElement).getAllByRole('checkbox')[0];
+
+    // 默认只勾第一条，且两条都有互斥提示
+    expect(firstCheckbox).toHaveProperty('checked', true);
+    expect(secondCheckbox).toHaveProperty('checked', false);
+    expect(within(dialog).getByRole('button', { name: /导入选中项 \(1\)/ })).toBeTruthy();
+    expect(within(dialog).getAllByText('同名 Skill 一次只能导入一个来源')).toHaveLength(2);
+
+    // 勾选第二条自动取消第一条，提交 payload 只有一条
+    fireEvent.click(secondCheckbox);
+    expect(firstCheckbox).toHaveProperty('checked', false);
+    expect(secondCheckbox).toHaveProperty('checked', true);
+
+    fireEvent.click(within(dialog).getByRole('button', { name: /导入选中项 \(1\)/ }));
+
+    await waitFor(() => expect(mockApi.importSkillsFromApps).toHaveBeenCalledTimes(1));
+    expect(mockApi.importSkillsFromApps.mock.calls[0][0]).toEqual([
+      {
+        directory: 'foo',
+        sourcePath: '/agents/codex/skills/foo',
+        apps: { claudeCode: false, codex: true, geminiCli: false, opencode: false },
+      },
+    ]);
+  });
 });
 
 describe('InstalledSkillsPanel 全部更新部分失败', () => {

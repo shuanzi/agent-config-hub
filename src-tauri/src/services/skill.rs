@@ -360,6 +360,14 @@ impl SkillMigrationFailure {
     }
 }
 
+/// 导入同步前记录的投影现场：失败回滚时据此决定是删除（调用前不存在）
+/// 还是从快照恢复（调用前已存在，可能是用户的原始未托管来源本身）。
+struct ProjectionSnapshot {
+    app: AgentType,
+    target: PathBuf,
+    snapshot: Option<(tempfile::TempDir, PathBuf)>,
+}
+
 impl SkillService {
     pub fn new() -> Self {
         Self
@@ -436,8 +444,7 @@ impl SkillService {
         )
     }
 
-    #[allow(dead_code)]
-    fn paths_overlap(left: &Path, right: &Path) -> bool {
+    pub(crate) fn paths_overlap(left: &Path, right: &Path) -> bool {
         let overlaps = |left: &Path, right: &Path| {
             left == right || left.starts_with(right) || right.starts_with(left)
         };
@@ -464,11 +471,19 @@ impl SkillService {
         app_dir: &Path,
         app: &AgentType,
     ) -> Result<(), AppError> {
-        if Self::paths_alias(ssot_dir, app_dir) {
-            return Err(AppError::InvalidInput(format!(
-                "Skill 存储目录不能与 {} 的 Skills 目录相同: {}",
-                app.as_str(),
-                ssot_dir.display()
+        // 判等之外还必须拒绝父子重叠：目标落在 SSOT 内部时，symlink 会造成
+        // 文件系统环，copy 会把临时目标递归拷进自身直至耗尽资源
+        if Self::paths_overlap(ssot_dir, app_dir) {
+            let ssot = ssot_dir.display().to_string();
+            let app_dir = app_dir.display().to_string();
+            return Err(AppError::Message(format_skill_error(
+                "SKILL_STORAGE_OVERLAP",
+                &[
+                    ("app", app.as_str()),
+                    ("ssotDir", &ssot),
+                    ("appDir", &app_dir),
+                ],
+                None,
             )));
         }
         Ok(())
@@ -510,33 +525,59 @@ impl SkillService {
             let same_repo = existing.repo_owner.as_deref() == Some(&skill.repo_owner)
                 && existing.repo_name.as_deref() == Some(&skill.repo_name);
             if same_repo {
-                let mut updated = existing.clone();
-                updated.apps.set_enabled_for(current_app, true);
-                // 先同步投影成功再落库：同步失败时 DB 保持原启用标志，
-                // 避免出现"已启用但无可用投影"的中间状态
-                Self::sync_to_app_dir(&updated.directory, current_app)?;
-                if let Err(error) = db.save_skill(&updated) {
-                    // 落库失败：移除本次新建的投影，恢复到操作前状态；
-                    // 操作前已启用的投影先于本次操作存在，保留不动
-                    if !existing.apps.is_enabled_for(current_app) {
-                        if let Err(rollback_error) =
-                            Self::remove_from_app(&updated.directory, current_app)
-                        {
-                            log::error!(
-                                "保存 Skill {} 失败后移除 {} 投影也失败: {rollback_error}",
-                                updated.name,
-                                current_app.as_str()
-                            );
+                // 同一仓库可能含多个同名不同内容的 skill（如 a/reviewer 与
+                // b/reviewer，sanitize 后安装名相同）：复用前必须比对完整来源
+                // 身份，身份不同即冲突，绝不冒名启用另一来源的内容
+                if existing.id == skill.key {
+                    let mut updated = existing.clone();
+                    updated.apps.set_enabled_for(current_app, true);
+                    // 先同步投影成功再落库：同步失败时 DB 保持原启用标志，
+                    // 避免出现"已启用但无可用投影"的中间状态
+                    Self::sync_to_app_dir(&updated.directory, current_app)?;
+                    if let Err(error) = db.save_skill(&updated) {
+                        // 落库失败：移除本次新建的投影，恢复到操作前状态；
+                        // 操作前已启用的投影先于本次操作存在，保留不动
+                        if !existing.apps.is_enabled_for(current_app) {
+                            if let Err(rollback_error) =
+                                Self::remove_from_app(&updated.directory, current_app)
+                            {
+                                log::error!(
+                                    "保存 Skill {} 失败后移除 {} 投影也失败: {rollback_error}",
+                                    updated.name,
+                                    current_app.as_str()
+                                );
+                            }
                         }
+                        return Err(error);
                     }
-                    return Err(error);
+                    log::info!(
+                        "Skill {} 已存在，更新 {} 启用状态",
+                        updated.name,
+                        current_app.as_str()
+                    );
+                    return Ok(Some(updated));
                 }
-                log::info!(
-                    "Skill {} 已存在，更新 {} 启用状态",
-                    updated.name,
-                    current_app.as_str()
-                );
-                return Ok(Some(updated));
+
+                return Err(AppError::Message(format_skill_error(
+                    "SKILL_DIRECTORY_CONFLICT",
+                    &[
+                        ("directory", install_name),
+                        (
+                            "existingRepo",
+                            &format!(
+                                "{}/{}:{}",
+                                existing.repo_owner.as_deref().unwrap_or("unknown"),
+                                existing.repo_name.as_deref().unwrap_or("unknown"),
+                                existing.id
+                            ),
+                        ),
+                        (
+                            "newRepo",
+                            &format!("{}/{}", skill.repo_owner, skill.repo_name),
+                        ),
+                    ],
+                    Some("uninstallFirst"),
+                )));
             }
 
             return Err(AppError::Message(format_skill_error(
@@ -1444,7 +1485,19 @@ impl SkillService {
                 }
                 Err(_) => match Self::copy_dir_recursive(&src, &dst) {
                     Ok(()) => {
-                        let _ = fs::remove_dir_all(&src);
+                        // 源删除失败视为迁移失败：目标副本已验证完整可删，回滚之。
+                        // 若残留旧副本仍计成功，之后迁回会因目标已存在而中止
+                        if let Err(e) = fs::remove_dir_all(&src) {
+                            log::warn!("迁移 Skill {directory} 失败：源目录删除失败: {e}");
+                            if let Err(rollback_error) = fs::remove_dir_all(&dst) {
+                                log::error!(
+                                    "回滚 Skill 迁移目标副本失败 {}: {rollback_error}",
+                                    dst.display()
+                                );
+                            }
+                            failures.push(directory);
+                            continue;
+                        }
                         result.migrated_count += 1;
                         moved.push(directory);
                     }
@@ -1823,6 +1876,15 @@ impl SkillService {
             let created_ssot = !dest.exists();
             if created_ssot {
                 Self::copy_dir_recursive(&source, &dest)?;
+            } else if !Self::paths_alias(&source, &dest) {
+                // SSOT 已有未纳管同名内容：落库/投影前比对内容身份。
+                // 内容不同则拒绝导入、双方保持不变——否则会跳过复制后从 A
+                // 读元数据/hash 落库，并把 A 投影回去覆盖所选来源 B
+                let source_hash = Self::compute_dir_hash(&source)?;
+                let dest_hash = Self::compute_dir_hash(&dest)?;
+                if source_hash != dest_hash {
+                    return Err(Self::unmanaged_destination_conflict(&dir_name));
+                }
             }
 
             let skill_md = dest.join("SKILL.md");
@@ -1861,21 +1923,29 @@ impl SkillService {
                 return Err(e);
             }
 
-            // 记录本次导入已成功的投影：任一 Agent 同步失败时逐项移除，
-            // 避免前序投影残留为"生效但未受管"的内容
-            let mut synced_apps: Vec<AgentType> = Vec::new();
+            // 记录本次导入已成功的投影及其同步前快照：任一 Agent 同步失败时，
+            // 只删除调用前不存在的投影；调用前已存在的内容（可能是用户的原始
+            // 未托管来源本身）从快照恢复，绝不因回滚而丢失
+            let mut synced_apps: Vec<ProjectionSnapshot> = Vec::new();
             for app in skill.apps.enabled_apps() {
+                let app_dir = Self::get_app_skills_dir(&app)?;
+                let target = app_dir.join(&skill.directory);
+                let snapshot = Self::snapshot_projection_target(&target)?;
                 if let Err(e) = Self::sync_to_app_dir(&skill.directory, &app) {
-                    for synced_app in &synced_apps {
+                    // 先恢复本次同步失败的 Agent 的现场（同步可能已破坏其原目标），
+                    // 再回滚前序已成功的 Agent
+                    Self::restore_projection_target(&target, snapshot.as_ref());
+                    for synced in &synced_apps {
                         if let Err(rollback_error) =
-                            Self::remove_from_app(&skill.directory, synced_app)
+                            Self::remove_from_app(&skill.directory, &synced.app)
                         {
                             log::error!(
                                 "导入 Skill {} 后同步失败，且移除 {} 投影也失败: {rollback_error}",
                                 skill.id,
-                                synced_app.as_str()
+                                synced.app.as_str()
                             );
                         }
+                        Self::restore_projection_target(&synced.target, synced.snapshot.as_ref());
                     }
                     if let Err(rollback_error) = db.delete_skill(&skill.id) {
                         log::error!(
@@ -1893,7 +1963,11 @@ impl SkillService {
                     }
                     return Err(e);
                 }
-                synced_apps.push(app);
+                synced_apps.push(ProjectionSnapshot {
+                    app,
+                    target,
+                    snapshot,
+                });
             }
 
             imported.push(skill);
@@ -1902,6 +1976,35 @@ impl SkillService {
         log::info!("成功导入 {} 个 Skills", imported.len());
 
         Ok(imported)
+    }
+
+    /// 同步前快照投影目标：目标已存在（用户自有内容，或本次导入的来源本身）时
+    /// 先复制到临时目录，供失败回滚恢复；不存在则无需快照。
+    fn snapshot_projection_target(
+        target: &Path,
+    ) -> Result<Option<(tempfile::TempDir, PathBuf)>, AppError> {
+        if !target.exists() && !Self::is_symlink(target) {
+            return Ok(None);
+        }
+        let guard = tempfile::tempdir().map_err(|e| AppError::io(target, e))?;
+        let snapshot = guard.path().join("snapshot");
+        Self::copy_dir_recursive(target, &snapshot)?;
+        Ok(Some((guard, snapshot)))
+    }
+
+    /// 最佳努力恢复同步前的投影目标内容。
+    fn restore_projection_target(target: &Path, snapshot: Option<&(tempfile::TempDir, PathBuf)>) {
+        let Some((_, snapshot_dir)) = snapshot else {
+            return;
+        };
+        if target.exists() || Self::is_symlink(target) {
+            if let Err(e) = Self::remove_path(target) {
+                log::error!("回滚投影目标失败 {}: {e}", target.display());
+            }
+        }
+        if let Err(e) = Self::copy_dir_recursive(snapshot_dir, target) {
+            log::error!("恢复投影目标快照失败 {}: {e}", target.display());
+        }
     }
 
     // ========== File sync methods ==========
@@ -5272,10 +5375,14 @@ mod tests {
         );
         assert!(result.is_err(), "第二个 Agent 同步失败必须返回错误");
 
-        // 前序 Agent 的投影必须被清除，不得残留"生效但未受管"的内容
+        // Claude 目录是用户的原始未托管来源：回滚必须从同步前快照恢复，
+        // 绝不允许把原始 skill 的唯一副本一并删除
+        let claude_native = config::get_claude_skills_dir().join("native");
+        let content = fs::read_to_string(claude_native.join("SKILL.md"))
+            .expect("同步失败时原始来源目录必须被保留");
         assert!(
-            !config::get_claude_skills_dir().join("native").exists(),
-            "同步失败时前序 Agent 的投影必须被移除"
+            content.contains("name: Native"),
+            "同步失败时原始来源内容必须原样保留"
         );
         // 本次新建的 SSOT 目录必须一并删除，避免残留未受管内容导致重试被拒
         assert!(
@@ -5646,5 +5753,183 @@ mod tests {
             }
         }
         crate::settings::reset_settings_store_for_test();
+    }
+
+    #[test]
+    #[serial]
+    fn sync_rejects_overlapping_app_skills_dir() {
+        let tmp = tempdir().unwrap();
+        let _guard = TestHomeGuard::set(tmp.path());
+
+        // override 的 skills 目录落在 SSOT 内部（父子重叠）：symlink 会造成
+        // 文件系统环，copy 会把临时目标递归拷进自身，必须拒绝
+        let ssot = SkillService::get_ssot_dir().unwrap();
+        crate::settings::set_agent_config_dir_override(
+            "claude-code",
+            Some(ssot.join("nested").to_string_lossy().to_string()),
+        )
+        .unwrap();
+        write_skill(&ssot.join("overlap-skill"), "Overlap");
+
+        let err = SkillService::sync_to_app_dir("overlap-skill", &AgentType::ClaudeCode)
+            .expect_err("父子重叠的 skills 目录必须被拒绝");
+        assert!(err.to_string().contains("SKILL_STORAGE_OVERLAP"));
+    }
+
+    #[test]
+    #[serial]
+    fn install_same_repo_different_source_conflicts() {
+        let tmp = tempdir().unwrap();
+        let _guard = TestHomeGuard::set(tmp.path());
+
+        let db = Arc::new(Database::memory().unwrap());
+        write_skill(
+            &SkillService::get_ssot_dir().unwrap().join("reviewer"),
+            "ReviewerA",
+        );
+
+        let mut existing = installed_skill_fixture("owner/repo:a/reviewer", "reviewer");
+        existing.apps = SkillApps::only(&AgentType::ClaudeCode);
+        db.save_skill(&existing).unwrap();
+
+        // 同一仓库的 b/reviewer：sanitize 后安装名相同，但来源身份不同，
+        // 必须报冲突而不是复用并启用第一个的内容
+        let discoverable = DiscoverableSkill {
+            key: "owner/repo:b/reviewer".to_string(),
+            name: "Reviewer B".to_string(),
+            description: "".to_string(),
+            directory: "b/reviewer".to_string(),
+            readme_url: None,
+            repo_owner: "owner".to_string(),
+            repo_name: "repo".to_string(),
+            repo_branch: "main".to_string(),
+        };
+
+        let err =
+            SkillService::reuse_existing_install(&db, &discoverable, "reviewer", &AgentType::Codex)
+                .expect_err("同名不同来源必须报冲突");
+        assert!(err.to_string().contains("SKILL_DIRECTORY_CONFLICT"));
+
+        // 已装内容未被覆盖，启用状态未变
+        let stored = db.get_installed_skill(&existing.id).unwrap().unwrap();
+        assert!(stored.apps.claude_code);
+        assert!(!stored.apps.codex);
+        let content = fs::read_to_string(
+            SkillService::get_ssot_dir()
+                .unwrap()
+                .join("reviewer")
+                .join("SKILL.md"),
+        )
+        .unwrap();
+        assert!(content.contains("name: ReviewerA"));
+    }
+
+    #[test]
+    #[serial]
+    fn migrate_storage_fails_when_source_dir_not_removable() {
+        let tmp = tempdir().unwrap();
+        let _guard = TestHomeGuard::set(tmp.path());
+
+        let db = Arc::new(Database::memory().unwrap());
+        let old_dir = SkillService::get_ssot_dir().unwrap();
+        write_skill(&old_dir.join("mig-src"), "MigSrc");
+        let skill = installed_skill_fixture("owner/repo:mig-src", "mig-src");
+        db.save_skill(&skill).unwrap();
+
+        // 故障注入：旧根只读 → rename 失败回退为 copy，copy 成功但源目录删除失败
+        let mut permissions = std::fs::metadata(&old_dir).unwrap().permissions();
+        permissions.set_readonly(true);
+        fs::set_permissions(&old_dir, permissions).unwrap();
+
+        let result = crate::commands::migrate_storage_combined(&db, StorageLocation::Unified);
+
+        // 恢复写权限以便断言与临时目录清理
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut permissions = std::fs::metadata(&old_dir).unwrap().permissions();
+            permissions.set_mode(permissions.mode() | 0o200);
+            let _ = fs::set_permissions(&old_dir, permissions);
+        }
+
+        assert!(result.is_err(), "源目录删除失败必须按迁移失败处理");
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("MIGRATION_ABORTED"));
+
+        // 目标副本必须被回滚删除，源目录保留，存储设置未切换
+        assert!(!config::get_home_dir()
+            .join(".agents")
+            .join("skills")
+            .join("mig-src")
+            .exists());
+        assert!(old_dir.join("mig-src").exists());
+        assert_eq!(
+            crate::settings::get_settings().storage_location,
+            StorageLocation::Hub
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn import_from_apps_conflicts_with_different_unmanaged_ssot_content() {
+        let tmp = tempdir().unwrap();
+        let _guard = TestHomeGuard::set(tmp.path());
+
+        let db = Arc::new(Database::memory().unwrap());
+        // SSOT 预置未纳管 shared=A，Agent 预置同名不同内容 shared=B，用户只选 B
+        let ssot = SkillService::get_ssot_dir().unwrap();
+        write_skill(&ssot.join("shared"), "Alpha");
+        let codex_shared = config::get_codex_skills_dir().join("shared");
+        write_skill(&codex_shared, "Beta");
+
+        let result = SkillService::import_from_apps(
+            &db,
+            vec![ImportSkillSelection {
+                directory: "shared".to_string(),
+                source_path: Some(codex_shared.to_string_lossy().to_string()),
+                apps: SkillApps::default(),
+            }],
+        );
+        let payload = result
+            .expect_err("SSOT 与所选来源内容不同必须报冲突")
+            .to_string();
+        assert!(payload.contains("SKILL_DIRECTORY_CONFLICT"));
+
+        // 双方内容均保持不变，且未落库
+        let ssot_content = fs::read_to_string(ssot.join("shared").join("SKILL.md")).unwrap();
+        assert!(ssot_content.contains("name: Alpha"));
+        let agent_content = fs::read_to_string(codex_shared.join("SKILL.md")).unwrap();
+        assert!(agent_content.contains("name: Beta"));
+        assert!(db.get_all_installed_skills().unwrap().is_empty());
+    }
+
+    #[test]
+    #[serial]
+    fn import_from_apps_adopts_when_unmanaged_ssot_content_matches() {
+        let tmp = tempdir().unwrap();
+        let _guard = TestHomeGuard::set(tmp.path());
+
+        let db = Arc::new(Database::memory().unwrap());
+        crate::settings::set_sync_method(SyncMethod::Copy).unwrap();
+        // SSOT 与所选 Agent 来源内容一致：正常完成导入
+        let ssot = SkillService::get_ssot_dir().unwrap();
+        write_skill(&ssot.join("shared"), "Same");
+        let claude_shared = config::get_claude_skills_dir().join("shared");
+        write_skill(&claude_shared, "Same");
+
+        let imported = SkillService::import_from_apps(
+            &db,
+            vec![ImportSkillSelection {
+                directory: "shared".to_string(),
+                source_path: Some(claude_shared.to_string_lossy().to_string()),
+                apps: SkillApps::only(&AgentType::ClaudeCode),
+            }],
+        )
+        .expect("内容一致应正常完成导入");
+        assert_eq!(imported.len(), 1);
+        assert!(db.get_installed_skill("local:shared").unwrap().is_some());
+        assert!(claude_shared.join("SKILL.md").exists());
     }
 }

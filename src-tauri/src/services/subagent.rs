@@ -208,20 +208,24 @@ impl SubagentService {
         Ok(dir)
     }
 
-    fn paths_alias(left: &Path, right: &Path) -> bool {
-        SkillService::paths_alias(left, right)
-    }
-
     fn ensure_distinct_subagent_roots(
         ssot_dir: &Path,
         app_dir: &Path,
         app: &AgentType,
     ) -> Result<(), AppError> {
-        if Self::paths_alias(ssot_dir, app_dir) {
-            return Err(AppError::InvalidInput(format!(
-                "Subagent 存储目录不能与 {} 的 subagents 目录相同: {}",
-                app.as_str(),
-                ssot_dir.display()
+        // 判等之外还必须拒绝父子重叠：目标落在 SSOT 内部时，symlink 会造成
+        // 文件系统环，copy 会把临时目标递归拷进自身
+        if SkillService::paths_overlap(ssot_dir, app_dir) {
+            let ssot = ssot_dir.display().to_string();
+            let app_dir = app_dir.display().to_string();
+            return Err(AppError::Message(format_subagent_error(
+                "SUBAGENT_STORAGE_OVERLAP",
+                &[
+                    ("app", app.as_str()),
+                    ("ssotDir", &ssot),
+                    ("appDir", &app_dir),
+                ],
+                None,
             )));
         }
         Ok(())
@@ -1610,7 +1614,19 @@ impl SubagentService {
                 }
                 Err(_) => match config::copy_file(&src, &dst) {
                     Ok(()) => {
-                        let _ = fs::remove_file(&src);
+                        // 源删除失败视为迁移失败：目标副本已验证完整可删，回滚之。
+                        // 若残留旧副本仍计成功，之后迁回会因目标已存在而中止
+                        if let Err(e) = fs::remove_file(&src) {
+                            log::warn!("迁移 Subagent {directory} 失败：源文件删除失败: {e}");
+                            if let Err(rollback_error) = fs::remove_file(&dst) {
+                                log::error!(
+                                    "回滚 Subagent 迁移目标副本失败 {}: {rollback_error}",
+                                    dst.display()
+                                );
+                            }
+                            failures.push(directory);
+                            continue;
+                        }
                         result.migrated_count += 1;
                         moved.push(directory);
                     }
@@ -3249,5 +3265,67 @@ mod tests {
         assert!(db.get_installed_subagent(&subagent.id).unwrap().is_none());
 
         restore_writable([&read_only_root, &agents_dir]);
+    }
+
+    #[test]
+    #[serial]
+    fn sync_rejects_overlapping_app_agents_dir() {
+        let tmp = tempdir().unwrap();
+        let _guard = TestHomeGuard::set(tmp.path());
+
+        // override 的 agents 目录落在 SSOT 内部（父子重叠）：symlink 会造成
+        // 文件系统环，copy 会反复写自身，必须拒绝
+        let ssot = SubagentService::get_ssot_dir().unwrap();
+        crate::settings::update_settings(crate::settings::AppSettings {
+            claude_code_config_dir: Some(ssot.join("nested").to_string_lossy().to_string()),
+            ..Default::default()
+        })
+        .unwrap();
+        write_subagent(&ssot, "overlap.md", "Overlap");
+
+        let err = SubagentService::sync_to_app_dir("overlap", &AgentType::ClaudeCode)
+            .expect_err("父子重叠的 agents 目录必须被拒绝");
+        assert!(err.to_string().contains("SUBAGENT_STORAGE_OVERLAP"));
+    }
+
+    #[test]
+    #[serial]
+    fn migrate_storage_fails_when_source_file_not_removable() {
+        let tmp = tempdir().unwrap();
+        let _guard = TestHomeGuard::set(tmp.path());
+
+        let db = Arc::new(Database::memory().unwrap());
+        let old_dir = SubagentService::get_ssot_dir().unwrap();
+        write_subagent(&old_dir, "mig-src.md", "MigSrc");
+        db.save_subagent(&installed_subagent("owner/repo:mig-src.md", "mig-src"))
+            .unwrap();
+
+        // 故障注入：旧根只读 → rename 失败回退为 copy，copy 成功但源文件删除失败
+        let mut permissions = std::fs::metadata(&old_dir).unwrap().permissions();
+        permissions.set_readonly(true);
+        fs::set_permissions(&old_dir, permissions).unwrap();
+
+        let result = crate::commands::migrate_storage_combined(&db, StorageLocation::Unified);
+
+        // 恢复写权限以便断言与临时目录清理
+        restore_writable([&old_dir, &old_dir]);
+
+        assert!(result.is_err(), "源文件删除失败必须按迁移失败处理");
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("MIGRATION_ABORTED"));
+
+        // 目标副本必须被回滚删除，源文件保留，存储设置未切换
+        assert!(!config::get_home_dir()
+            .join(".agents")
+            .join("subagents")
+            .join("mig-src.md")
+            .exists());
+        assert!(old_dir.join("mig-src.md").exists());
+        assert_eq!(
+            crate::settings::get_settings().storage_location,
+            StorageLocation::Hub
+        );
     }
 }

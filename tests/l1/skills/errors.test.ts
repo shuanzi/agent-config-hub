@@ -98,4 +98,16 @@ describe('toUserError', () => {
     expect(userError.message).toContain('一次只能导入一个来源');
     expect(userError.message).toContain('shared');
   });
+
+  it('renders context for SKILL_STORAGE_OVERLAP', () => {
+    const error = new Error(
+      JSON.stringify({
+        code: 'SKILL_STORAGE_OVERLAP',
+        context: { app: 'codex', ssotDir: '/a', appDir: '/a/b' },
+      }),
+    );
+    const userError = toUserError(error);
+    expect(userError.message).toContain('存储目录重叠');
+    expect(userError.message).toContain('codex');
+  });
 });

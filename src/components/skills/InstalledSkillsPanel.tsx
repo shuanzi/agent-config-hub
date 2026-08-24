@@ -471,14 +471,16 @@ function ImportDialog({
 }) {
   // 同名不同来源的发现项需用 directory + path（扫描拆条后各自指向本组来源）复合 key 区分。
   const selectionKey = (skill: UnmanagedSkill) => `${skill.directory}::${skill.path}`;
+  // 与后端批量导入判重（directory.to_lowercase()）一致：directory 分组统一按小写比较。
+  const directoryKey = (skill: UnmanagedSkill) => skill.directory.toLowerCase();
 
   // 同 directory 的发现项互斥（后端对重复 directory 会整批拒绝），默认只勾选每组第一条。
   const [selected, setSelected] = useState<Set<string>>(() => {
     const seenDirectories = new Set<string>();
     const initial = new Set<string>();
     for (const skill of skills) {
-      if (!seenDirectories.has(skill.directory)) {
-        seenDirectories.add(skill.directory);
+      if (!seenDirectories.has(directoryKey(skill))) {
+        seenDirectories.add(directoryKey(skill));
         initial.add(selectionKey(skill));
       }
     }
@@ -488,7 +490,8 @@ function ImportDialog({
   const conflictDirectories = useMemo(() => {
     const counts = new Map<string, number>();
     for (const skill of skills) {
-      counts.set(skill.directory, (counts.get(skill.directory) ?? 0) + 1);
+      const key = directoryKey(skill);
+      counts.set(key, (counts.get(key) ?? 0) + 1);
     }
     return new Set(
       [...counts.entries()].filter(([, count]) => count > 1).map(([directory]) => directory),
@@ -513,9 +516,9 @@ function ImportDialog({
     if (next.has(key)) {
       next.delete(key);
     } else {
-      // 单选语义：勾选一条时自动取消同 directory 的其他来源。
+      // 单选语义：勾选一条时自动取消同 directory（小写归一）的其他来源。
       for (const other of skills) {
-        if (other.directory === skill.directory) {
+        if (directoryKey(other) === directoryKey(skill)) {
           next.delete(selectionKey(other));
         }
       }
@@ -576,7 +579,7 @@ function ImportDialog({
                   <div style={{ fontSize: 12, color: '#555' }}>{skill.description}</div>
                 )}
                 <div className="skill-import-item-path">{skill.path}</div>
-                {conflictDirectories.has(skill.directory) && (
+                {conflictDirectories.has(directoryKey(skill)) && (
                   <div style={{ fontSize: 11, color: '#a15c00' }}>
                     同名 Skill 一次只能导入一个来源
                   </div>
