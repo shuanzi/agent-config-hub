@@ -1739,13 +1739,26 @@ impl SubagentService {
             return Err(err);
         }
 
-        // 为所有启用的 Agent 重建投影
+        // 为所有启用的 Agent 重建投影；任一失败时连同本次已创建的前序投影一并清理
+        let mut synced_apps: Vec<AgentType> = Vec::new();
         for app in restored_subagent.apps.enabled_apps() {
             if let Err(err) = Self::sync_to_app_dir(&restored_subagent.directory, &app) {
+                for synced_app in &synced_apps {
+                    if let Err(rollback_error) =
+                        Self::remove_from_app(&restored_subagent.directory, synced_app)
+                    {
+                        log::error!(
+                            "恢复 Subagent {} 失败后移除 {} 投影也失败: {rollback_error}",
+                            restored_subagent.name,
+                            synced_app.as_str()
+                        );
+                    }
+                }
                 let _ = db.delete_subagent(&restored_subagent.id);
                 let _ = fs::remove_file(&restore_path);
                 return Err(err);
             }
+            synced_apps.push(app);
         }
 
         log::info!(
@@ -2608,6 +2621,82 @@ mod tests {
         assert!(config::get_codex_agents_dir()
             .join("multi-agent.md")
             .exists());
+    }
+
+    #[test]
+    #[serial]
+    fn restore_from_backup_removes_prior_projections_on_sync_failure() {
+        let tmp = tempdir().unwrap();
+        let _guard = TestHomeGuard::set(tmp.path());
+
+        let db = Arc::new(Database::memory().unwrap());
+        crate::settings::set_sync_method(SyncMethod::Copy).unwrap();
+        write_subagent(
+            &SubagentService::get_ssot_dir().unwrap(),
+            "restore-rb-agent.md",
+            "RestoreRB",
+        );
+
+        // 卸载前对 ClaudeCode 与 Codex 两个 Agent 启用
+        let mut subagent = installed_subagent("owner/repo:restore-rb-agent.md", "restore-rb-agent");
+        subagent.apps = SubagentApps::only(&AgentType::ClaudeCode);
+        subagent.apps.set_enabled_for(&AgentType::Codex, true);
+        db.save_subagent(&subagent).unwrap();
+        SubagentService::sync_to_app_dir("restore-rb-agent", &AgentType::ClaudeCode).unwrap();
+        SubagentService::sync_to_app_dir("restore-rb-agent", &AgentType::Codex).unwrap();
+
+        let result = SubagentService::uninstall(&db, &subagent.id).expect("uninstall");
+        let backup_id = result
+            .backup_path
+            .unwrap()
+            .split('/')
+            .next_back()
+            .unwrap()
+            .to_string();
+
+        // 故障注入：codex 配置目录只读，恢复时第二个 Agent 的投影同步必然失败
+        let read_only_root = tmp.path().join("readonly-codex");
+        let agents_dir = read_only_root.join("agents");
+        fs::create_dir_all(&agents_dir).unwrap();
+        for dir in [&read_only_root, &agents_dir] {
+            let mut permissions = std::fs::metadata(dir).unwrap().permissions();
+            permissions.set_readonly(true);
+            fs::set_permissions(dir, permissions).unwrap();
+        }
+        crate::settings::set_agent_config_dir_override(
+            "codex",
+            Some(read_only_root.to_string_lossy().to_string()),
+        )
+        .unwrap();
+
+        SubagentService::restore_from_backup(&db, &backup_id, &AgentType::ClaudeCode)
+            .expect_err("第二个 Agent 同步失败必须返回错误");
+
+        // 本次恢复创建的前序投影必须被移除
+        assert!(
+            !config::get_claude_agents_dir()
+                .join("restore-rb-agent.md")
+                .exists(),
+            "同步失败时前序 Agent 的投影必须被移除"
+        );
+        // DB 与 SSOT 已清理
+        assert!(db.get_installed_subagent(&subagent.id).unwrap().is_none());
+        assert!(!SubagentService::get_ssot_dir()
+            .unwrap()
+            .join("restore-rb-agent.md")
+            .exists());
+
+        // 恢复写权限以便临时目录清理
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            for dir in [&read_only_root, &agents_dir] {
+                let mut permissions = std::fs::metadata(dir).unwrap().permissions();
+                permissions.set_mode(permissions.mode() | 0o200);
+                let _ = fs::set_permissions(dir, permissions);
+            }
+        }
+        crate::settings::reset_settings_store_for_test();
     }
 
     #[test]

@@ -472,7 +472,28 @@ function ImportDialog({
   // 同名不同来源的发现项需用 directory + path（扫描拆条后各自指向本组来源）复合 key 区分。
   const selectionKey = (skill: UnmanagedSkill) => `${skill.directory}::${skill.path}`;
 
-  const [selected, setSelected] = useState<Set<string>>(new Set(skills.map(selectionKey)));
+  // 同 directory 的发现项互斥（后端对重复 directory 会整批拒绝），默认只勾选每组第一条。
+  const [selected, setSelected] = useState<Set<string>>(() => {
+    const seenDirectories = new Set<string>();
+    const initial = new Set<string>();
+    for (const skill of skills) {
+      if (!seenDirectories.has(skill.directory)) {
+        seenDirectories.add(skill.directory);
+        initial.add(selectionKey(skill));
+      }
+    }
+    return initial;
+  });
+
+  const conflictDirectories = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const skill of skills) {
+      counts.set(skill.directory, (counts.get(skill.directory) ?? 0) + 1);
+    }
+    return new Set(
+      [...counts.entries()].filter(([, count]) => count > 1).map(([directory]) => directory),
+    );
+  }, [skills]);
   const [appsBySkill, setAppsBySkill] = useState<Record<string, SkillApps>>(() => {
     const initial: Record<string, SkillApps> = {};
     for (const skill of skills) {
@@ -486,11 +507,18 @@ function ImportDialog({
     return initial;
   });
 
-  const toggleSelect = (key: string) => {
+  const toggleSelect = (skill: UnmanagedSkill) => {
+    const key = selectionKey(skill);
     const next = new Set(selected);
     if (next.has(key)) {
       next.delete(key);
     } else {
+      // 单选语义：勾选一条时自动取消同 directory 的其他来源。
+      for (const other of skills) {
+        if (other.directory === skill.directory) {
+          next.delete(selectionKey(other));
+        }
+      }
       next.add(key);
     }
     setSelected(next);
@@ -540,7 +568,7 @@ function ImportDialog({
               <input
                 type="checkbox"
                 checked={selected.has(selectionKey(skill))}
-                onChange={() => toggleSelect(selectionKey(skill))}
+                onChange={() => toggleSelect(skill)}
               />
               <div className="skill-import-item-info">
                 <div className="skill-import-item-name">{skill.name}</div>
@@ -548,6 +576,11 @@ function ImportDialog({
                   <div style={{ fontSize: 12, color: '#555' }}>{skill.description}</div>
                 )}
                 <div className="skill-import-item-path">{skill.path}</div>
+                {conflictDirectories.has(skill.directory) && (
+                  <div style={{ fontSize: 11, color: '#a15c00' }}>
+                    同名 Skill 一次只能导入一个来源
+                  </div>
+                )}
                 <div className="skill-toggle-group" style={{ borderTop: 'none', paddingTop: 6 }}>
                   {AGENTS.map((app) => (
                     <label key={app} className="skill-toggle">

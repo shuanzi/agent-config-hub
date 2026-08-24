@@ -30,6 +30,7 @@ const ERROR_MESSAGES: Record<string, string | ((ctx: Record<string, string>) => 
   SUBAGENT_INTERNAL: 'Subagent 操作失败。',
   SETTINGS_INTERNAL: '设置操作失败。',
   MIGRATION_ABORTED: (ctx) => `迁移失败：${ctx.failures ?? ''}`,
+  IMPORT_DUPLICATE_DIRECTORY: (ctx) => `同名 Skill 一次只能导入一个来源：${ctx.directory ?? ''}。`,
   UPDATE_SYNC_FAILED: (ctx) => `更新后同步失败：${ctx.apps ?? ''}`,
   UNINSTALL_PROJECTION_FAILED: (ctx) => `移除投影失败：${ctx.apps ?? ''}`,
 };

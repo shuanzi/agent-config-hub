@@ -86,4 +86,16 @@ describe('toUserError', () => {
     expect(userError.message).toBe('Skill 操作失败。');
     expect(userError.suggestion).toBe('请检查日志或重试。');
   });
+
+  it('renders context for IMPORT_DUPLICATE_DIRECTORY', () => {
+    const error = new Error(
+      JSON.stringify({
+        code: 'IMPORT_DUPLICATE_DIRECTORY',
+        context: { directory: 'shared' },
+      }),
+    );
+    const userError = toUserError(error);
+    expect(userError.message).toContain('一次只能导入一个来源');
+    expect(userError.message).toContain('shared');
+  });
 });

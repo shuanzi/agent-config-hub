@@ -1574,13 +1574,26 @@ impl SkillService {
             return Err(err);
         }
 
-        // 为所有启用的 Agent 重建投影
+        // 为所有启用的 Agent 重建投影；任一失败时连同本次已创建的前序投影一并清理
+        let mut synced_apps: Vec<AgentType> = Vec::new();
         for app in restored_skill.apps.enabled_apps() {
             if let Err(err) = Self::sync_to_app_dir(&restored_skill.directory, &app) {
+                for synced_app in &synced_apps {
+                    if let Err(rollback_error) =
+                        Self::remove_from_app(&restored_skill.directory, synced_app)
+                    {
+                        log::error!(
+                            "恢复 Skill {} 失败后移除 {} 投影也失败: {rollback_error}",
+                            restored_skill.name,
+                            synced_app.as_str()
+                        );
+                    }
+                }
                 let _ = db.delete_skill(&restored_skill.id);
                 let _ = fs::remove_dir_all(&restore_path);
                 return Err(err);
             }
+            synced_apps.push(app);
         }
 
         log::info!(
@@ -1720,6 +1733,21 @@ impl SkillService {
         imports: Vec<ImportSkillSelection>,
     ) -> Result<Vec<InstalledSkill>, AppError> {
         let _state_guard = skill_state_write_guard();
+
+        // 批次级校验：同一 directory 出现两次时，两个选择映射到同一 SSOT 目标，
+        // 后者会静默重导前者内容并覆盖其启用标志——直接拒绝整个批次
+        let mut seen_directories: HashMap<String, &str> = HashMap::new();
+        for selection in &imports {
+            let key = selection.directory.to_lowercase();
+            if let Some(conflicting) = seen_directories.insert(key, selection.directory.as_str()) {
+                return Err(AppError::Message(format_skill_error(
+                    "IMPORT_DUPLICATE_DIRECTORY",
+                    &[("directory", conflicting)],
+                    None,
+                )));
+            }
+        }
+
         let ssot_dir = Self::get_ssot_dir()?;
         let agents_lock = parse_agents_lock();
         let mut imported = Vec::new();
@@ -1791,7 +1819,9 @@ impl SkillService {
             }
 
             let dest = ssot_dir.join(&dir_name);
-            if !dest.exists() {
+            // 记录本次是否新建 SSOT 目录：失败回滚时只删本次新建，绝不删除既有内容
+            let created_ssot = !dest.exists();
+            if created_ssot {
                 Self::copy_dir_recursive(&source, &dest)?;
             }
 
@@ -1819,18 +1849,51 @@ impl SkillService {
                 updated_at: 0,
             };
 
-            db.save_skill(&skill)?;
+            if let Err(e) = db.save_skill(&skill) {
+                if created_ssot {
+                    if let Err(rollback_error) = fs::remove_dir_all(&dest) {
+                        log::error!(
+                            "导入 Skill {} 落库失败，且回滚本次新建的 SSOT 目录也失败: {rollback_error}",
+                            skill.id
+                        );
+                    }
+                }
+                return Err(e);
+            }
 
+            // 记录本次导入已成功的投影：任一 Agent 同步失败时逐项移除，
+            // 避免前序投影残留为"生效但未受管"的内容
+            let mut synced_apps: Vec<AgentType> = Vec::new();
             for app in skill.apps.enabled_apps() {
                 if let Err(e) = Self::sync_to_app_dir(&skill.directory, &app) {
+                    for synced_app in &synced_apps {
+                        if let Err(rollback_error) =
+                            Self::remove_from_app(&skill.directory, synced_app)
+                        {
+                            log::error!(
+                                "导入 Skill {} 后同步失败，且移除 {} 投影也失败: {rollback_error}",
+                                skill.id,
+                                synced_app.as_str()
+                            );
+                        }
+                    }
                     if let Err(rollback_error) = db.delete_skill(&skill.id) {
                         log::error!(
                             "导入 Skill {} 后同步失败，且回滚数据库记录也失败: {rollback_error}",
                             skill.id
                         );
                     }
+                    if created_ssot {
+                        if let Err(rollback_error) = fs::remove_dir_all(&dest) {
+                            log::error!(
+                                "导入 Skill {} 后同步失败，且回滚本次新建的 SSOT 目录也失败: {rollback_error}",
+                                skill.id
+                            );
+                        }
+                    }
                     return Err(e);
                 }
+                synced_apps.push(app);
             }
 
             imported.push(skill);
@@ -5120,6 +5183,195 @@ mod tests {
             .join("uninstall-skill")
             .exists());
         assert!(db.get_installed_skill(&skill.id).unwrap().is_some());
+    }
+
+    #[test]
+    #[serial]
+    fn import_from_apps_rejects_duplicate_directory_in_batch() {
+        let tmp = tempdir().unwrap();
+        let _guard = TestHomeGuard::set(tmp.path());
+
+        let db = Arc::new(Database::memory().unwrap());
+        // 同名不同内容的两条发现项
+        write_skill(&config::get_claude_skills_dir().join("shared"), "Alpha");
+        write_skill(&config::get_codex_skills_dir().join("shared"), "Beta");
+
+        let result = SkillService::import_from_apps(
+            &db,
+            vec![
+                ImportSkillSelection {
+                    directory: "shared".to_string(),
+                    source_path: Some(
+                        config::get_claude_skills_dir()
+                            .join("shared")
+                            .to_string_lossy()
+                            .to_string(),
+                    ),
+                    apps: SkillApps::default(),
+                },
+                ImportSkillSelection {
+                    directory: "shared".to_string(),
+                    source_path: Some(
+                        config::get_codex_skills_dir()
+                            .join("shared")
+                            .to_string_lossy()
+                            .to_string(),
+                    ),
+                    apps: SkillApps::default(),
+                },
+            ],
+        );
+        let payload = result
+            .expect_err("同批次重复 directory 必须被拒绝")
+            .to_string();
+        assert!(payload.contains("IMPORT_DUPLICATE_DIRECTORY"));
+        assert!(payload.contains("shared"));
+
+        // 整个批次被拒绝：SSOT 与 DB 均无任何变化
+        assert!(!SkillService::get_ssot_dir()
+            .unwrap()
+            .join("shared")
+            .exists());
+        assert!(db.get_all_installed_skills().unwrap().is_empty());
+    }
+
+    #[test]
+    #[serial]
+    fn import_from_apps_rolls_back_projections_and_ssot_on_sync_failure() {
+        let tmp = tempdir().unwrap();
+        let _guard = TestHomeGuard::set(tmp.path());
+
+        let db = Arc::new(Database::memory().unwrap());
+        crate::settings::set_sync_method(SyncMethod::Copy).unwrap();
+        write_skill(&config::get_claude_skills_dir().join("native"), "Native");
+
+        // 故障注入：codex 配置目录只读，第二个 Agent 的投影同步必然失败
+        let read_only_root = tmp.path().join("readonly-codex");
+        let skills_dir = read_only_root.join("skills");
+        fs::create_dir_all(&skills_dir).unwrap();
+        for dir in [&read_only_root, &skills_dir] {
+            let mut permissions = std::fs::metadata(dir).unwrap().permissions();
+            permissions.set_readonly(true);
+            fs::set_permissions(dir, permissions).unwrap();
+        }
+        crate::settings::set_agent_config_dir_override(
+            "codex",
+            Some(read_only_root.to_string_lossy().to_string()),
+        )
+        .unwrap();
+
+        let mut apps = SkillApps::only(&AgentType::ClaudeCode);
+        apps.set_enabled_for(&AgentType::Codex, true);
+        let result = SkillService::import_from_apps(
+            &db,
+            vec![ImportSkillSelection {
+                directory: "native".to_string(),
+                source_path: None,
+                apps,
+            }],
+        );
+        assert!(result.is_err(), "第二个 Agent 同步失败必须返回错误");
+
+        // 前序 Agent 的投影必须被清除，不得残留"生效但未受管"的内容
+        assert!(
+            !config::get_claude_skills_dir().join("native").exists(),
+            "同步失败时前序 Agent 的投影必须被移除"
+        );
+        // 本次新建的 SSOT 目录必须一并删除，避免残留未受管内容导致重试被拒
+        assert!(
+            !SkillService::get_ssot_dir()
+                .unwrap()
+                .join("native")
+                .exists(),
+            "同步失败时本次新建的 SSOT 目录必须被删除"
+        );
+        // 数据库记录必须回滚
+        assert!(db.get_installed_skill("local:native").unwrap().is_none());
+
+        // 恢复写权限以便临时目录清理
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            for dir in [&read_only_root, &skills_dir] {
+                let mut permissions = std::fs::metadata(dir).unwrap().permissions();
+                permissions.set_mode(permissions.mode() | 0o200);
+                let _ = fs::set_permissions(dir, permissions);
+            }
+        }
+        crate::settings::reset_settings_store_for_test();
+    }
+
+    #[test]
+    #[serial]
+    fn restore_from_backup_removes_prior_projections_on_sync_failure() {
+        let tmp = tempdir().unwrap();
+        let _guard = TestHomeGuard::set(tmp.path());
+
+        let db = Arc::new(Database::memory().unwrap());
+        crate::settings::set_sync_method(SyncMethod::Copy).unwrap();
+        write_skill(
+            &SkillService::get_ssot_dir().unwrap().join("restore-rb"),
+            "RestoreRB",
+        );
+
+        // 卸载前对 ClaudeCode 与 Codex 两个 Agent 启用
+        let mut skill = installed_skill_fixture("owner/repo:restore-rb", "restore-rb");
+        skill.apps = SkillApps::only(&AgentType::ClaudeCode);
+        skill.apps.set_enabled_for(&AgentType::Codex, true);
+        db.save_skill(&skill).unwrap();
+        SkillService::sync_to_app_dir("restore-rb", &AgentType::ClaudeCode).unwrap();
+        SkillService::sync_to_app_dir("restore-rb", &AgentType::Codex).unwrap();
+
+        let result = SkillService::uninstall(&db, &skill.id).expect("uninstall");
+        let backup_id = result
+            .backup_path
+            .unwrap()
+            .split('/')
+            .next_back()
+            .unwrap()
+            .to_string();
+
+        // 故障注入：codex 配置目录只读，恢复时第二个 Agent 的投影同步必然失败
+        let read_only_root = tmp.path().join("readonly-codex");
+        let skills_dir = read_only_root.join("skills");
+        fs::create_dir_all(&skills_dir).unwrap();
+        for dir in [&read_only_root, &skills_dir] {
+            let mut permissions = std::fs::metadata(dir).unwrap().permissions();
+            permissions.set_readonly(true);
+            fs::set_permissions(dir, permissions).unwrap();
+        }
+        crate::settings::set_agent_config_dir_override(
+            "codex",
+            Some(read_only_root.to_string_lossy().to_string()),
+        )
+        .unwrap();
+
+        SkillService::restore_from_backup(&db, &backup_id, &AgentType::ClaudeCode)
+            .expect_err("第二个 Agent 同步失败必须返回错误");
+
+        // 本次恢复创建的前序投影必须被移除
+        assert!(
+            !config::get_claude_skills_dir().join("restore-rb").exists(),
+            "同步失败时前序 Agent 的投影必须被移除"
+        );
+        // DB 与 SSOT 已清理
+        assert!(db.get_installed_skill(&skill.id).unwrap().is_none());
+        assert!(!SkillService::get_ssot_dir()
+            .unwrap()
+            .join("restore-rb")
+            .exists());
+
+        // 恢复写权限以便临时目录清理
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            for dir in [&read_only_root, &skills_dir] {
+                let mut permissions = std::fs::metadata(dir).unwrap().permissions();
+                permissions.set_mode(permissions.mode() | 0o200);
+                let _ = fs::set_permissions(dir, permissions);
+            }
+        }
+        crate::settings::reset_settings_store_for_test();
     }
 
     fn installed_skill_fixture(id: &str, directory: &str) -> InstalledSkill {

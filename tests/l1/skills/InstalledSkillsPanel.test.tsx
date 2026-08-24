@@ -75,7 +75,7 @@ describe('InstalledSkillsPanel 导入同目录不同来源的本地 Skill', () =
     cleanup();
   });
 
-  it('同 directory 不同 sourcePath 的两条可同时勾选互不干扰', async () => {
+  it('同 directory 的两条默认只勾选第一条，并提示互斥', async () => {
     const Panel = await loadPanel();
     render(<Panel activeApp="claude-code" />, { wrapper: createWrapper(queryClient) });
 
@@ -93,23 +93,14 @@ describe('InstalledSkillsPanel 导入同目录不同来源的本地 Skill', () =
     const firstCheckbox = within(firstItem as HTMLElement).getAllByRole('checkbox')[0];
     const secondCheckbox = within(secondItem as HTMLElement).getAllByRole('checkbox')[0];
 
-    // 默认两条均选中
+    // 同 directory 组内默认只勾选第一条
     expect(firstCheckbox).toHaveProperty('checked', true);
-    expect(secondCheckbox).toHaveProperty('checked', true);
-
-    // 取消第一条不影响第二条
-    fireEvent.click(firstCheckbox);
-    expect(firstCheckbox).toHaveProperty('checked', false);
-    expect(secondCheckbox).toHaveProperty('checked', true);
-
-    // 重新勾选第一条，两条可同时选中
-    fireEvent.click(firstCheckbox);
-    expect(firstCheckbox).toHaveProperty('checked', true);
-    expect(secondCheckbox).toHaveProperty('checked', true);
-    expect(within(dialog).getByRole('button', { name: /导入选中项 \(2\)/ })).toBeTruthy();
+    expect(secondCheckbox).toHaveProperty('checked', false);
+    expect(within(dialog).getByRole('button', { name: /导入选中项 \(1\)/ })).toBeTruthy();
+    expect(within(dialog).getAllByText('同名 Skill 一次只能导入一个来源')).toHaveLength(2);
   });
 
-  it('只选中第二条提交时 selection 携带第二条的 sourcePath', async () => {
+  it('勾选第二条时自动取消第一条，提交只含一条 selection', async () => {
     const Panel = await loadPanel();
     render(<Panel activeApp="claude-code" />, { wrapper: createWrapper(queryClient) });
 
@@ -119,8 +110,15 @@ describe('InstalledSkillsPanel 导入同目录不同来源的本地 Skill', () =
     const firstItem = screen
       .getByText('/agents/claude/skills/shared')
       .closest('.skill-import-item');
+    const secondItem = screen
+      .getByText('/agents/codex/skills/shared')
+      .closest('.skill-import-item');
     const firstCheckbox = within(firstItem as HTMLElement).getAllByRole('checkbox')[0];
-    fireEvent.click(firstCheckbox);
+    const secondCheckbox = within(secondItem as HTMLElement).getAllByRole('checkbox')[0];
+
+    fireEvent.click(secondCheckbox);
+    expect(firstCheckbox).toHaveProperty('checked', false);
+    expect(secondCheckbox).toHaveProperty('checked', true);
 
     fireEvent.click(within(dialog).getByRole('button', { name: /导入选中项 \(1\)/ }));
 
