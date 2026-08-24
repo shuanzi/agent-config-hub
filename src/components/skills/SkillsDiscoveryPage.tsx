@@ -42,9 +42,7 @@ export function SkillsDiscoveryPage({ activeApp }: SkillsDiscoveryPageProps) {
   const installedIdsByKey = useMemo(() => {
     const map = new Map<string, string>();
     for (const s of installedSkills ?? []) {
-      const owner = s.repoOwner?.toLowerCase() ?? '';
-      const name = s.repoName?.toLowerCase() ?? '';
-      map.set(`${s.directory.toLowerCase()}:${owner}:${name}`, s.id);
+      map.set(s.id.toLowerCase(), s.id);
     }
     return map;
   }, [installedSkills]);
@@ -54,10 +52,7 @@ export function SkillsDiscoveryPage({ activeApp }: SkillsDiscoveryPageProps) {
   const skills: SkillItem[] = useMemo(() => {
     if (discoverableSkills === undefined) return [];
     return discoverableSkills.map((skill) => {
-      const installName =
-        skill.directory.split(/[/\\]/).pop()?.toLowerCase() ?? skill.directory.toLowerCase();
-      const key = `${installName}:${skill.repoOwner.toLowerCase()}:${skill.repoName.toLowerCase()}`;
-      const installedId = installedIdsByKey.get(key) ?? null;
+      const installedId = installedIdsByKey.get(skill.key.toLowerCase()) ?? null;
       return { ...skill, installed: installedId !== null, installedId };
     });
   }, [discoverableSkills, installedIdsByKey]);

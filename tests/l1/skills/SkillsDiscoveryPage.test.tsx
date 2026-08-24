@@ -18,7 +18,7 @@ const mockApi = {
 vi.mock('../../../src/lib/api/skills', () => mockApi);
 
 const discoverable: DiscoverableSkill = {
-  key: 'skill',
+  key: 'a/b:skill',
   name: 'TestSkill',
   description: 'desc',
   directory: 'skill',
@@ -28,7 +28,7 @@ const discoverable: DiscoverableSkill = {
 };
 
 const installed: InstalledSkill = {
-  id: 'installed-skill-1',
+  id: 'a/b:skill',
   name: 'TestSkill',
   directory: 'skill',
   repoOwner: 'a',
@@ -82,6 +82,30 @@ describe('SkillsDiscoveryPage 卸载已安装 Skill', () => {
     expect(screen.queryByRole('button', { name: '安装' })).toBeNull();
   });
 
+  it('同仓库同名 Skill 按完整身份分别显示安装状态', async () => {
+    mockApi.discoverAvailableSkills.mockResolvedValue([
+      { ...discoverable, key: 'a/b:a/reviewer', name: 'Reviewer A', directory: 'a/reviewer' },
+      { ...discoverable, key: 'a/b:b/reviewer', name: 'Reviewer B', directory: 'b/reviewer' },
+    ]);
+    mockApi.getInstalledSkills.mockResolvedValue([
+      { ...installed, id: 'a/b:a/reviewer', name: 'Reviewer A', directory: 'reviewer' },
+    ]);
+    const Page = await loadPage();
+    render(<Page activeApp="claude-code" />, { wrapper: createWrapper(queryClient) });
+
+    const installedCard = (await screen.findByRole('heading', { name: 'Reviewer A' })).closest(
+      'article',
+    );
+    const uninstalledCard = (await screen.findByRole('heading', { name: 'Reviewer B' })).closest(
+      'article',
+    );
+
+    expect(installedCard).not.toBeNull();
+    expect(uninstalledCard).not.toBeNull();
+    expect(within(installedCard!).getByRole('button', { name: '卸载' })).toBeTruthy();
+    expect(within(uninstalledCard!).getByRole('button', { name: '安装' })).toBeTruthy();
+  });
+
   it('取消确认后不调用卸载接口且安装态不变', async () => {
     mockApi.getInstalledSkills.mockResolvedValue([installed]);
     const Page = await loadPage();
@@ -111,7 +135,7 @@ describe('SkillsDiscoveryPage 卸载已安装 Skill', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: '卸载' }));
 
     await waitFor(() => expect(mockApi.uninstallSkill).toHaveBeenCalledTimes(1));
-    expect(mockApi.uninstallSkill.mock.calls[0][0]).toBe('installed-skill-1');
+    expect(mockApi.uninstallSkill.mock.calls[0][0]).toBe('a/b:skill');
 
     // 安装态更新：卡片回到未安装状态并给出成功反馈
     await screen.findByRole('button', { name: '安装' });
@@ -132,7 +156,7 @@ describe('SkillsDiscoveryPage 卸载已安装 Skill', () => {
     fireEvent.click(within(dialog).getByRole('button', { name: '卸载' }));
 
     await waitFor(() => expect(mockApi.uninstallSkill).toHaveBeenCalledTimes(1));
-    expect(mockApi.uninstallSkill.mock.calls[0][0]).toBe('installed-skill-1');
+    expect(mockApi.uninstallSkill.mock.calls[0][0]).toBe('a/b:skill');
     await screen.findByText('操作失败，请稍后重试。');
     expect(screen.getByRole('button', { name: '卸载' })).toBeTruthy();
   });
