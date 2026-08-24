@@ -1002,7 +1002,8 @@ impl SkillService {
     ///
     /// 不能用 basename 匹配：同一仓库可能同时存在 `a/reviewer` 与
     /// `b/reviewer`，basename 匹配会选中扫描顺序中的第一个而更新错来源。
-    /// key 匹配不上时回退为按 id 中的完整目录匹配（同样不含 basename 歧义）。
+    /// lock 导入的 skill 若能从 readme_url 还原来源目录，该路径比本地 basename
+    /// id 更准确；否则按完整 key、再按 id 中的完整目录回退（均不含 basename 歧义）。
     fn remote_match_for_installed<'a>(
         remote: &'a [DiscoverableSkill],
         installed: &InstalledSkill,
@@ -1012,9 +1013,33 @@ impl SkillService {
             .split_once(':')
             .map(|(_, directory)| directory)
             .unwrap_or(&installed.directory);
+        let source_directory = installed
+            .readme_url
+            .as_deref()
+            .and_then(|url| {
+                installed
+                    .repo_branch
+                    .as_deref()
+                    .and_then(|branch| {
+                        let marker = format!("/blob/{branch}/");
+                        url.split_once(&marker).map(|(_, path)| path.to_string())
+                    })
+                    .or_else(|| Self::extract_doc_path_from_url(url))
+            })
+            .map(|path| path.trim_end_matches("/SKILL.md").to_string())
+            .filter(|path| !path.is_empty());
         remote
             .iter()
-            .find(|rs| rs.key.eq_ignore_ascii_case(&installed.id))
+            .find(|rs| {
+                source_directory
+                    .as_deref()
+                    .is_some_and(|directory| rs.directory.eq_ignore_ascii_case(directory))
+            })
+            .or_else(|| {
+                remote
+                    .iter()
+                    .find(|rs| rs.key.eq_ignore_ascii_case(&installed.id))
+            })
             .or_else(|| {
                 remote
                     .iter()
@@ -1222,13 +1247,14 @@ impl SkillService {
         let mut remote_skills: Vec<DiscoverableSkill> = Vec::new();
         let _ = Self::scan_dir_recursive_static(temp_dir, temp_dir, &repo, &mut remote_skills);
 
-        let remote_match = Self::remote_match_for_installed(&remote_skills, &skill).ok_or_else(|| {
-            AppError::Message(format_skill_error(
-                "SKILL_DIR_NOT_FOUND",
-                &[("path", &skill.directory)],
-                Some("checkRepoUrl"),
-            ))
-        })?;
+        let remote_match =
+            Self::remote_match_for_installed(&remote_skills, &skill).ok_or_else(|| {
+                AppError::Message(format_skill_error(
+                    "SKILL_DIR_NOT_FOUND",
+                    &[("path", &skill.directory)],
+                    Some("checkRepoUrl"),
+                ))
+            })?;
 
         let source =
             Self::resolve_skill_source_dir(temp_dir, &remote_match.directory).ok_or_else(|| {
@@ -6050,6 +6076,64 @@ mod tests {
         // 完整目录也对不上时才判定远程不存在
         let missing = installed_skill_fixture("mirror/repo:c/reviewer", "reviewer");
         assert!(SkillService::remote_match_for_installed(&remote, &missing).is_none());
+    }
+
+    #[test]
+    #[serial]
+    fn remote_match_for_lock_import_uses_skill_path_identity() {
+        let tmp = tempdir().unwrap();
+        let _guard = TestHomeGuard::set(tmp.path());
+        let db = Arc::new(Database::memory().unwrap());
+
+        let source = tmp.path().join(".agents").join("skills").join("foo");
+        write_skill(&source, "Foo");
+        fs::write(
+            tmp.path().join(".agents").join(".skill-lock.json"),
+            r#"{
+                "skills": {
+                    "foo": {
+                        "source": "owner/repo",
+                        "sourceType": "github",
+                        "branch": "feature/new-thing",
+                        "skillPath": "skills/foo/SKILL.md"
+                    }
+                }
+            }"#,
+        )
+        .unwrap();
+
+        let imported = SkillService::import_from_apps(
+            &db,
+            vec![ImportSkillSelection {
+                directory: "foo".to_string(),
+                source_path: Some(source.to_string_lossy().to_string()),
+                apps: SkillApps::default(),
+            }],
+        )
+        .expect("lock source should import");
+        let installed = &imported[0];
+        assert_eq!(installed.id, "owner/repo:foo");
+        assert_eq!(installed.repo_branch.as_deref(), Some("feature/new-thing"));
+        assert_eq!(
+            installed.readme_url.as_deref(),
+            Some("https://github.com/owner/repo/blob/feature/new-thing/skills/foo/SKILL.md")
+        );
+
+        let remote = vec![
+            discoverable_skill_fixture("owner/repo:foo", "foo"),
+            discoverable_skill_fixture("owner/repo:skills/foo", "skills/foo"),
+        ];
+        let matched = SkillService::remote_match_for_installed(&remote, installed)
+            .expect("nested lock skillPath must identify its remote source");
+        assert_eq!(matched.key, "owner/repo:skills/foo");
+
+        let mut ordinary_branch = installed.clone();
+        ordinary_branch.repo_branch = Some("main".to_string());
+        ordinary_branch.readme_url =
+            Some("https://github.com/owner/repo/blob/main/skills/foo/SKILL.md".to_string());
+        let matched = SkillService::remote_match_for_installed(&remote, &ordinary_branch)
+            .expect("ordinary branches must keep matching the nested source");
+        assert_eq!(matched.key, "owner/repo:skills/foo");
     }
 
     #[test]
