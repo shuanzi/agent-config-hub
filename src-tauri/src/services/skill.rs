@@ -998,6 +998,30 @@ impl SkillService {
         }
     }
 
+    /// 按完整身份 `{owner}/{repo}:{directory}` 匹配远程候选。
+    ///
+    /// 不能用 basename 匹配：同一仓库可能同时存在 `a/reviewer` 与
+    /// `b/reviewer`，basename 匹配会选中扫描顺序中的第一个而更新错来源。
+    /// key 匹配不上时回退为按 id 中的完整目录匹配（同样不含 basename 歧义）。
+    fn remote_match_for_installed<'a>(
+        remote: &'a [DiscoverableSkill],
+        installed: &InstalledSkill,
+    ) -> Option<&'a DiscoverableSkill> {
+        let installed_directory = installed
+            .id
+            .split_once(':')
+            .map(|(_, directory)| directory)
+            .unwrap_or(&installed.directory);
+        remote
+            .iter()
+            .find(|rs| rs.key.eq_ignore_ascii_case(&installed.id))
+            .or_else(|| {
+                remote
+                    .iter()
+                    .find(|rs| rs.directory.eq_ignore_ascii_case(installed_directory))
+            })
+    }
+
     // ========== Updates ==========
 
     pub async fn check_updates(
@@ -1050,11 +1074,7 @@ impl SkillService {
             let _state_guard = skill_state_read_guard();
 
             for skill in group_skills {
-                let remote_match = remote_skills.iter().find(|rs| {
-                    let remote_install_name =
-                        rs.directory.rsplit('/').next().unwrap_or(&rs.directory);
-                    remote_install_name.eq_ignore_ascii_case(&skill.directory)
-                });
+                let remote_match = Self::remote_match_for_installed(&remote_skills, skill);
 
                 let remote_skill_dir = match remote_match {
                     Some(rs) => match Self::resolve_skill_source_dir(temp_dir, &rs.directory) {
@@ -1202,19 +1222,13 @@ impl SkillService {
         let mut remote_skills: Vec<DiscoverableSkill> = Vec::new();
         let _ = Self::scan_dir_recursive_static(temp_dir, temp_dir, &repo, &mut remote_skills);
 
-        let remote_match = remote_skills
-            .iter()
-            .find(|rs| {
-                let remote_install_name = rs.directory.rsplit('/').next().unwrap_or(&rs.directory);
-                remote_install_name.eq_ignore_ascii_case(&skill.directory)
-            })
-            .ok_or_else(|| {
-                AppError::Message(format_skill_error(
-                    "SKILL_DIR_NOT_FOUND",
-                    &[("path", &skill.directory)],
-                    Some("checkRepoUrl"),
-                ))
-            })?;
+        let remote_match = Self::remote_match_for_installed(&remote_skills, &skill).ok_or_else(|| {
+            AppError::Message(format_skill_error(
+                "SKILL_DIR_NOT_FOUND",
+                &[("path", &skill.directory)],
+                Some("checkRepoUrl"),
+            ))
+        })?;
 
         let source =
             Self::resolve_skill_source_dir(temp_dir, &remote_match.directory).ok_or_else(|| {
@@ -1404,6 +1418,43 @@ impl SkillService {
         }
     }
 
+    /// 迁移回退复制成功但源目录删除失败时，用完整的目标副本恢复残缺的源目录。
+    ///
+    /// `remove_dir_all` 不是原子的：它可能先删掉 src 的部分子项再在顶层报错。
+    /// 因此先用 dst 把 src 恢复完整并比对目录哈希，恢复成功才删除 dst；
+    /// 恢复失败则保留 dst 作为该 skill 的恢复副本，绝不让 src/dst 同时残缺。
+    fn restore_migration_source(src: &Path, dst: &Path, directory: &str) {
+        let expected_hash = match Self::compute_dir_hash(dst) {
+            Ok(hash) => hash,
+            Err(e) => {
+                log::error!(
+                    "迁移 Skill {directory} 失败：读取目标副本哈希失败，保留目标副本 {} 作为恢复副本: {e}",
+                    dst.display()
+                );
+                return;
+            }
+        };
+
+        let restored = Self::copy_dir_recursive(dst, src)
+            .and_then(|()| Self::compute_dir_hash(src))
+            .map(|hash| hash == expected_hash)
+            .unwrap_or(false);
+
+        if restored {
+            if let Err(e) = fs::remove_dir_all(dst) {
+                log::error!(
+                    "迁移 Skill {directory} 失败：源目录已恢复完整，但删除目标副本 {} 失败: {e}",
+                    dst.display()
+                );
+            }
+        } else {
+            log::error!(
+                "迁移 Skill {directory} 失败：源目录恢复失败，保留目标副本 {} 作为恢复副本",
+                dst.display()
+            );
+        }
+    }
+
     /// 执行实际的文件移动，不持久化设置、不刷新投影。
     ///
     /// `failures` 只携带稳定标识（目录名/阶段名），原始错误（可能含绝对路径）
@@ -1485,16 +1536,13 @@ impl SkillService {
                 }
                 Err(_) => match Self::copy_dir_recursive(&src, &dst) {
                     Ok(()) => {
-                        // 源删除失败视为迁移失败：目标副本已验证完整可删，回滚之。
-                        // 若残留旧副本仍计成功，之后迁回会因目标已存在而中止
+                        // 源删除失败视为迁移失败。remove_dir_all 非原子：可能已删掉
+                        // 部分子项才在顶层报错，src 残缺但仍存在——先用 dst 把 src
+                        // 恢复完整并校验，恢复成功才删 dst；恢复失败保留 dst
+                        // 作为恢复副本，绝不销毁唯一完整副本
                         if let Err(e) = fs::remove_dir_all(&src) {
                             log::warn!("迁移 Skill {directory} 失败：源目录删除失败: {e}");
-                            if let Err(rollback_error) = fs::remove_dir_all(&dst) {
-                                log::error!(
-                                    "回滚 Skill 迁移目标副本失败 {}: {rollback_error}",
-                                    dst.display()
-                                );
-                            }
+                            Self::restore_migration_source(&src, &dst, &directory);
                             failures.push(directory);
                             continue;
                         }
@@ -1923,44 +1971,61 @@ impl SkillService {
                 return Err(e);
             }
 
-            // 记录本次导入已成功的投影及其同步前快照：任一 Agent 同步失败时，
+            // 记录本次导入已成功的投影及其同步前快照：任一 Agent 失败时，
             // 只删除调用前不存在的投影；调用前已存在的内容（可能是用户的原始
             // 未托管来源本身）从快照恢复，绝不因回滚而丢失
             let mut synced_apps: Vec<ProjectionSnapshot> = Vec::new();
+            // 局部回滚：移除前序已同步的投影并从快照恢复其同步前现场、
+            // 删除 DB 记录、清理本次新建的 SSOT 目录（既有内容绝不动）
+            let rollback_prior_progress = |synced_apps: &[ProjectionSnapshot]| {
+                for synced in synced_apps {
+                    if let Err(rollback_error) =
+                        Self::remove_from_app(&skill.directory, &synced.app)
+                    {
+                        log::error!(
+                            "导入 Skill {} 后同步失败，且移除 {} 投影也失败: {rollback_error}",
+                            skill.id,
+                            synced.app.as_str()
+                        );
+                    }
+                    Self::restore_projection_target(&synced.target, synced.snapshot.as_ref());
+                }
+                if let Err(rollback_error) = db.delete_skill(&skill.id) {
+                    log::error!(
+                        "导入 Skill {} 后同步失败，且回滚数据库记录也失败: {rollback_error}",
+                        skill.id
+                    );
+                }
+                if created_ssot {
+                    if let Err(rollback_error) = fs::remove_dir_all(&dest) {
+                        log::error!(
+                            "导入 Skill {} 后同步失败，且回滚本次新建的 SSOT 目录也失败: {rollback_error}",
+                            skill.id
+                        );
+                    }
+                }
+            };
             for app in skill.apps.enabled_apps() {
-                let app_dir = Self::get_app_skills_dir(&app)?;
-                let target = app_dir.join(&skill.directory);
-                let snapshot = Self::snapshot_projection_target(&target)?;
+                // 取 app 目录、同步前快照与同步本身属于同一 fallible 段：
+                // 任一步失败都进入同一回滚路径，避免快照失败绕过既有回滚
+                let prepared = Self::get_app_skills_dir(&app).and_then(|app_dir| {
+                    let target = app_dir.join(&skill.directory);
+                    let snapshot = Self::snapshot_projection_target(&target)?;
+                    Ok((target, snapshot))
+                });
+                let (target, snapshot) = match prepared {
+                    Ok(prepared) => prepared,
+                    Err(e) => {
+                        // 当前 target 尚未被本次导入触碰，无需恢复它本身
+                        rollback_prior_progress(&synced_apps);
+                        return Err(e);
+                    }
+                };
                 if let Err(e) = Self::sync_to_app_dir(&skill.directory, &app) {
                     // 先恢复本次同步失败的 Agent 的现场（同步可能已破坏其原目标），
                     // 再回滚前序已成功的 Agent
                     Self::restore_projection_target(&target, snapshot.as_ref());
-                    for synced in &synced_apps {
-                        if let Err(rollback_error) =
-                            Self::remove_from_app(&skill.directory, &synced.app)
-                        {
-                            log::error!(
-                                "导入 Skill {} 后同步失败，且移除 {} 投影也失败: {rollback_error}",
-                                skill.id,
-                                synced.app.as_str()
-                            );
-                        }
-                        Self::restore_projection_target(&synced.target, synced.snapshot.as_ref());
-                    }
-                    if let Err(rollback_error) = db.delete_skill(&skill.id) {
-                        log::error!(
-                            "导入 Skill {} 后同步失败，且回滚数据库记录也失败: {rollback_error}",
-                            skill.id
-                        );
-                    }
-                    if created_ssot {
-                        if let Err(rollback_error) = fs::remove_dir_all(&dest) {
-                            log::error!(
-                                "导入 Skill {} 后同步失败，且回滚本次新建的 SSOT 目录也失败: {rollback_error}",
-                                skill.id
-                            );
-                        }
-                    }
+                    rollback_prior_progress(&synced_apps);
                     return Err(e);
                 }
                 synced_apps.push(ProjectionSnapshot {
@@ -5931,5 +5996,164 @@ mod tests {
         assert_eq!(imported.len(), 1);
         assert!(db.get_installed_skill("local:shared").unwrap().is_some());
         assert!(claude_shared.join("SKILL.md").exists());
+    }
+
+    fn discoverable_skill_fixture(key: &str, directory: &str) -> DiscoverableSkill {
+        DiscoverableSkill {
+            key: key.to_string(),
+            name: directory.to_string(),
+            description: String::new(),
+            directory: directory.to_string(),
+            readme_url: None,
+            repo_owner: "owner".to_string(),
+            repo_name: "repo".to_string(),
+            repo_branch: "main".to_string(),
+        }
+    }
+
+    #[test]
+    fn remote_match_for_installed_uses_full_key_over_basename() {
+        // 同一仓库含 a/reviewer 与 b/reviewer：basename 相同，
+        // 必须按完整 key 选中安装记录指向的来源，而非扫描顺序中的第一个
+        let remote = vec![
+            discoverable_skill_fixture("owner/repo:a/reviewer", "a/reviewer"),
+            discoverable_skill_fixture("owner/repo:b/reviewer", "b/reviewer"),
+        ];
+        let installed = installed_skill_fixture("owner/repo:b/reviewer", "reviewer");
+
+        let matched = SkillService::remote_match_for_installed(&remote, &installed)
+            .expect("必须匹配到远程来源");
+        assert_eq!(matched.key, "owner/repo:b/reviewer");
+
+        // key 匹配大小写不敏感
+        let mut upper = installed.clone();
+        upper.id = "OWNER/REPO:B/REVIEWER".to_string();
+        let matched = SkillService::remote_match_for_installed(&remote, &upper)
+            .expect("大小写不同的完整 key 也必须匹配");
+        assert_eq!(matched.directory, "b/reviewer");
+    }
+
+    #[test]
+    fn remote_match_for_installed_falls_back_to_full_directory() {
+        let remote = vec![
+            discoverable_skill_fixture("owner/repo:a/reviewer", "a/reviewer"),
+            discoverable_skill_fixture("owner/repo:b/reviewer", "b/reviewer"),
+        ];
+        // key 对不上（如仓库迁移后 owner 变更）时回退为按 id 中的完整目录匹配，
+        // 仍能区分 a/reviewer 与 b/reviewer，绝不退化为 basename 匹配
+        let installed = installed_skill_fixture("mirror/repo:b/reviewer", "reviewer");
+
+        let matched = SkillService::remote_match_for_installed(&remote, &installed)
+            .expect("完整目录回退匹配必须命中");
+        assert_eq!(matched.key, "owner/repo:b/reviewer");
+
+        // 完整目录也对不上时才判定远程不存在
+        let missing = installed_skill_fixture("mirror/repo:c/reviewer", "reviewer");
+        assert!(SkillService::remote_match_for_installed(&remote, &missing).is_none());
+    }
+
+    #[test]
+    #[serial]
+    fn migrate_storage_restores_partially_deleted_source() {
+        let tmp = tempdir().unwrap();
+        let _guard = TestHomeGuard::set(tmp.path());
+
+        let db = Arc::new(Database::memory().unwrap());
+        let old_dir = SkillService::get_ssot_dir().unwrap();
+        let src = old_dir.join("mig-src");
+        write_skill(&src, "MigSrc");
+        fs::write(src.join("data.txt"), "precious").unwrap();
+        let skill = installed_skill_fixture("owner/repo:mig-src", "mig-src");
+        db.save_skill(&skill).unwrap();
+
+        // 故障注入：旧根只读 → rename 失败回退为 copy；remove_dir_all 非原子，
+        // 会先删掉 src 的子项再在顶层目录报 PermissionDenied，src 残缺但仍存在
+        let mut permissions = std::fs::metadata(&old_dir).unwrap().permissions();
+        permissions.set_readonly(true);
+        fs::set_permissions(&old_dir, permissions).unwrap();
+
+        let result = crate::commands::migrate_storage_combined(&db, StorageLocation::Unified);
+
+        // 恢复写权限以便断言与临时目录清理
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut permissions = std::fs::metadata(&old_dir).unwrap().permissions();
+            permissions.set_mode(permissions.mode() | 0o200);
+            let _ = fs::set_permissions(&old_dir, permissions);
+        }
+
+        assert!(result.is_err(), "源目录删除失败必须按迁移失败处理");
+
+        // src 已从完整的目标副本恢复：内容绝不因部分删除而丢失
+        assert_eq!(
+            fs::read_to_string(src.join("data.txt")).unwrap(),
+            "precious"
+        );
+        let manifest = fs::read_to_string(src.join("SKILL.md")).unwrap();
+        assert!(manifest.contains("name: MigSrc"));
+
+        // 恢复成功并校验一致后，目标副本才被删除
+        assert!(!config::get_home_dir()
+            .join(".agents")
+            .join("skills")
+            .join("mig-src")
+            .exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    #[serial]
+    fn import_from_apps_rolls_back_on_snapshot_failure() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let tmp = tempdir().unwrap();
+        let _guard = TestHomeGuard::set(tmp.path());
+
+        let db = Arc::new(Database::memory().unwrap());
+        crate::settings::set_sync_method(SyncMethod::Copy).unwrap();
+        // 用户的原始未托管来源放在 claude 目录
+        write_skill(&config::get_claude_skills_dir().join("native"), "Native");
+
+        // 故障注入：codex 目录下预置同名目录并设为不可读，
+        // 使同步前快照必然失败（copy_dir_recursive 读目录报错）
+        let codex_target = config::get_codex_skills_dir().join("native");
+        write_skill(&codex_target, "CodexNative");
+        let mut permissions = std::fs::metadata(&codex_target).unwrap().permissions();
+        permissions.set_mode(0o000);
+        fs::set_permissions(&codex_target, permissions).unwrap();
+
+        let mut apps = SkillApps::only(&AgentType::ClaudeCode);
+        apps.set_enabled_for(&AgentType::Codex, true);
+        let result = SkillService::import_from_apps(
+            &db,
+            vec![ImportSkillSelection {
+                directory: "native".to_string(),
+                source_path: None,
+                apps,
+            }],
+        );
+
+        // 恢复读权限以便断言与临时目录清理
+        let mut permissions = std::fs::metadata(&codex_target).unwrap().permissions();
+        permissions.set_mode(0o755);
+        let _ = fs::set_permissions(&codex_target, permissions);
+
+        assert!(result.is_err(), "快照失败必须返回错误");
+
+        // 数据库记录必须回滚
+        assert!(db.get_installed_skill("local:native").unwrap().is_none());
+        // 本次新建的 SSOT 目录必须清理
+        assert!(!SkillService::get_ssot_dir()
+            .unwrap()
+            .join("native")
+            .exists());
+        // 前序已同步的 claude 投影必须回滚为同步前内容（用户原始来源）
+        let claude_native = config::get_claude_skills_dir().join("native");
+        let content = fs::read_to_string(claude_native.join("SKILL.md")).unwrap();
+        assert!(content.contains("name: Native"));
+        // 快照失败的 codex 目标未被本次导入触碰，内容保持原样
+        let codex_content = fs::read_to_string(codex_target.join("SKILL.md")).unwrap();
+        assert!(codex_content.contains("name: CodexNative"));
     }
 }

@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use crate::config;
@@ -278,8 +278,9 @@ pub(crate) fn migrate_storage_combined(
 /// Persist a per-agent config-dir override and relocate managed projections.
 ///
 /// 流程：预校验新目标目录 -> 移除旧投影（失败则恢复已移除项）-> 搬迁启用中
-/// 指令的 live 文件 -> 持久化设置 -> 在新目录重建投影。中途失败会尽力恢复
-/// 设置、投影与 live 文件，使状态可解释后再重试。
+/// 指令的 live 文件 -> 持久化设置 -> 在新目录重建投影（逐目标快照）。中途失败
+/// 会尽力恢复设置、投影与 live 文件，并清理/恢复新目录中已重建的投影，
+/// 使状态可解释后再重试。
 #[tauri::command]
 pub async fn set_agent_override_dir(
     app: String,
@@ -306,6 +307,53 @@ fn current_override_for(app: &AgentType) -> Option<String> {
         AgentType::Codex => settings.codex_config_dir,
         AgentType::GeminiCli => settings.gemini_cli_config_dir,
         AgentType::OpenCode => settings.opencode_config_dir,
+    }
+}
+
+/// 新目录投影目标的同步前快照：目标存在时备份到临时目录供失败回滚恢复；
+/// None 表示目标原本不存在，回滚时只需删除本次新建内容。
+/// （skill.rs 中有同名私有实现，这里为命令层本地副本：skill 投影是目录、
+/// subagent 投影是文件，统一按路径类型处理。）
+type NewTargetSnapshot = Option<(tempfile::TempDir, PathBuf)>;
+
+fn snapshot_projection_target(target: &Path) -> Result<NewTargetSnapshot, AppError> {
+    if !target.exists() && !SkillService::is_symlink(target) {
+        return Ok(None);
+    }
+    let guard = tempfile::tempdir().map_err(|e| AppError::io(target, e))?;
+    let snapshot = guard.path().join("snapshot");
+    if target.is_dir() {
+        SkillService::copy_dir_recursive(target, &snapshot)?;
+    } else {
+        std::fs::copy(target, &snapshot).map_err(|e| AppError::io(target, e))?;
+    }
+    Ok(Some((guard, snapshot)))
+}
+
+/// 尽力还原新目录中的单个投影目标：有快照则覆盖恢复（sync 可能已破坏目标），
+/// 无快照（原本不存在）则删除本次新建的内容。
+fn restore_projection_target(target: &Path, snapshot: &NewTargetSnapshot) {
+    if let Err(e) = SkillService::remove_path(target) {
+        log::error!("清理新目录投影目标失败 {}: {e}", target.display());
+    }
+    if let Some((_, snapshot_path)) = snapshot {
+        let result = if snapshot_path.is_dir() {
+            SkillService::copy_dir_recursive(snapshot_path, target)
+        } else {
+            std::fs::copy(snapshot_path, target)
+                .map(|_| ())
+                .map_err(|e| AppError::io(target, e))
+        };
+        if let Err(e) = result {
+            log::error!("恢复新目录投影目标快照失败 {}: {e}", target.display());
+        }
+    }
+}
+
+/// 逆序回滚本次在新目录中已重建的全部投影；调用后列表被排空，重复调用安全。
+fn rollback_new_projections(snapshots: &mut Vec<(PathBuf, NewTargetSnapshot)>) {
+    while let Some((target, snapshot)) = snapshots.pop() {
+        restore_projection_target(&target, &snapshot);
     }
 }
 
@@ -391,6 +439,9 @@ pub(crate) fn set_agent_override_dir_inner(
     // 新目录已有用户 live 文件时的备份（None 表示原本不存在）；失败回滚时
     // 用于恢复磁盘内容，成功提交时转存为禁用的备份预设
     let mut new_live_backup: Option<String> = None;
+    // 新目录中已重建投影的快照（按重建顺序）；sync 中途失败或后续
+    // save_live_backup_prompt 失败时，据此清理/恢复新目录中的目标
+    let mut new_projection_snapshots: Vec<(PathBuf, NewTargetSnapshot)> = Vec::new();
 
     let mut commit = || -> Result<(), AppError> {
         // 搬迁启用中指令的 live 文件
@@ -429,16 +480,40 @@ pub(crate) fn set_agent_override_dir_inner(
         set_agent_config_dir_override(agent.as_str(), dir.clone())?;
         persisted = true;
 
-        // 在新目录重建投影
-        for skill in skills.values() {
-            if skill.apps.is_enabled_for(&agent) {
-                SkillService::sync_to_app_dir(&skill.directory, &agent)?;
+        // 在新目录重建投影：每个目标先快照，任一 sync 失败时先恢复当前
+        // 目标（sync 可能已破坏它），再回滚此前已重建的目标，避免新目录
+        // 残留半更新状态或丢失被覆盖的用户内容
+        let skills_root = new_config_dir.join("skills");
+        let agents_root = new_config_dir.join("agents");
+        let rebuild_result = (|| -> Result<(), AppError> {
+            for skill in skills.values() {
+                if skill.apps.is_enabled_for(&agent) {
+                    let target = skills_root.join(&skill.directory);
+                    let snapshot = snapshot_projection_target(&target)?;
+                    if let Err(e) = SkillService::sync_to_app_dir(&skill.directory, &agent) {
+                        restore_projection_target(&target, &snapshot);
+                        return Err(e);
+                    }
+                    new_projection_snapshots.push((target, snapshot));
+                }
             }
-        }
-        for subagent in subagents.values() {
-            if subagent.apps.is_enabled_for(&agent) {
-                SubagentService::sync_to_app_dir(&subagent.directory, &agent)?;
+            for subagent in subagents.values() {
+                if subagent.apps.is_enabled_for(&agent) {
+                    let target = agents_root.join(format!("{}.md", subagent.directory));
+                    let snapshot = snapshot_projection_target(&target)?;
+                    if let Err(e) = SubagentService::sync_to_app_dir(&subagent.directory, &agent)
+                    {
+                        restore_projection_target(&target, &snapshot);
+                        return Err(e);
+                    }
+                    new_projection_snapshots.push((target, snapshot));
+                }
             }
+            Ok(())
+        })();
+        if let Err(e) = rebuild_result {
+            rollback_new_projections(&mut new_projection_snapshots);
+            return Err(e);
         }
 
         // 被启用预设覆盖的用户原有 live 内容持久化为禁用备份预设
@@ -452,7 +527,7 @@ pub(crate) fn set_agent_override_dir_inner(
     };
 
     if let Err(err) = commit() {
-        // 尽力恢复：先还原设置，再重建旧投影、还原 live 文件
+        // 尽力恢复：先还原设置，再清理/恢复新目录投影、重建旧投影、还原 live 文件
         if persisted {
             if let Err(restore_err) =
                 set_agent_config_dir_override(agent.as_str(), previous_override)
@@ -460,6 +535,9 @@ pub(crate) fn set_agent_override_dir_inner(
                 log::error!("恢复旧的覆盖目录设置失败: {restore_err}");
             }
         }
+        // 清理/恢复新目录中已重建的投影（sync 中途失败时 commit 内已回滚，
+        // 这里覆盖 save_live_backup_prompt 等后续失败路径；列表已排空时为 no-op）
+        rollback_new_projections(&mut new_projection_snapshots);
         for directory in &removed_skills {
             let _ = SkillService::sync_to_app_dir(directory, &agent);
         }
@@ -1222,5 +1300,87 @@ mod tests {
         let prompts = db.get_prompts("claude-code").unwrap();
         assert_eq!(prompts.len(), 2);
         assert!(!prompts.keys().any(|id| id.starts_with("backup-")));
+    }
+
+    #[test]
+    #[serial]
+    fn set_agent_override_dir_rolls_back_new_dir_projections_on_sync_failure() {
+        let tmp = tempdir().unwrap();
+        let _guard = TestHomeGuard::set(tmp.path());
+        let db = Arc::new(Database::memory().unwrap());
+
+        // snap-skill：新目录中已存在用户自有同名目录（会被 sync 覆盖，需快照恢复）
+        // fresh-skill：新目录中不存在（sync 新建，回滚需删除）
+        for name in ["snap-skill", "fresh-skill"] {
+            write_skill(&SkillService::get_ssot_dir().unwrap().join(name), name);
+            db.save_skill(&skill_fixture(name)).unwrap();
+        }
+        write_subagent(
+            &SubagentService::get_ssot_dir().unwrap(),
+            "fail-agent.md",
+            "fail-agent",
+        );
+        db.save_subagent(&subagent_fixture("fail-agent")).unwrap();
+
+        // 旧目录中的投影在搬迁前存在，失败回滚后必须完好
+        SkillService::sync_to_app_dir("snap-skill", &AgentType::ClaudeCode).unwrap();
+        SkillService::sync_to_app_dir("fresh-skill", &AgentType::ClaudeCode).unwrap();
+        SubagentService::sync_to_app_dir("fail-agent", &AgentType::ClaudeCode).unwrap();
+        let old_snap_skill = config::get_claude_skills_dir().join("snap-skill");
+        let old_fresh_skill = config::get_claude_skills_dir().join("fresh-skill");
+        let old_subagent = config::get_claude_agents_dir().join("fail-agent.md");
+        assert!(old_snap_skill.exists() && old_fresh_skill.exists() && old_subagent.exists());
+
+        // 新目录预置用户自有内容：snap-skill 同名目录会被重建覆盖
+        let custom_dir = tmp.path().join("custom-claude");
+        let user_skill_dir = custom_dir.join("skills").join("snap-skill");
+        fs::create_dir_all(&user_skill_dir).unwrap();
+        fs::write(user_skill_dir.join("USER.md"), "user skill content").unwrap();
+
+        // 故障注入：新目录的 agents 只读，第二次 sync（subagent 文件）必然失败，
+        // 此时两个 skill 投影已在新目录重建完成
+        let new_agents_dir = custom_dir.join("agents");
+        fs::create_dir_all(&new_agents_dir).unwrap();
+        let mut permissions = fs::metadata(&new_agents_dir).unwrap().permissions();
+        permissions.set_readonly(true);
+        fs::set_permissions(&new_agents_dir, permissions).unwrap();
+
+        let err = set_agent_override_dir_inner(
+            "claude-code",
+            Some(custom_dir.to_string_lossy().to_string()),
+            &db,
+        )
+        .expect_err("sync failure in the new dir must abort the command");
+        let _ = err;
+
+        // 恢复写权限以便临时目录清理
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut permissions = fs::metadata(&new_agents_dir).unwrap().permissions();
+            permissions.set_mode(permissions.mode() | 0o200);
+            let _ = fs::set_permissions(&new_agents_dir, permissions);
+        }
+
+        // 新目录无残留投影：本次新建的 fresh-skill 被删除、失败目标未留下文件
+        assert!(!custom_dir.join("skills").join("fresh-skill").exists());
+        assert!(!SkillService::is_symlink(
+            &custom_dir.join("skills").join("fresh-skill")
+        ));
+        assert!(!custom_dir.join("agents").join("fail-agent.md").exists());
+
+        // 被 sync 覆盖的用户自有内容已按快照恢复
+        assert_eq!(
+            fs::read_to_string(user_skill_dir.join("USER.md")).unwrap(),
+            "user skill content"
+        );
+        assert!(
+            !user_skill_dir.join("SKILL.md").exists(),
+            "restored snapshot must not retain the synced projection"
+        );
+
+        // 旧目录投影被重建，设置已还原
+        assert!(old_snap_skill.exists() && old_fresh_skill.exists() && old_subagent.exists());
+        assert_eq!(crate::settings::get_settings().claude_code_config_dir, None);
     }
 }
