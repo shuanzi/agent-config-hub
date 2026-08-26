@@ -1,74 +1,78 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import {
+  ArchiveRestore,
+  ArrowLeft,
+  Download,
+  FolderInput,
+  Loader2,
   RefreshCw,
   Search,
   Trash2,
-  Download,
-  FolderInput,
-  ArchiveRestore,
-  Loader2,
 } from 'lucide-react';
 import type {
   AgentType,
+  ConfigContext,
   ImportSkillSelection,
   InstalledSkill,
+  ProjectSummary,
+  ScopeTarget,
   SkillApps,
+  SkillBackupEntry,
   UnmanagedSkill,
 } from '../../types';
 import {
-  useInstalledSkills,
-  useToggleSkillApp,
-  useUninstallSkill,
   useCheckSkillUpdates,
-  useUpdateSkill,
-  useScanUnmanagedSkills,
+  useDeleteSkillBackup,
   useImportSkillsFromApps,
   useInstallSkillsFromZip,
-  useSkillBackups,
+  useInstalledSkills,
   useRestoreSkillBackup,
-  useDeleteSkillBackup,
+  useScanUnmanagedSkills,
+  useSkillBackups,
+  useToggleSkillApp,
+  useUninstallSkill,
+  useUpdateSkill,
 } from '../../hooks/useSkills';
 import { toUserError } from '../../lib/errors';
+import { AgentBrandMark, agentLabels, WORKBENCH_AGENTS } from '../workbench/AgentBrandMark';
+import { FocusedDialog } from '../workbench/FocusedDialog';
 import './skills.css';
-
-const AGENTS: AgentType[] = ['claude-code', 'codex', 'gemini-cli', 'opencode'];
-
-const agentLabels: Record<AgentType, string> = {
-  'claude-code': 'Claude',
-  codex: 'Codex',
-  'gemini-cli': 'Gemini',
-  opencode: 'OpenCode',
-};
 
 interface InstalledSkillsPanelProps {
   activeApp: AgentType;
+  context: ConfigContext;
+  projects: readonly ProjectSummary[];
 }
 
-function AppToggleGroup({
-  apps,
-  onToggle,
-  disabled,
-}: {
-  apps: SkillApps;
-  onToggle: (app: AgentType, enabled: boolean) => void;
-  disabled?: boolean;
-}) {
+function targetForContext(context: ConfigContext): ScopeTarget | null {
+  if (context.kind === 'global') return { scope: 'global' };
+  if (context.kind === 'project') return { scope: 'project', projectId: context.projectId };
+  return null;
+}
+
+function contextKey(context: ConfigContext): string {
+  return context.kind === 'project' ? `project:${context.projectId}` : context.kind;
+}
+
+function sameTarget(left: ScopeTarget, right: ScopeTarget): boolean {
   return (
-    <div className="skill-toggle-group">
-      <span className="skill-toggle-label">启用：</span>
-      {AGENTS.map((app) => (
-        <label key={app} className="skill-toggle">
-          <input
-            type="checkbox"
-            checked={apps[mapAppField(app)]}
-            onChange={(event) => onToggle(app, event.target.checked)}
-            disabled={disabled}
-          />
-          {agentLabels[app]}
-        </label>
-      ))}
-    </div>
+    left.scope === right.scope &&
+    (left.scope !== 'project' || (right.scope === 'project' && left.projectId === right.projectId))
   );
+}
+
+function targetValue(target: ScopeTarget | null): string {
+  if (target === null) return '';
+  return target.scope === 'global' ? 'global' : `project:${target.projectId}`;
+}
+
+function targetFromValue(value: string): ScopeTarget | null {
+  if (value === 'global') return { scope: 'global' };
+  return value.startsWith('project:') ? { scope: 'project', projectId: value.slice(8) } : null;
+}
+
+function skillSelectionId(skill: InstalledSkill): string {
+  return `${targetValue(skill.target)}:${skill.id}`;
 }
 
 function mapAppField(app: AgentType): keyof SkillApps {
@@ -89,28 +93,321 @@ function formatDate(unixSeconds: number): string {
   return Number.isNaN(date.getTime()) ? String(unixSeconds) : date.toLocaleString();
 }
 
-export function InstalledSkillsPanel({ activeApp }: InstalledSkillsPanelProps) {
+function AppToggleGroup({
+  apps,
+  onToggle,
+  disabled,
+  legend = '启用的 Agent',
+}: {
+  apps: SkillApps;
+  onToggle: (app: AgentType, enabled: boolean) => void;
+  disabled?: boolean;
+  legend?: string;
+}) {
+  return (
+    <fieldset className="skill-toggle-group">
+      <legend className="skill-toggle-label">{legend}</legend>
+      <div className="skill-toggle-options">
+        {WORKBENCH_AGENTS.map((app) => (
+          <label key={app} className="skill-toggle">
+            <input
+              type="checkbox"
+              checked={apps[mapAppField(app)]}
+              onChange={(event) => onToggle(app, event.target.checked)}
+              disabled={disabled}
+              aria-label={agentLabels[app]}
+            />
+            <AgentBrandMark app={app} size={16} />
+            <span className="skill-visually-hidden">{agentLabels[app]}</span>
+          </label>
+        ))}
+      </div>
+    </fieldset>
+  );
+}
+
+function SkillFeedback({
+  errorMessage,
+  statusMessage,
+}: {
+  errorMessage: string;
+  statusMessage: string;
+}) {
+  return (
+    <>
+      {errorMessage && (
+        <div className="skill-error" role="alert">
+          {errorMessage}
+        </div>
+      )}
+      {statusMessage && (
+        <div className="skill-status" role="status">
+          {statusMessage}
+        </div>
+      )}
+    </>
+  );
+}
+
+function InstalledSkillRow({
+  skill,
+  updateAvailable,
+  selected,
+  onSelect,
+  onUpdate,
+  onUninstall,
+  onToggle,
+  pending,
+}: {
+  skill: InstalledSkill;
+  updateAvailable: boolean;
+  selected: boolean;
+  onSelect: () => void;
+  onUpdate: () => void;
+  onUninstall: () => void;
+  onToggle: (app: AgentType, enabled: boolean) => void;
+  pending: boolean;
+}) {
+  return (
+    <article
+      className={selected ? 'skill-row skill-card is-selected' : 'skill-row skill-card'}
+      data-skill-id={skill.id}
+      data-skill-target={targetValue(skill.target)}
+      data-skill-selection-id={skillSelectionId(skill)}
+    >
+      <button
+        type="button"
+        className="skill-row-select"
+        onClick={onSelect}
+        aria-current={selected ? 'true' : undefined}
+      >
+        <span className="skill-row-primary">
+          <span className="skill-row-title skill-card-title" role="heading" aria-level={3}>
+            {skill.name}
+          </span>
+          {skill.description && <span className="skill-row-description">{skill.description}</span>}
+        </span>
+        <span className="skill-row-source">
+          <span>{skill.directory}</span>
+          {skill.repoOwner && skill.repoName && (
+            <span>
+              {skill.repoOwner}/{skill.repoName}
+            </span>
+          )}
+        </span>
+      </button>
+
+      <div className="skill-row-actions" aria-label={`${skill.name} 操作`}>
+        <span className="skill-target-badge">
+          {skill.target.scope === 'global' ? '全局' : '项目'}
+        </span>
+        <span className="skill-row-agents" role="group" aria-label="Agent 启用状态">
+          {WORKBENCH_AGENTS.map((app) => (
+            <label
+              key={app}
+              className="skill-row-agent-toggle"
+              title={`${agentLabels[app]}：${skill.apps[mapAppField(app)] ? '已启用' : '未启用'}`}
+            >
+              <input
+                type="checkbox"
+                checked={skill.apps[mapAppField(app)]}
+                onChange={(event) => onToggle(app, event.target.checked)}
+                disabled={pending}
+                aria-label={agentLabels[app]}
+              />
+              <AgentBrandMark
+                app={app}
+                size={15}
+                className={skill.apps[mapAppField(app)] ? 'is-enabled' : 'is-disabled'}
+              />
+            </label>
+          ))}
+        </span>
+        {updateAvailable && <span className="skill-update-badge">可更新</span>}
+        {updateAvailable && (
+          <button
+            type="button"
+            className="skill-icon-button"
+            onClick={onUpdate}
+            disabled={pending}
+            aria-label={`更新 ${skill.name}`}
+            title="更新"
+          >
+            <RefreshCw size={15} aria-hidden="true" />
+          </button>
+        )}
+        <button
+          type="button"
+          className="skill-icon-button is-danger uninstall"
+          onClick={onUninstall}
+          disabled={pending}
+          aria-label={`卸载 ${skill.name}`}
+          title="卸载"
+        >
+          <Trash2 size={15} aria-hidden="true" />
+        </button>
+      </div>
+    </article>
+  );
+}
+
+function InstalledSkillDetail({
+  skill,
+  updateAvailable,
+  pending,
+  onBack,
+  backButtonRef,
+  onUpdate,
+  onUninstall,
+  onToggle,
+}: {
+  skill: InstalledSkill;
+  updateAvailable: boolean;
+  pending: boolean;
+  onBack: () => void;
+  backButtonRef: RefObject<HTMLButtonElement>;
+  onUpdate: () => void;
+  onUninstall: () => void;
+  onToggle: (app: AgentType, enabled: boolean) => void;
+}) {
+  return (
+    <section
+      className="skill-detail"
+      data-skill-detail={skill.id}
+      data-skill-target={targetValue(skill.target)}
+      aria-label={`${skill.name} 详情`}
+    >
+      <div className="skill-detail-header">
+        <button ref={backButtonRef} type="button" className="skill-back-button" onClick={onBack}>
+          <ArrowLeft size={16} aria-hidden="true" />
+          返回列表
+        </button>
+        <div className="skill-detail-heading">
+          <h2>{skill.name}</h2>
+          {skill.description && <p>{skill.description}</p>}
+        </div>
+        <div className="skill-detail-actions">
+          {skill.readmeUrl && (
+            <a className="skill-button" href={skill.readmeUrl} target="_blank" rel="noreferrer">
+              README
+            </a>
+          )}
+          {updateAvailable && (
+            <button
+              type="button"
+              className="skill-button primary"
+              onClick={onUpdate}
+              disabled={pending}
+            >
+              <RefreshCw size={15} aria-hidden="true" />
+              更新
+            </button>
+          )}
+          <button
+            type="button"
+            className="skill-button danger"
+            onClick={onUninstall}
+            disabled={pending}
+          >
+            <Trash2 size={15} aria-hidden="true" />
+            卸载
+          </button>
+        </div>
+      </div>
+
+      <dl className="skill-detail-grid">
+        <div>
+          <dt>目录</dt>
+          <dd>
+            <code>{skill.directory}</code>
+          </dd>
+        </div>
+        <div>
+          <dt>目标</dt>
+          <dd>{skill.target.scope === 'global' ? '全局配置' : '项目配置'}</dd>
+        </div>
+        {skill.repoOwner && skill.repoName && (
+          <div>
+            <dt>仓库</dt>
+            <dd>
+              {skill.repoOwner}/{skill.repoName}
+            </dd>
+          </div>
+        )}
+        {skill.repoBranch && (
+          <div>
+            <dt>分支</dt>
+            <dd>{skill.repoBranch}</dd>
+          </div>
+        )}
+        <div>
+          <dt>安装时间</dt>
+          <dd>{formatDate(skill.installedAt)}</dd>
+        </div>
+        <div>
+          <dt>更新时间</dt>
+          <dd>{formatDate(skill.updatedAt)}</dd>
+        </div>
+        {skill.contentHash && (
+          <div>
+            <dt>内容标识</dt>
+            <dd>
+              <code>{skill.contentHash}</code>
+            </dd>
+          </div>
+        )}
+      </dl>
+
+      <div className="skill-detail-section">
+        <AppToggleGroup
+          apps={skill.apps}
+          onToggle={onToggle}
+          disabled={pending}
+          legend="启用的 Agent"
+        />
+      </div>
+    </section>
+  );
+}
+
+export function InstalledSkillsPanel({ activeApp, context, projects }: InstalledSkillsPanelProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [zipPath, setZipPath] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
+  const [statusMessage, setStatusMessage] = useState('');
+  const [selectedSkillId, setSelectedSkillId] = useState<string | null>(null);
+  const [uninstallTarget, setUninstallTarget] = useState<InstalledSkill | null>(null);
   const [importDialogOpen, setImportDialogOpen] = useState(false);
   const [backupsDialogOpen, setBackupsDialogOpen] = useState(false);
+  const [allOperationTarget, setAllOperationTarget] = useState<ScopeTarget | null>(null);
+  const detailBackButtonRef = useRef<HTMLButtonElement>(null);
+  const detailReturnFocusIdRef = useRef<string | null>(null);
+  const panelHeadingRef = useRef<HTMLHeadingElement>(null);
+  const previousContextKeyRef = useRef(contextKey(context));
+  const scopedTarget = targetForContext(context);
+  const operationTarget = scopedTarget ?? allOperationTarget;
 
-  const { data: skills, isLoading } = useInstalledSkills();
+  const {
+    data: skills,
+    isLoading,
+    error: installedSkillsError,
+  } = useInstalledSkills(context, activeApp);
   const toggleAppMutation = useToggleSkillApp();
   const uninstallMutation = useUninstallSkill();
   const {
     data: updates,
     refetch: checkUpdates,
     isFetching: isCheckingUpdates,
-  } = useCheckSkillUpdates();
+  } = useCheckSkillUpdates(operationTarget, activeApp);
   const updateSkillMutation = useUpdateSkill();
-  const { data: unmanagedSkills, refetch: scanUnmanaged } = useScanUnmanagedSkills({
-    enabled: false,
-  });
+  const { data: unmanagedSkills, refetch: scanUnmanaged } = useScanUnmanagedSkills(
+    operationTarget,
+    activeApp,
+    { enabled: false },
+  );
   const importMutation = useImportSkillsFromApps();
   const installFromZipMutation = useInstallSkillsFromZip();
-  const { data: backups, refetch: refetchBackups } = useSkillBackups();
+  const { data: backups, refetch: refetchBackups } = useSkillBackups(operationTarget, activeApp);
   const restoreMutation = useRestoreSkillBackup();
   const deleteBackupMutation = useDeleteSkillBackup();
 
@@ -130,10 +427,8 @@ export function InstalledSkillsPanel({ activeApp }: InstalledSkillsPanelProps) {
       opencode: 0,
     };
     for (const skill of skills ?? []) {
-      for (const app of AGENTS) {
-        if (skill.apps[mapAppField(app)]) {
-          counts[app] += 1;
-        }
+      for (const app of WORKBENCH_AGENTS) {
+        if (skill.apps[mapAppField(app)]) counts[app] += 1;
       }
     }
     return counts;
@@ -156,6 +451,52 @@ export function InstalledSkillsPanel({ activeApp }: InstalledSkillsPanelProps) {
     });
   }, [skills, searchQuery]);
 
+  const selectedSkill =
+    selectedSkillId === null
+      ? null
+      : (filteredSkills.find((skill) => skillSelectionId(skill) === selectedSkillId) ?? null);
+  useEffect(() => {
+    if (selectedSkillId !== null && selectedSkill === null) setSelectedSkillId(null);
+  }, [selectedSkill, selectedSkillId]);
+
+  useEffect(() => {
+    if (
+      uninstallTarget !== null &&
+      !(skills ?? []).some(
+        (skill) =>
+          skill.id === uninstallTarget.id && sameTarget(skill.target, uninstallTarget.target),
+      )
+    ) {
+      setUninstallTarget(null);
+    }
+  }, [skills, uninstallTarget]);
+
+  useEffect(() => {
+    if (selectedSkillId !== null) detailBackButtonRef.current?.focus();
+  }, [selectedSkillId]);
+
+  useEffect(() => {
+    const nextContextKey = contextKey(context);
+    if (previousContextKeyRef.current === nextContextKey) return;
+
+    previousContextKeyRef.current = nextContextKey;
+    setAllOperationTarget(null);
+    setSelectedSkillId(null);
+    setUninstallTarget(null);
+    setImportDialogOpen(false);
+    setBackupsDialogOpen(false);
+    window.setTimeout(() => panelHeadingRef.current?.focus(), 0);
+  }, [context]);
+
+  useEffect(() => {
+    if (
+      allOperationTarget?.scope === 'project' &&
+      !projects.some((project) => project.projectId === allOperationTarget.projectId)
+    ) {
+      setAllOperationTarget(null);
+    }
+  }, [allOperationTarget, projects]);
+
   const pending =
     toggleAppMutation.isPending ||
     uninstallMutation.isPending ||
@@ -165,216 +506,364 @@ export function InstalledSkillsPanel({ activeApp }: InstalledSkillsPanelProps) {
     restoreMutation.isPending ||
     deleteBackupMutation.isPending;
 
-  const handleToggleApp = async (id: string, app: AgentType, enabled: boolean) => {
+  const clearFeedback = () => {
     setErrorMessage('');
+    setStatusMessage('');
+  };
+
+  const reportError = (error: unknown) => {
+    const userError = toUserError(error);
+    setStatusMessage('');
+    setErrorMessage([userError.message, userError.suggestion].filter(Boolean).join('\n'));
+  };
+
+  const requireOperationTarget = (): ScopeTarget | null => {
+    if (operationTarget !== null) return operationTarget;
+    setStatusMessage('');
+    setErrorMessage('请先选择全局配置或一个项目配置作为操作目标。');
+    return null;
+  };
+
+  const selectSkill = (skill: InstalledSkill) => {
+    const id = skillSelectionId(skill);
+    detailReturnFocusIdRef.current = id;
+    setSelectedSkillId(id);
+  };
+
+  const closeDetail = () => {
+    setSelectedSkillId(null);
+    window.setTimeout(() => {
+      const id = detailReturnFocusIdRef.current;
+      if (id === null) return;
+      const trigger = Array.from(
+        document.querySelectorAll<HTMLElement>('[data-skill-selection-id]'),
+      )
+        .find((row) => row.dataset.skillSelectionId === id)
+        ?.querySelector<HTMLButtonElement>('.skill-row-select');
+      trigger?.focus();
+    }, 0);
+  };
+
+  const handleToggleApp = async (skill: InstalledSkill, app: AgentType, enabled: boolean) => {
+    clearFeedback();
     try {
-      await toggleAppMutation.mutateAsync({ id, app, enabled });
+      await toggleAppMutation.mutateAsync({ id: skill.id, target: skill.target, app, enabled });
+      setStatusMessage(`${enabled ? '已启用' : '已停用'} ${agentLabels[app]}。`);
     } catch (error) {
-      const userError = toUserError(error);
-      setErrorMessage([userError.message, userError.suggestion].filter(Boolean).join('\n'));
+      reportError(error);
     }
   };
 
-  const handleUninstall = async (skill: InstalledSkill) => {
-    setErrorMessage('');
+  const requestUninstall = (skill: InstalledSkill) => {
+    if (
+      !(skills ?? []).some(
+        (candidate) => candidate.id === skill.id && sameTarget(candidate.target, skill.target),
+      )
+    ) {
+      return;
+    }
+    clearFeedback();
+    setUninstallTarget(skill);
+  };
+
+  const handleConfirmUninstall = async () => {
+    if (uninstallTarget === null) return;
+    const { id, name, target } = uninstallTarget;
+    setUninstallTarget(null);
+    clearFeedback();
     try {
-      await uninstallMutation.mutateAsync(skill.id);
+      await uninstallMutation.mutateAsync({ id, target });
+      if (selectedSkillId === skillSelectionId(uninstallTarget)) setSelectedSkillId(null);
+      setStatusMessage(`已卸载 ${name}。`);
     } catch (error) {
-      const userError = toUserError(error);
-      setErrorMessage([userError.message, userError.suggestion].filter(Boolean).join('\n'));
+      reportError(error);
     }
   };
 
   const handleCheckUpdates = async () => {
-    setErrorMessage('');
+    clearFeedback();
+    if (requireOperationTarget() === null) return;
     try {
       const result = await checkUpdates();
       const count = result.data?.length ?? 0;
-      if (count === 0) {
-        setErrorMessage('当前没有可更新的 Skill。');
-      }
+      setStatusMessage(
+        count === 0 ? '当前没有可更新的 Skill。' : `发现 ${count} 个可更新的 Skill。`,
+      );
     } catch (error) {
-      const userError = toUserError(error);
-      setErrorMessage([userError.message, userError.suggestion].filter(Boolean).join('\n'));
+      reportError(error);
     }
   };
 
   const handleUpdateSkill = async (skill: InstalledSkill) => {
-    setErrorMessage('');
+    clearFeedback();
     try {
-      await updateSkillMutation.mutateAsync(skill.id);
+      await updateSkillMutation.mutateAsync({ id: skill.id, target: skill.target });
+      setStatusMessage(`已更新 ${skill.name}。`);
     } catch (error) {
-      const userError = toUserError(error);
-      setErrorMessage([userError.message, userError.suggestion].filter(Boolean).join('\n'));
+      reportError(error);
     }
   };
 
   const handleUpdateAll = async () => {
-    setErrorMessage('');
-    const applicable = (updates ?? []).filter((update) =>
-      (skills ?? []).some((skill) => skill.id === update.id),
-    );
+    clearFeedback();
+    const target = requireOperationTarget();
+    if (target === null) return;
+    const applicable = (updates ?? [])
+      .map((update) => ({
+        update,
+        skill: (skills ?? []).find(
+          (skill) => skill.id === update.id && sameTarget(skill.target, target),
+        ),
+      }))
+      .filter(
+        (entry): entry is { update: NonNullable<typeof updates>[number]; skill: InstalledSkill } =>
+          entry.skill !== undefined,
+      );
     if (applicable.length === 0) return;
+
     let success = 0;
     const failures: string[] = [];
-    for (const update of applicable) {
+    for (const { update, skill } of applicable) {
       try {
-        await updateSkillMutation.mutateAsync(update.id);
+        await updateSkillMutation.mutateAsync({ id: skill.id, target: skill.target });
         success += 1;
       } catch (error) {
-        const userError = toUserError(error);
-        failures.push(`${update.name}: ${userError.message}`);
+        failures.push(`${update.name}: ${toUserError(error).message}`);
       }
     }
-    const messages: string[] = [];
-    if (success > 0) {
-      messages.push(`成功更新 ${success} 个 Skill。`);
-    }
-    messages.push(...failures);
-    if (messages.length > 0) {
+
+    const messages = [success > 0 ? `成功更新 ${success} 个 Skill。` : '', ...failures].filter(
+      Boolean,
+    );
+    if (failures.length > 0) {
       setErrorMessage(messages.join('\n'));
+    } else if (messages.length > 0) {
+      setStatusMessage(messages.join('\n'));
     }
   };
 
   const handleOpenImport = async () => {
-    setErrorMessage('');
+    clearFeedback();
+    if (requireOperationTarget() === null) return;
     try {
       const result = await scanUnmanaged();
       if (result.data === undefined || result.data.length === 0) {
-        setErrorMessage('未找到可导入的本地 Skill。');
+        setStatusMessage('未找到可导入的本地 Skill。');
         return;
       }
       setImportDialogOpen(true);
     } catch (error) {
-      const userError = toUserError(error);
-      setErrorMessage([userError.message, userError.suggestion].filter(Boolean).join('\n'));
+      reportError(error);
     }
   };
 
   const handleImport = async (selections: ImportSkillSelection[]) => {
-    setErrorMessage('');
+    clearFeedback();
+    const target = requireOperationTarget();
+    if (target === null) return;
     try {
-      await importMutation.mutateAsync(selections);
+      await importMutation.mutateAsync({ selections, target });
       setImportDialogOpen(false);
+      setStatusMessage(`已导入 ${selections.length} 个本地 Skill。`);
     } catch (error) {
-      const userError = toUserError(error);
-      setErrorMessage([userError.message, userError.suggestion].filter(Boolean).join('\n'));
+      reportError(error);
     }
   };
 
   const handleInstallFromZip = async () => {
-    setErrorMessage('');
+    clearFeedback();
     if (zipPath.trim() === '') return;
+    const target = requireOperationTarget();
+    if (target === null) return;
     try {
-      await installFromZipMutation.mutateAsync({ filePath: zipPath.trim(), currentApp: activeApp });
+      await installFromZipMutation.mutateAsync({
+        filePath: zipPath.trim(),
+        currentApp: activeApp,
+        target,
+      });
       setZipPath('');
+      setStatusMessage(`已从 ZIP 安装 Skill，并启用 ${agentLabels[activeApp]}。`);
     } catch (error) {
-      const userError = toUserError(error);
-      setErrorMessage([userError.message, userError.suggestion].filter(Boolean).join('\n'));
+      reportError(error);
     }
   };
 
   const handleOpenBackups = async () => {
-    setErrorMessage('');
+    clearFeedback();
+    if (requireOperationTarget() === null) return;
     setBackupsDialogOpen(true);
     try {
       await refetchBackups();
     } catch (error) {
-      const userError = toUserError(error);
-      setErrorMessage([userError.message, userError.suggestion].filter(Boolean).join('\n'));
+      reportError(error);
     }
   };
 
-  const handleRestore = async (backupId: string) => {
-    setErrorMessage('');
+  const handleRestore = async (backup: SkillBackupEntry) => {
+    clearFeedback();
     try {
-      await restoreMutation.mutateAsync({ backupId, currentApp: activeApp });
+      await restoreMutation.mutateAsync({ backupId: backup.backupId, target: backup.skill.target });
       setBackupsDialogOpen(false);
+      setStatusMessage('已恢复 Skill 备份。');
     } catch (error) {
-      const userError = toUserError(error);
-      setErrorMessage([userError.message, userError.suggestion].filter(Boolean).join('\n'));
+      reportError(error);
     }
   };
 
-  const handleDeleteBackup = async (backupId: string) => {
-    setErrorMessage('');
+  const handleDeleteBackup = async (backup: SkillBackupEntry) => {
+    clearFeedback();
     try {
-      await deleteBackupMutation.mutateAsync(backupId);
+      await deleteBackupMutation.mutateAsync({
+        backupId: backup.backupId,
+        target: backup.skill.target,
+      });
       await refetchBackups();
+      setStatusMessage('已删除 Skill 备份。');
     } catch (error) {
-      const userError = toUserError(error);
-      setErrorMessage([userError.message, userError.suggestion].filter(Boolean).join('\n'));
+      reportError(error);
     }
   };
+
+  const hasUpdate = (skill: InstalledSkill) =>
+    operationTarget !== null &&
+    sameTarget(skill.target, operationTarget) &&
+    updatesMap[skill.id] !== undefined;
+  const installedSkillsUserError =
+    installedSkillsError === null ? null : toUserError(installedSkillsError);
+  const installedSkillsErrorMessage = installedSkillsUserError
+    ? [installedSkillsUserError.message, installedSkillsUserError.suggestion]
+        .filter(Boolean)
+        .join('\n')
+    : '';
 
   return (
     <section className="skill-panel" aria-label="已安装 Skills">
-      <div className="skill-count-bar">
-        <span>
-          已安装 <span className="count-value">{skills?.length ?? 0}</span> 个
-        </span>
-        {AGENTS.map((app) => (
-          <span key={app} className="count-item">
-            {agentLabels[app]}: <span className="count-value">{enabledCounts[app]}</span>
-          </span>
-        ))}
+      <div className="skill-panel-heading">
+        <div>
+          <p className="skill-eyebrow">Skills</p>
+          <h2 ref={panelHeadingRef} tabIndex={-1}>
+            已安装
+          </h2>
+          <p>{skills?.length ?? 0} 个本地 Skill</p>
+        </div>
+        <div className="skill-count-bar" aria-label="各 Agent 启用的 Skill 数">
+          {WORKBENCH_AGENTS.map((app) => (
+            <span key={app} className="count-item">
+              <AgentBrandMark app={app} size={15} />
+              <span className="count-value">{enabledCounts[app]}</span>
+            </span>
+          ))}
+        </div>
       </div>
 
       <div className="skill-toolbar">
-        <div style={{ position: 'relative' }}>
-          <Search
-            size={14}
-            style={{ position: 'absolute', left: 8, top: '50%', transform: 'translateY(-50%)' }}
-          />
+        <label className="skill-search-field" htmlFor="skill-installed-search">
+          <Search size={15} aria-hidden="true" />
           <input
             id="skill-installed-search"
-            type="text"
-            placeholder="搜索已安装 skill"
+            type="search"
+            placeholder="搜索已安装 Skill"
             value={searchQuery}
             onChange={(event) => setSearchQuery(event.target.value)}
-            style={{ paddingLeft: 28 }}
           />
-        </div>
-        <button type="button" onClick={handleCheckUpdates} disabled={isCheckingUpdates || pending}>
-          {isCheckingUpdates ? <Loader2 size={14} className="spin" /> : <RefreshCw size={14} />}
-          检查更新
-        </button>
-        {(updates ?? []).length > 0 && (
-          <button type="button" className="primary" onClick={handleUpdateAll} disabled={pending}>
-            <RefreshCw size={14} />
-            全部更新 ({updates!.length})
+        </label>
+        <div className="skill-toolbar-actions">
+          <button
+            type="button"
+            className="skill-button"
+            onClick={handleCheckUpdates}
+            disabled={isCheckingUpdates || pending}
+          >
+            {isCheckingUpdates ? <Loader2 size={15} className="spin" /> : <RefreshCw size={15} />}
+            检查更新
           </button>
+          {(updates ?? []).length > 0 && (
+            <button
+              type="button"
+              className="skill-button primary"
+              onClick={handleUpdateAll}
+              disabled={pending}
+            >
+              <RefreshCw size={15} />
+              全部更新 ({updates!.length})
+            </button>
+          )}
+          <button
+            type="button"
+            className="skill-button"
+            onClick={handleOpenImport}
+            disabled={pending}
+          >
+            <FolderInput size={15} />
+            导入本地
+          </button>
+          <button
+            type="button"
+            className="skill-button"
+            onClick={handleOpenBackups}
+            disabled={pending}
+          >
+            <ArchiveRestore size={15} />
+            备份
+          </button>
+        </div>
+        {context.kind === 'all' && (
+          <label className="skill-target-field" htmlFor="skill-installed-target">
+            <span>操作目标</span>
+            <select
+              id="skill-installed-target"
+              aria-label="选择 Skill 操作目标"
+              value={targetValue(allOperationTarget)}
+              onChange={(event) => setAllOperationTarget(targetFromValue(event.target.value))}
+            >
+              <option value="">选择全局或项目配置</option>
+              <option value="global">全局配置</option>
+              {projects.map((project) => (
+                <option key={project.projectId} value={`project:${project.projectId}`}>
+                  项目配置：{project.displayName}
+                </option>
+              ))}
+            </select>
+          </label>
         )}
-        <button type="button" onClick={handleOpenImport} disabled={pending}>
-          <FolderInput size={14} />
-          导入本地
-        </button>
-        <button type="button" onClick={handleOpenBackups} disabled={pending}>
-          <ArchiveRestore size={14} />
-          备份
-        </button>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <label className="skill-zip-field" htmlFor="skill-zip-path">
+          <span className="sr-only">ZIP 文件路径</span>
           <input
+            id="skill-zip-path"
             type="text"
             placeholder="ZIP 文件路径"
             value={zipPath}
             onChange={(event) => setZipPath(event.target.value)}
-            style={{ minWidth: 200 }}
           />
           <button
             type="button"
+            className="skill-button"
             onClick={handleInstallFromZip}
             disabled={pending || zipPath.trim() === ''}
           >
-            <Download size={14} />从 ZIP 安装
+            <Download size={15} />从 ZIP 安装
           </button>
-        </div>
+        </label>
       </div>
 
-      {errorMessage && <div className="skill-error">{errorMessage}</div>}
+      <SkillFeedback
+        errorMessage={installedSkillsErrorMessage || errorMessage}
+        statusMessage={statusMessage}
+      />
 
-      {isLoading ? (
-        <div className="skill-empty">
+      {selectedSkill !== null ? (
+        <InstalledSkillDetail
+          skill={selectedSkill}
+          updateAvailable={hasUpdate(selectedSkill)}
+          pending={pending}
+          onBack={closeDetail}
+          backButtonRef={detailBackButtonRef}
+          onUpdate={() => void handleUpdateSkill(selectedSkill)}
+          onUninstall={() => requestUninstall(selectedSkill)}
+          onToggle={(app, enabled) => void handleToggleApp(selectedSkill, app, enabled)}
+        />
+      ) : isLoading ? (
+        <div className="skill-empty" role="status">
           <Loader2 size={24} className="spin" />
           <p>正在加载…</p>
         </div>
@@ -388,54 +877,19 @@ export function InstalledSkillsPanel({ activeApp }: InstalledSkillsPanelProps) {
           <h3>没有匹配的 Skill</h3>
         </div>
       ) : (
-        <div className="skill-list">
+        <div className="skill-list" role="list" aria-label="已安装 Skill 列表">
           {filteredSkills.map((skill) => (
-            <article key={skill.id} className="skill-card" data-skill-id={skill.id}>
-              <div className="skill-card-header">
-                <div>
-                  <h3 className="skill-card-title">{skill.name}</h3>
-                  <div className="skill-card-meta">
-                    <span className="skill-card-badge">{skill.directory}</span>
-                    {skill.repoOwner && skill.repoName && (
-                      <span className="skill-card-badge">
-                        {skill.repoOwner}/{skill.repoName}
-                      </span>
-                    )}
-                    {updatesMap[skill.id] !== undefined && (
-                      <span className="skill-update-badge">可更新</span>
-                    )}
-                  </div>
-                </div>
-                <div className="skill-card-actions">
-                  {updatesMap[skill.id] !== undefined && (
-                    <button
-                      type="button"
-                      className="primary"
-                      onClick={() => handleUpdateSkill(skill)}
-                      disabled={pending}
-                    >
-                      <RefreshCw size={14} />
-                      更新
-                    </button>
-                  )}
-                  <button
-                    type="button"
-                    className="uninstall"
-                    onClick={() => handleUninstall(skill)}
-                    disabled={pending}
-                  >
-                    <Trash2 size={14} />
-                    卸载
-                  </button>
-                </div>
-              </div>
-              {skill.description && <p className="skill-card-desc">{skill.description}</p>}
-              <AppToggleGroup
-                apps={skill.apps}
-                onToggle={(app, enabled) => handleToggleApp(skill.id, app, enabled)}
-                disabled={pending || toggleAppMutation.isPending}
-              />
-            </article>
+            <InstalledSkillRow
+              key={`${targetValue(skill.target)}:${skill.id}`}
+              skill={skill}
+              updateAvailable={hasUpdate(skill)}
+              selected={selectedSkillId === skillSelectionId(skill)}
+              onSelect={() => selectSkill(skill)}
+              onUpdate={() => void handleUpdateSkill(skill)}
+              onUninstall={() => requestUninstall(skill)}
+              onToggle={(app, enabled) => void handleToggleApp(skill, app, enabled)}
+              pending={pending}
+            />
           ))}
         </div>
       )}
@@ -456,6 +910,35 @@ export function InstalledSkillsPanel({ activeApp }: InstalledSkillsPanelProps) {
           onClose={() => setBackupsDialogOpen(false)}
         />
       )}
+
+      <FocusedDialog
+        open={uninstallTarget !== null}
+        title="确认卸载"
+        onClose={() => setUninstallTarget(null)}
+        closeLabel="关闭确认卸载对话框"
+        className="skill-dialog"
+        footer={
+          <>
+            <button type="button" className="skill-button" onClick={() => setUninstallTarget(null)}>
+              取消
+            </button>
+            <button
+              type="button"
+              className="skill-button danger"
+              onClick={() => void handleConfirmUninstall()}
+              disabled={pending}
+            >
+              卸载
+            </button>
+          </>
+        }
+      >
+        {uninstallTarget !== null && (
+          <p className="skill-dialog-copy">
+            确定要卸载 {uninstallTarget.name} 吗？该 Skill 将从该配置目标的所有 Agent 移除。
+          </p>
+        )}
+      </FocusedDialog>
     </section>
   );
 }
@@ -469,12 +952,9 @@ function ImportDialog({
   onImport: (selections: ImportSkillSelection[]) => void;
   onClose: () => void;
 }) {
-  // 同名不同来源的发现项需用 directory + path（扫描拆条后各自指向本组来源）复合 key 区分。
+  const firstSelectionRef = useRef<HTMLInputElement>(null);
   const selectionKey = (skill: UnmanagedSkill) => `${skill.directory}::${skill.path}`;
-  // 与后端批量导入判重（directory.to_lowercase()）一致：directory 分组统一按小写比较。
   const directoryKey = (skill: UnmanagedSkill) => skill.directory.toLowerCase();
-
-  // 同 directory 的发现项互斥（后端对重复 directory 会整批拒绝），默认只勾选每组第一条。
   const [selected, setSelected] = useState<Set<string>>(() => {
     const seenDirectories = new Set<string>();
     const initial = new Set<string>();
@@ -486,7 +966,6 @@ function ImportDialog({
     }
     return initial;
   });
-
   const conflictDirectories = useMemo(() => {
     const counts = new Map<string, number>();
     for (const skill of skills) {
@@ -512,111 +991,102 @@ function ImportDialog({
 
   const toggleSelect = (skill: UnmanagedSkill) => {
     const key = selectionKey(skill);
-    const next = new Set(selected);
-    if (next.has(key)) {
-      next.delete(key);
-    } else {
-      // 单选语义：勾选一条时自动取消同 directory（小写归一）的其他来源。
-      for (const other of skills) {
-        if (directoryKey(other) === directoryKey(skill)) {
-          next.delete(selectionKey(other));
+    setSelected((previous) => {
+      const next = new Set(previous);
+      if (next.has(key)) {
+        next.delete(key);
+      } else {
+        for (const other of skills) {
+          if (directoryKey(other) === directoryKey(skill)) next.delete(selectionKey(other));
         }
+        next.add(key);
       }
-      next.add(key);
-    }
-    setSelected(next);
+      return next;
+    });
   };
 
   const toggleApp = (key: string, app: AgentType, enabled: boolean) => {
-    setAppsBySkill((prev) => ({
-      ...prev,
-      [key]: {
-        ...prev[key],
-        [mapAppField(app)]: enabled,
-      },
+    setAppsBySkill((previous) => ({
+      ...previous,
+      [key]: { ...previous[key], [mapAppField(app)]: enabled },
     }));
   };
 
   const handleImport = () => {
-    const selections = skills
-      .filter((skill) => selected.has(selectionKey(skill)))
-      .map((skill) => ({
-        directory: skill.directory,
-        sourcePath: skill.path,
-        apps: appsBySkill[selectionKey(skill)] ?? {
-          claudeCode: false,
-          codex: false,
-          geminiCli: false,
-          opencode: false,
-        },
-      }));
-    onImport(selections);
+    onImport(
+      skills
+        .filter((skill) => selected.has(selectionKey(skill)))
+        .map((skill) => ({
+          directory: skill.directory,
+          sourcePath: skill.path,
+          apps: appsBySkill[selectionKey(skill)] ?? {
+            claudeCode: false,
+            codex: false,
+            geminiCli: false,
+            opencode: false,
+          },
+        })),
+    );
   };
 
   return (
-    <div className="skill-dialog-overlay" onClick={onClose}>
-      <div
-        className="skill-dialog"
-        onClick={(event) => event.stopPropagation()}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="import-title"
-      >
-        <div className="skill-dialog-header">
-          <h3 id="import-title">导入本地 Skill</h3>
-        </div>
-        <div className="skill-dialog-body">
-          {skills.map((skill) => (
-            <div key={selectionKey(skill)} className="skill-import-item">
-              <input
-                type="checkbox"
-                checked={selected.has(selectionKey(skill))}
-                onChange={() => toggleSelect(skill)}
-              />
-              <div className="skill-import-item-info">
-                <div className="skill-import-item-name">{skill.name}</div>
-                {skill.description && (
-                  <div style={{ fontSize: 12, color: '#555' }}>{skill.description}</div>
-                )}
-                <div className="skill-import-item-path">{skill.path}</div>
-                {conflictDirectories.has(directoryKey(skill)) && (
-                  <div style={{ fontSize: 11, color: '#a15c00' }}>
-                    同名 Skill 一次只能导入一个来源
-                  </div>
-                )}
-                <div className="skill-toggle-group" style={{ borderTop: 'none', paddingTop: 6 }}>
-                  {AGENTS.map((app) => (
-                    <label key={app} className="skill-toggle">
-                      <input
-                        type="checkbox"
-                        checked={appsBySkill[selectionKey(skill)]?.[mapAppField(app)] ?? false}
-                        onChange={(event) =>
-                          toggleApp(selectionKey(skill), app, event.target.checked)
-                        }
-                      />
-                      {agentLabels[app]}
-                    </label>
-                  ))}
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-        <div className="skill-dialog-footer">
-          <button type="button" onClick={onClose}>
+    <FocusedDialog
+      open
+      title="导入本地 Skill"
+      onClose={onClose}
+      initialFocusRef={firstSelectionRef}
+      closeLabel="关闭导入本地 Skill 对话框"
+      className="skill-dialog"
+      footer={
+        <>
+          <button type="button" className="skill-button" onClick={onClose}>
             取消
           </button>
           <button
             type="button"
-            className="primary"
+            className="skill-button primary"
             onClick={handleImport}
             disabled={selected.size === 0}
           >
             导入选中项 ({selected.size})
           </button>
-        </div>
+        </>
+      }
+    >
+      <div className="skill-import-list">
+        {skills.map((skill, index) => {
+          const key = selectionKey(skill);
+          return (
+            <div key={key} className="skill-import-item">
+              <label className="skill-import-select">
+                <input
+                  ref={index === 0 ? firstSelectionRef : undefined}
+                  type="checkbox"
+                  checked={selected.has(key)}
+                  onChange={() => toggleSelect(skill)}
+                  aria-label={`选择 ${skill.name}，来源 ${skill.path}`}
+                />
+              </label>
+              <div className="skill-import-item-info">
+                <div className="skill-import-item-name">{skill.name}</div>
+                {skill.description && (
+                  <div className="skill-import-description">{skill.description}</div>
+                )}
+                <div className="skill-import-item-path">{skill.path}</div>
+                {conflictDirectories.has(directoryKey(skill)) && (
+                  <div className="skill-import-warning">同名 Skill 一次只能导入一个来源</div>
+                )}
+                <AppToggleGroup
+                  apps={appsBySkill[key]}
+                  onToggle={(app, enabled) => toggleApp(key, app, enabled)}
+                  legend="导入到 Agent"
+                />
+              </div>
+            </div>
+          );
+        })}
       </div>
-    </div>
+    </FocusedDialog>
   );
 }
 
@@ -626,60 +1096,57 @@ function BackupsDialog({
   onDelete,
   onClose,
 }: {
-  backups: { backupId: string; backupPath: string; createdAt: number; skill: InstalledSkill }[];
-  onRestore: (backupId: string) => void;
-  onDelete: (backupId: string) => void;
+  backups: SkillBackupEntry[];
+  onRestore: (backup: SkillBackupEntry) => void;
+  onDelete: (backup: SkillBackupEntry) => void;
   onClose: () => void;
 }) {
   return (
-    <div className="skill-dialog-overlay" onClick={onClose}>
-      <div
-        className="skill-dialog"
-        onClick={(event) => event.stopPropagation()}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="backups-title"
-      >
-        <div className="skill-dialog-header">
-          <h3 id="backups-title">Skill 备份</h3>
-        </div>
-        <div className="skill-dialog-body">
-          {backups.length === 0 ? (
-            <p style={{ color: '#555', fontSize: 13 }}>暂无备份。</p>
-          ) : (
-            backups.map((backup) => (
-              <div key={backup.backupId} className="skill-backup-item">
-                <div className="skill-backup-item-info">
-                  <div className="skill-backup-item-name">{backup.skill.name}</div>
-                  <div className="skill-backup-item-path">{backup.backupPath}</div>
-                  <div style={{ fontSize: 11, color: '#777' }}>{formatDate(backup.createdAt)}</div>
-                </div>
-                <div className="skill-backup-actions">
-                  <button
-                    type="button"
-                    className="primary"
-                    onClick={() => onRestore(backup.backupId)}
-                  >
-                    恢复
-                  </button>
-                  <button
-                    type="button"
-                    className="uninstall"
-                    onClick={() => onDelete(backup.backupId)}
-                  >
-                    <Trash2 size={14} />
-                  </button>
-                </div>
+    <FocusedDialog
+      open
+      title="Skill 备份"
+      onClose={onClose}
+      closeLabel="关闭 Skill 备份对话框"
+      className="skill-dialog"
+      footer={
+        <button type="button" className="skill-button" onClick={onClose}>
+          关闭
+        </button>
+      }
+    >
+      {backups.length === 0 ? (
+        <p className="skill-dialog-empty">暂无备份。</p>
+      ) : (
+        <div className="skill-backup-list">
+          {backups.map((backup) => (
+            <div key={backup.backupId} className="skill-backup-item">
+              <div className="skill-backup-item-info">
+                <div className="skill-backup-item-name">{backup.skill.name}</div>
+                <div className="skill-backup-item-path">{backup.backupPath}</div>
+                <div className="skill-backup-date">{formatDate(backup.createdAt)}</div>
               </div>
-            ))
-          )}
+              <div className="skill-backup-actions">
+                <button
+                  type="button"
+                  className="skill-button primary"
+                  onClick={() => onRestore(backup)}
+                >
+                  恢复
+                </button>
+                <button
+                  type="button"
+                  className="skill-icon-button is-danger"
+                  onClick={() => onDelete(backup)}
+                  aria-label={`删除 ${backup.skill.name} 的备份`}
+                  title="删除备份"
+                >
+                  <Trash2 size={15} aria-hidden="true" />
+                </button>
+              </div>
+            </div>
+          ))}
         </div>
-        <div className="skill-dialog-footer">
-          <button type="button" onClick={onClose}>
-            关闭
-          </button>
-        </div>
-      </div>
-    </div>
+      )}
+    </FocusedDialog>
   );
 }

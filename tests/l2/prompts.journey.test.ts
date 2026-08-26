@@ -10,136 +10,94 @@ async function waitForStable(): Promise<void> {
   });
 }
 
-describe('Prompt management journey', () => {
-  it('creates a preset, enables it, shows live content, then switches to another', async () => {
-    await browser.setWindowSize(1280, 900);
-    await browser.url(ENTRY);
+async function openInstructionsInContext(contextSelector: string) {
+  const instructionsTab = await $(
+    "//*[@data-workbench-rail='asset-type']//button[normalize-space()='长期指令']",
+  );
+  await instructionsTab.waitForDisplayed();
+  await instructionsTab.click();
+  const contextButton = await $(contextSelector);
+  await contextButton.waitForDisplayed();
+  await contextButton.click();
+  await $('.instructions-panel').waitForDisplayed();
+  await waitForStable();
+}
 
-    // 切换到长期指令视图
-    const instructionsTab = await $(
-      "//button[contains(@class,'tab')][normalize-space()='长期指令']",
+describe('长期指令文档管理旅程', () => {
+  it('在全局上下文直接编辑 CLAUDE.md，并保留固定 AGENTS.md 行', async () => {
+    await browser.setWindowSize(1280, 900);
+    await browser.url(`${ENTRY}?fixture=visual`);
+    await waitForStable();
+
+    await openInstructionsInContext(
+      "//*[@data-workbench-rail='context']//button[normalize-space()='全局配置']",
     );
-    await instructionsTab.waitForDisplayed();
-    await instructionsTab.click();
 
     const panel = await $('.instructions-panel');
-    await panel.waitForDisplayed();
+    const claudeRow = await panel.$("button[data-instruction-kind='claude']");
+    const agentsRow = await panel.$(
+      "button[data-instruction-kind='agents'][data-instruction-target='global']",
+    );
+    await claudeRow.waitForDisplayed();
+    await agentsRow.waitForDisplayed();
+    expect(await claudeRow.getText()).toContain('CLAUDE.md');
+    expect(await agentsRow.getText()).toContain('AGENTS.md');
 
-    // 新建第一条预设
-    const createButton = await panel.$("//button[normalize-space()='新建预设']");
-    await createButton.click();
-
-    const nameInput = await $('#prompt-name');
-    await nameInput.setValue('First Prompt');
-
-    const contentInput = await $('#prompt-content');
-    await contentInput.setValue('first live body');
-
-    const saveButton = await panel.$("//button[normalize-space()='保存']");
-    await saveButton.click();
+    await claudeRow.click();
+    const content = await $('#instruction-document-content');
+    await content.setValue('# Updated global Claude instructions');
+    await (await panel.$("//button[normalize-space()='保存 CLAUDE.md']")).click();
     await waitForStable();
 
-    const error = await $('.instructions-error');
-    if (await error.isExisting()) {
-      throw new Error(`Save failed: ${await error.getText()}`);
-    }
+    const status = await panel.$("[role='status']");
+    await status.waitForDisplayed();
+    expect(await status.getText()).toContain('CLAUDE.md');
 
-    // 列表应出现该预设
-    const firstRow = await $("//li[contains(.,'First Prompt')]");
-    await firstRow.waitForDisplayed();
-
-    // 启用它
-    const enableButton = await panel.$("//button[normalize-space()='启用']");
-    await enableButton.click();
-    await waitForStable();
-
-    // 查看 live 内容
-    const viewLiveButton = await panel.$("//button[normalize-space()='查看 live 内容']");
-    await viewLiveButton.click();
-    await waitForStable();
-
-    const livePre = await $('.live-content-view .source-view');
-    await livePre.waitForDisplayed();
-    expect(await livePre.getText()).toContain('first live body');
-
-    // 隐藏 live 视图，创建第二条预设
-    const hideLiveButton = await panel.$("//button[normalize-space()='隐藏 live 内容']");
-    await hideLiveButton.click();
-
-    await createButton.click();
-    await nameInput.setValue('Second Prompt');
-    await contentInput.setValue('second live body');
-    await saveButton.click();
-    await waitForStable();
-
-    // 切换到第二条并启用
-    const secondRow = await $("//li[contains(.,'Second Prompt')]");
-    await secondRow.click();
-    await enableButton.click();
-    await waitForStable();
-
-    // 验证第一条显示未启用，第二条显示已启用
-    const firstEnabled = await firstRow.$('.enabled-badge');
-    expect(await firstEnabled.isExisting()).toBe(false);
-
-    const secondEnabled = await secondRow.$('.enabled-badge');
-    expect(await secondEnabled.isExisting()).toBe(true);
-
-    // live 内容应更新
-    await viewLiveButton.click();
-    await waitForStable();
-    expect(await livePre.getText()).toContain('second live body');
+    await agentsRow.click();
+    expect(await content.getValue()).toBe('');
+    expect(await panel.getText()).toContain('未创建');
   });
 
-  it('selects an existing preset, edits it, and persists the change', async () => {
+  it('在项目上下文直接编辑共享 AGENTS.md，Codex 和 OpenCode 使用同一文档', async () => {
     await browser.setWindowSize(1280, 900);
-    await browser.url(ENTRY);
+    await browser.url(`${ENTRY}?fixture=visual`);
+    await waitForStable();
 
-    const instructionsTab = await $(
-      "//button[contains(@class,'tab')][normalize-space()='长期指令']",
+    await openInstructionsInContext(
+      "[data-workbench-rail='context'] [data-project-id='visual-project-alpha']",
     );
-    await instructionsTab.waitForDisplayed();
-    await instructionsTab.click();
 
     const panel = await $('.instructions-panel');
-    await panel.waitForDisplayed();
+    const agentsRow = await panel.$(
+      "button[data-instruction-kind='agents'][data-instruction-target='project:visual-project-alpha']",
+    );
+    await agentsRow.click();
 
-    // 创建初始预设
-    const createButton = await panel.$("//button[normalize-space()='新建预设']");
-    await createButton.click();
+    const content = await $('#instruction-document-content');
+    expect(await content.getValue()).toContain('Project shared instructions');
+    expect(await panel.getText()).toContain('Codex');
+    expect(await panel.getText()).toContain('OpenCode');
+    expect(await panel.getText()).not.toContain('Gemini');
 
-    const nameInput = await $('#prompt-name');
-    await nameInput.setValue('Editable Prompt');
+    await content.setValue('# Updated shared project instructions');
+    await (await panel.$("//button[normalize-space()='保存 AGENTS.md']")).click();
+    await waitForStable();
+    expect(await content.getValue()).toBe('# Updated shared project instructions');
+  });
 
-    const contentInput = await $('#prompt-content');
-    await contentInput.setValue('original body');
-
-    const saveButton = await panel.$("//button[normalize-space()='保存']");
-    await saveButton.click();
+  it('不显示旧的预设、Agent enable 或 Gemini 控件', async () => {
+    await browser.setWindowSize(1280, 900);
+    await browser.url(`${ENTRY}?fixture=visual`);
     await waitForStable();
 
-    const row = await $("//li[contains(.,'Editable Prompt')]");
-    await row.waitForDisplayed();
+    await openInstructionsInContext(
+      "//*[@data-workbench-rail='context']//button[normalize-space()='全局配置']",
+    );
 
-    // 选中并编辑
-    await row.click();
-    await nameInput.setValue('Updated Prompt');
-    await contentInput.setValue('updated body');
-    await saveButton.click();
-    await waitForStable();
-
-    const error = await $('.instructions-error');
-    if (await error.isExisting()) {
-      throw new Error(`Save failed: ${await error.getText()}`);
+    const panel = await $('.instructions-panel');
+    for (const label of ['新建预设', '从 live 文件导入', '查看 live 内容', '启用']) {
+      expect(await panel.$(`//button[normalize-space()='${label}']`).isExisting()).toBe(false);
     }
-
-    // 列表应反映更新后的名称
-    const updatedRow = await $("//li[contains(.,'Updated Prompt')]");
-    await updatedRow.waitForDisplayed();
-
-    // 重新选中应加载持久化内容
-    await updatedRow.click();
-    expect(await nameInput.getValue()).toBe('Updated Prompt');
-    expect(await contentInput.getValue()).toBe('updated body');
+    expect(await panel.getText()).not.toContain('Gemini');
   });
 });

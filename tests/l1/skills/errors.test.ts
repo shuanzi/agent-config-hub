@@ -110,4 +110,20 @@ describe('toUserError', () => {
     expect(userError.message).toContain('存储目录重叠');
     expect(userError.message).toContain('codex');
   });
+
+  it('maps unavailable project roots without exposing the backend code', () => {
+    const userError = toUserError(
+      new Error(
+        JSON.stringify({
+          code: 'PROJECT_ROOT_UNAVAILABLE',
+          context: { projectId: 'project-a' },
+          suggestion: 'relinkProject',
+        }),
+      ),
+    );
+
+    expect(userError.message).toContain('项目目录不可用');
+    expect(userError.message).not.toContain('PROJECT_ROOT_UNAVAILABLE');
+    expect(userError.suggestion).toContain('重新关联项目目录');
+  });
 });

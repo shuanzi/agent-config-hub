@@ -3,7 +3,12 @@ import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook, waitFor, act } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
-import type { DiscoverableSubagent, InstalledSubagent } from '../../../src/types';
+import type {
+  ConfigContext,
+  DiscoverableSubagent,
+  InstalledSubagent,
+  ScopeTarget,
+} from '../../../src/types';
 
 const mockApi = {
   getInstalledSubagents: vi.fn(),
@@ -28,7 +33,11 @@ function createWrapper(queryClient: QueryClient) {
   };
 }
 
-describe('useSubagents query invalidation', () => {
+const globalContext: ConfigContext = { kind: 'global' };
+const globalTarget: ScopeTarget = { scope: 'global' };
+const projectContext: ConfigContext = { kind: 'project', projectId: 'project-alpha' };
+
+describe('useSubagents context and target contracts', () => {
   let queryClient: QueryClient;
 
   beforeEach(() => {
@@ -42,24 +51,28 @@ describe('useSubagents query invalidation', () => {
     vi.restoreAllMocks();
   });
 
-  it('useInstalledSubagents caches installed list with staleTime Infinity', async () => {
-    mockApi.getInstalledSubagents.mockResolvedValue([]);
+  it('uses ConfigContext as the installed list identity', async () => {
+    mockApi.getInstalledSubagents.mockImplementation((context: ConfigContext) =>
+      Promise.resolve(context.kind === 'project' ? [{ id: 'project-only' }] : []),
+    );
     const hooks = await loadHooks();
-    const { result } = renderHook(() => hooks.useInstalledSubagents(), {
-      wrapper: createWrapper(queryClient),
-    });
+    const { result: globalResult } = renderHook(
+      () => hooks.useInstalledSubagents(globalContext, 'claude-code'),
+      { wrapper: createWrapper(queryClient) },
+    );
+    const { result: projectResult } = renderHook(
+      () => hooks.useInstalledSubagents(projectContext, 'claude-code'),
+      { wrapper: createWrapper(queryClient) },
+    );
 
-    await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    expect(mockApi.getInstalledSubagents).toHaveBeenCalledTimes(1);
-
-    const { result: result2 } = renderHook(() => hooks.useInstalledSubagents(), {
-      wrapper: createWrapper(queryClient),
-    });
-    expect(result2.current.data).toEqual([]);
-    expect(mockApi.getInstalledSubagents).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(globalResult.current.isSuccess).toBe(true));
+    await waitFor(() => expect(projectResult.current.isSuccess).toBe(true));
+    expect(mockApi.getInstalledSubagents).toHaveBeenCalledWith(globalContext);
+    expect(mockApi.getInstalledSubagents).toHaveBeenCalledWith(projectContext);
+    expect(projectResult.current.data).toEqual([{ id: 'project-only' }]);
   });
 
-  it('installSubagent mutation merges into installed cache and invalidates on settle', async () => {
+  it('install mutation forwards complete target and refreshes observed Subagent queries', async () => {
     const existing: InstalledSubagent[] = [
       {
         id: 'old',
@@ -68,6 +81,7 @@ describe('useSubagents query invalidation', () => {
         apps: { claudeCode: true, codex: false, geminiCli: false, opencode: false },
         installedAt: 1,
         updatedAt: 0,
+        target: globalTarget,
       },
     ];
     const subagent: DiscoverableSubagent = {
@@ -79,6 +93,7 @@ describe('useSubagents query invalidation', () => {
       repoOwner: 'a',
       repoName: 'b',
       repoBranch: 'main',
+      installed: false,
     };
     const installed: InstalledSubagent = {
       ...subagent,
@@ -86,6 +101,7 @@ describe('useSubagents query invalidation', () => {
       apps: { claudeCode: false, codex: true, geminiCli: false, opencode: false },
       installedAt: 2,
       updatedAt: 0,
+      target: globalTarget,
     };
 
     mockApi.getInstalledSubagents
@@ -94,28 +110,29 @@ describe('useSubagents query invalidation', () => {
     mockApi.installSubagent.mockResolvedValue(installed);
 
     const hooks = await loadHooks();
-    const { result: queryResult } = renderHook(() => hooks.useInstalledSubagents(), {
-      wrapper: createWrapper(queryClient),
-    });
+    const { result: queryResult } = renderHook(
+      () => hooks.useInstalledSubagents(globalContext, 'claude-code'),
+      { wrapper: createWrapper(queryClient) },
+    );
     await waitFor(() => expect(queryResult.current.data).toEqual(existing));
 
     const { result: mutationResult } = renderHook(() => hooks.useInstallSubagent(), {
       wrapper: createWrapper(queryClient),
     });
     await act(async () => {
-      await mutationResult.current.mutateAsync({ subagent, currentApp: 'codex' });
+      await mutationResult.current.mutateAsync({
+        subagent,
+        target: globalTarget,
+        currentApp: 'codex',
+      });
     });
 
-    await waitFor(() =>
-      expect(
-        queryClient.getQueryData<InstalledSubagent[]>(['subagents', 'installed']),
-      ).toContainEqual(installed),
-    );
-    expect(mockApi.installSubagent).toHaveBeenCalledWith(subagent, 'codex');
+    await waitFor(() => expect(queryResult.current.data).toContainEqual(installed));
+    expect(mockApi.installSubagent).toHaveBeenCalledWith(subagent, globalTarget, 'codex');
     expect(mockApi.getInstalledSubagents).toHaveBeenCalledTimes(2);
   });
 
-  it('uninstallSubagent mutation removes subagent from installed cache', async () => {
+  it('uninstall mutation forwards the recorded target and invalidates the list', async () => {
     const existing: InstalledSubagent[] = [
       {
         id: 'to-remove',
@@ -124,6 +141,7 @@ describe('useSubagents query invalidation', () => {
         apps: { claudeCode: true, codex: false, geminiCli: false, opencode: false },
         installedAt: 1,
         updatedAt: 0,
+        target: globalTarget,
       },
       {
         id: 'keep',
@@ -132,28 +150,30 @@ describe('useSubagents query invalidation', () => {
         apps: { claudeCode: true, codex: false, geminiCli: false, opencode: false },
         installedAt: 2,
         updatedAt: 0,
+        target: globalTarget,
       },
     ];
     mockApi.getInstalledSubagents.mockResolvedValueOnce(existing).mockResolvedValue([existing[1]]);
     mockApi.uninstallSubagent.mockResolvedValue({ backupPath: '/tmp/bak' });
 
     const hooks = await loadHooks();
-    const { result: queryResult } = renderHook(() => hooks.useInstalledSubagents(), {
-      wrapper: createWrapper(queryClient),
-    });
+    const { result: queryResult } = renderHook(
+      () => hooks.useInstalledSubagents(globalContext, 'claude-code'),
+      { wrapper: createWrapper(queryClient) },
+    );
     await waitFor(() => expect(queryResult.current.data).toEqual(existing));
 
     const { result: mutationResult } = renderHook(() => hooks.useUninstallSubagent(), {
       wrapper: createWrapper(queryClient),
     });
     await act(async () => {
-      await mutationResult.current.mutateAsync('to-remove');
+      await mutationResult.current.mutateAsync({ id: 'to-remove', target: globalTarget });
     });
 
-    await waitFor(() => {
-      const remaining = queryClient.getQueryData<InstalledSubagent[]>(['subagents', 'installed']);
-      expect(remaining?.map((s) => s.id)).toEqual(['keep']);
-    });
+    await waitFor(() =>
+      expect(queryResult.current.data?.map((subagent) => subagent.id)).toEqual(['keep']),
+    );
+    expect(mockApi.uninstallSubagent).toHaveBeenCalledWith('to-remove', globalTarget);
     expect(mockApi.getInstalledSubagents).toHaveBeenCalledTimes(2);
   });
 });

@@ -1,132 +1,763 @@
-/* Subagent 管理面板样式 —— 复用 skill 面板变量与类名 */
+/* selected B2 壳层下的 Subagent 工作区：仅使用当前 DTO 和 mutation。 */
 
 .subagent-panel {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  min-width: 0;
+  min-height: 100%;
+  gap: 12px;
+  color: var(--wb-ink);
 }
 
-.subagent-toolbar {
+.subagent-summary-row,
+.subagent-toolbar,
+.subagent-toolbar-actions,
+.subagent-detail-actions,
+.subagent-backup-actions,
+.subagent-repo-row-actions {
   display: flex;
   align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
+  gap: 8px;
 }
 
-.subagent-toolbar input[type='text'] {
-  min-width: 240px;
-  padding: 6px 8px;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  font-size: 13px;
+.subagent-summary-row {
+  justify-content: space-between;
+  min-height: 28px;
+  color: var(--wb-muted);
+  font-size: 12px;
 }
 
-.subagent-toolbar select {
-  padding: 5px 8px;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  font-size: 13px;
+.subagent-agent-counts {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 
-.subagent-toolbar button {
+.subagent-agent-counts > span {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  padding: 6px 12px;
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  background: #fff;
+  color: var(--wb-muted);
+}
+
+.subagent-toolbar {
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.subagent-toolbar-actions {
+  flex-wrap: wrap;
+}
+
+.subagent-search-field {
+  display: flex;
+  flex: 1 1 250px;
+  align-items: center;
+  min-width: 0;
+  max-width: 420px;
+  padding: 0 10px;
+  border: 1px solid var(--wb-line-strong);
+  border-radius: 7px;
+  color: var(--wb-faint);
+  background: var(--wb-panel);
+}
+
+.subagent-search-field:focus-within {
+  border-color: var(--wb-blue);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--wb-blue) 14%, transparent);
+}
+
+.subagent-search-field input {
+  width: 100%;
+  min-width: 0;
+  height: 34px;
+  padding: 0 8px;
+  border: 0;
+  outline: 0;
+  color: var(--wb-ink);
+  background: transparent;
   font-size: 13px;
+}
+
+.subagent-select-field select,
+.subagent-repo-form input {
+  min-height: 34px;
+  border: 1px solid var(--wb-line-strong);
+  border-radius: 7px;
+  color: var(--wb-ink);
+  background: var(--wb-panel);
+  font-size: 13px;
+}
+
+.subagent-select-field select {
+  max-width: 180px;
+  padding: 0 28px 0 10px;
+}
+
+.subagent-target-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: var(--wb-muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.subagent-target-field select {
+  min-height: 34px;
+  max-width: 220px;
+  padding: 0 28px 0 10px;
+  border: 1px solid var(--wb-line-strong);
+  border-radius: 7px;
+  color: var(--wb-ink);
+  background: var(--wb-panel);
+  font-size: 13px;
+}
+
+.subagent-button,
+.subagent-icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 34px;
+  border: 1px solid var(--wb-line-strong);
+  border-radius: 7px;
+  color: var(--wb-ink);
+  background: var(--wb-panel);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1;
+  text-decoration: none;
   cursor: pointer;
 }
 
-.subagent-toolbar button:hover {
-  background: var(--bg-subtle);
+.subagent-button {
+  padding: 0 11px;
 }
 
-.subagent-toolbar button.primary {
-  background: var(--accent);
-  border-color: var(--accent);
+.subagent-icon-button {
+  width: 34px;
+  padding: 0;
+}
+
+.subagent-button:hover:not(:disabled),
+.subagent-icon-button:hover:not(:disabled) {
+  border-color: var(--wb-line-strong);
+  background: var(--wb-bg);
+}
+
+.subagent-button:disabled,
+.subagent-icon-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
+.subagent-button.is-primary {
+  border-color: var(--wb-blue);
   color: #fff;
+  background: var(--wb-blue);
 }
 
-.subagent-toolbar button.primary:hover {
-  background: #0a4fd1;
+.subagent-button.is-primary:hover:not(:disabled) {
+  border-color: var(--wb-blue-dark);
+  background: var(--wb-blue-dark);
 }
 
-.subagent-count-bar {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 8px 12px;
-  background: var(--bg-subtle);
-  border: 1px solid var(--border);
-  border-radius: 6px;
+.subagent-button.is-danger,
+.subagent-icon-button.is-danger {
+  border-color: color-mix(in srgb, var(--wb-red) 40%, var(--wb-line));
+  color: var(--wb-red);
+}
+
+.subagent-button.is-danger:hover:not(:disabled),
+.subagent-icon-button.is-danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--wb-red) 7%, #fff);
+}
+
+.subagent-results-count {
+  color: var(--wb-muted);
+  font-size: 12px;
+}
+
+.subagent-error,
+.subagent-status-message {
+  padding: 9px 11px;
+  border: 1px solid var(--wb-line-strong);
+  border-radius: 7px;
   font-size: 13px;
+  line-height: 1.45;
+  white-space: pre-line;
 }
 
-.subagent-count-bar .count-item {
-  display: flex;
-  align-items: center;
-  gap: 4px;
+.subagent-error {
+  border-color: color-mix(in srgb, var(--wb-red) 35%, var(--wb-line));
+  color: #a61b1b;
+  background: color-mix(in srgb, var(--wb-red) 7%, #fff);
 }
 
-.subagent-count-bar .count-value {
-  font-weight: 600;
+.subagent-status-message {
+  color: #236a40;
+  background: color-mix(in srgb, var(--wb-green) 7%, #fff);
+}
+
+.subagent-master-detail {
+  display: grid;
+  grid-template-columns: minmax(260px, 0.88fr) minmax(0, 1.42fr);
+  flex: 1;
+  min-width: 0;
+  min-height: 400px;
+  overflow: hidden;
+  border: 1px solid var(--wb-line);
+  border-radius: 9px;
+  background: var(--wb-panel);
+}
+
+.subagent-list-pane,
+.subagent-detail-pane {
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+}
+
+.subagent-list-pane {
+  padding: 7px;
+  border-right: 1px solid var(--wb-line);
+  background: var(--wb-panel-muted);
 }
 
 .subagent-list {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 3px;
 }
 
-.subagent-empty {
-  padding: 48px 16px;
-  text-align: center;
-  color: #555;
+.subagent-list-row {
+  min-width: 0;
+  border: 1px solid transparent;
+  border-radius: 7px;
 }
 
-.subagent-empty h3 {
-  margin: 0 0 8px;
-  font-size: 16px;
-  color: #1c1c1f;
+.subagent-list-row.is-selected {
+  border-color: color-mix(in srgb, var(--wb-blue) 35%, var(--wb-line));
+  background: var(--wb-blue-soft);
 }
 
-.subagent-error {
-  padding: 12px;
-  border: 1px solid var(--error);
+.subagent-list-row-select {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  min-height: 62px;
+  gap: 10px;
+  padding: 10px;
+  overflow: hidden;
+  border: 0;
   border-radius: 6px;
-  color: var(--error);
-  background: #fff0f2;
+  color: var(--wb-ink);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.subagent-list-row-select:hover {
+  background: color-mix(in srgb, var(--wb-bg) 72%, transparent);
+}
+
+.subagent-list-row-copy {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.subagent-list-row .skill-card-title {
+  overflow: hidden;
   font-size: 13px;
-  white-space: pre-line;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.subagent-list-row-meta {
+  overflow: hidden;
+  color: var(--wb-muted);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.subagent-list-row-marks {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 3px;
+}
+
+.subagent-status {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  min-height: 20px;
+  padding: 0 7px;
+  border: 1px solid var(--wb-line-strong);
+  border-radius: 999px;
+  color: var(--wb-muted);
+  background: var(--wb-panel);
+  font-size: 11px;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.subagent-status.is-enabled {
+  border-color: color-mix(in srgb, var(--wb-green) 32%, var(--wb-line));
+  color: #236a40;
+  background: color-mix(in srgb, var(--wb-green) 7%, #fff);
+}
+
+.subagent-status.is-update {
+  border-color: color-mix(in srgb, var(--wb-amber) 35%, var(--wb-line));
+  color: var(--wb-amber);
+  background: color-mix(in srgb, var(--wb-amber) 8%, #fff);
+}
+
+.subagent-target-badge {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  min-height: 20px;
+  padding: 0 6px;
+  border: 1px solid var(--wb-line-strong);
+  border-radius: 999px;
+  color: var(--wb-muted);
+  background: var(--wb-panel);
+  font-size: 10px;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.subagent-detail-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  padding: 28px;
+  background: var(--wb-panel);
+}
+
+.subagent-detail-empty {
+  align-items: center;
+  justify-content: center;
+  color: var(--wb-muted);
+  text-align: center;
+}
+
+.subagent-detail-empty p {
+  margin: 0;
+}
+
+.subagent-detail-back {
+  display: none;
+  align-items: center;
+  align-self: flex-start;
+  gap: 2px;
+  min-height: 30px;
+  padding: 0 4px;
+  border: 0;
+  border-radius: 6px;
+  color: var(--wb-muted);
+  background: transparent;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.subagent-detail-back:hover {
+  color: var(--wb-ink);
+  background: var(--wb-bg);
+}
+
+.subagent-detail-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.subagent-eyebrow {
+  margin: 0 0 6px;
+  color: var(--wb-faint);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+}
+
+.subagent-detail-header h2 {
+  margin: 0;
+  color: var(--wb-ink);
+  font-size: 20px;
+  letter-spacing: -0.02em;
+}
+
+.subagent-detail-header p:not(.subagent-eyebrow) {
+  max-width: 58ch;
+  margin: 8px 0 0;
+  color: var(--wb-muted);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.subagent-detail-facts {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  margin: 0;
+  border-top: 1px solid var(--wb-line);
+}
+
+.subagent-detail-facts > div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--wb-line);
+}
+
+.subagent-detail-facts > div:nth-child(odd) {
+  padding-right: 18px;
+}
+
+.subagent-detail-facts > div:nth-child(even) {
+  padding-left: 18px;
+  border-left: 1px solid var(--wb-line);
+}
+
+.subagent-detail-facts dt {
+  color: var(--wb-faint);
+  font-size: 11px;
+}
+
+.subagent-detail-facts dd {
+  overflow: hidden;
+  margin: 0;
+  color: var(--wb-ink);
+  font-size: 12px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
 }
 
 .subagent-toggle-group {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.subagent-toggle-group legend,
+.subagent-agent-state h3 {
+  padding: 0;
+  color: var(--wb-faint);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+.subagent-toggle-list,
+.subagent-agent-state > div {
   display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-top: 12px;
-  padding-top: 12px;
-  border-top: 1px solid var(--border);
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
-.subagent-toggle-label {
-  font-size: 12px;
-  color: #555;
-  margin-right: 8px;
-}
-
-.subagent-toggle {
+.subagent-agent-toggle,
+.subagent-agent-state-mark {
+  position: relative;
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  font-size: 12px;
-  cursor: pointer;
-  user-select: none;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border: 1px solid var(--wb-line-strong);
+  border-radius: 7px;
+  background: var(--wb-panel-muted);
 }
 
-.subagent-toggle input {
+.subagent-agent-toggle {
   cursor: pointer;
+}
+
+.subagent-agent-toggle.is-enabled,
+.subagent-agent-state-mark.is-enabled {
+  border-color: color-mix(in srgb, var(--wb-blue) 45%, var(--wb-line));
+  background: var(--wb-blue-soft);
+}
+
+.subagent-agent-toggle.is-unsupported {
+  cursor: not-allowed;
+  opacity: 0.62;
+}
+
+.subagent-agent-toggle input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+
+.subagent-agent-toggle:focus-within {
+  outline: 2px solid var(--wb-blue);
+  outline-offset: 2px;
+}
+
+.subagent-toggle-unsupported {
+  position: absolute;
+  right: 1px;
+  bottom: 1px;
+  padding: 1px 2px;
+  border-radius: 3px;
+  color: var(--wb-muted);
+  background: var(--wb-panel);
+  font-size: 8px;
+  line-height: 1;
+}
+
+.subagent-agent-state {
+  display: grid;
+  gap: 10px;
+}
+
+.subagent-agent-state h3 {
+  margin: 0;
+}
+
+.subagent-detail-actions {
+  flex-wrap: wrap;
+  padding-top: 2px;
+}
+
+.subagent-empty {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  min-height: 260px;
+  padding: 48px 16px;
+  color: var(--wb-muted);
+  text-align: center;
+}
+
+.subagent-empty h3,
+.subagent-empty p {
+  margin: 0;
+}
+
+.subagent-empty h3 {
+  color: var(--wb-ink);
+  font-size: 16px;
+}
+
+.subagent-backup-list,
+.subagent-repo-list {
+  display: grid;
+  gap: 8px;
+}
+
+.subagent-backup-row,
+.subagent-repo-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--wb-line);
+}
+
+.subagent-backup-row > div:first-child,
+.subagent-repo-row > div:first-child {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.subagent-backup-row strong,
+.subagent-repo-row strong {
+  color: var(--wb-ink);
+  font-size: 13px;
+}
+
+.subagent-backup-row span,
+.subagent-backup-row time,
+.subagent-repo-row span {
+  overflow: hidden;
+  color: var(--wb-muted);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.subagent-repo-manager,
+.subagent-repo-form {
+  display: grid;
+  gap: 8px;
+}
+
+.subagent-repo-form {
+  padding-bottom: 18px;
+  border-bottom: 1px solid var(--wb-line);
+}
+
+.subagent-repo-form label {
+  margin-top: 4px;
+  color: var(--wb-muted);
+  font-size: 12px;
+}
+
+.subagent-repo-form input {
+  width: 100%;
+  padding: 0 10px;
+}
+
+.subagent-repo-form .subagent-button {
+  justify-self: start;
+  margin-top: 4px;
+}
+
+.subagent-dialog-section-title {
+  margin: 0;
+  color: var(--wb-ink);
+  font-size: 13px;
+}
+
+.subagent-dialog-empty,
+.subagent-dialog-confirm-copy {
+  margin: 0;
+  color: var(--wb-muted);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.subagent-dialog-error {
+  margin: 0;
+  color: var(--wb-red);
+  font-size: 12px;
+}
+
+.subagent-install-unsupported {
+  margin: 0;
+  color: var(--wb-muted);
+  font-size: 12px;
+}
+
+.subagent-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+@media (max-width: 1199px) {
+  .subagent-panel {
+    min-height: auto;
+  }
+
+  .subagent-master-detail {
+    display: block;
+    min-height: 0;
+    border: 0;
+    border-radius: 0;
+  }
+
+  .subagent-list-pane {
+    min-height: 0;
+    padding: 0;
+    border-right: 0;
+    background: transparent;
+  }
+
+  .subagent-detail-pane {
+    display: none;
+    min-height: 0;
+    padding: 8px 0 20px;
+  }
+
+  .subagent-master-detail[data-detail-open='true'] .subagent-list-pane {
+    display: none;
+  }
+
+  .subagent-master-detail[data-detail-open='true'] .subagent-detail-pane {
+    display: flex;
+  }
+
+  .subagent-detail-back {
+    display: inline-flex;
+  }
+}
+
+@media (max-width: 640px) {
+  .subagent-summary-row {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .subagent-toolbar-actions {
+    width: 100%;
+  }
+
+  .subagent-toolbar-actions .subagent-button {
+    flex: 1 1 auto;
+  }
+
+  .subagent-search-field {
+    flex-basis: 100%;
+    max-width: none;
+  }
+
+  .subagent-select-field {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+
+  .subagent-select-field select {
+    width: 100%;
+    max-width: none;
+  }
+
+  .subagent-target-field {
+    flex: 1 1 100%;
+  }
+
+  .subagent-target-field select {
+    flex: 1 1 auto;
+    min-width: 0;
+    max-width: none;
+  }
+
+  .subagent-detail-facts {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .subagent-detail-facts > div:nth-child(odd),
+  .subagent-detail-facts > div:nth-child(even) {
+    padding-right: 0;
+    padding-left: 0;
+    border-left: 0;
+  }
+
+  .subagent-detail-pane {
+    gap: 16px;
+  }
+
+  .subagent-backup-row,
+  .subagent-repo-row {
+    align-items: flex-start;
+  }
+
+  .subagent-backup-row span,
+  .subagent-backup-row time,
+  .subagent-repo-row span {
+    max-width: 190px;
+  }
 }

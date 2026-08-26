@@ -3,6 +3,8 @@
 mod dao;
 mod schema;
 
+pub(crate) use dao::ProjectRemoval;
+
 use std::sync::Mutex;
 
 use rusqlite::Connection;
@@ -10,7 +12,7 @@ use rusqlite::Connection;
 use crate::config::get_db_path;
 use crate::error::AppError;
 
-pub const SCHEMA_VERSION: i32 = 1;
+pub const SCHEMA_VERSION: i32 = 2;
 
 macro_rules! lock_conn {
     ($mutex:expr) => {

@@ -31,6 +31,23 @@ export interface StructuredError {
   suggestion?: string;
 }
 
+// ========== Project / configuration-context DTOs ==========
+
+/** mirrors src-tauri/src/services/project.rs:ProjectSummary */
+export interface ProjectSummary {
+  /** 数据库生成的稳定不透明标识；展示名和路径都不是身份。 */
+  projectId: string;
+  displayName: string;
+  rootPath: string;
+}
+
+/** 只用于读取的配置上下文；`all` 不能作为 mutation target。 */
+export type ConfigContext =
+  { kind: 'all' } | { kind: 'global' } | { kind: 'project'; projectId: string };
+
+/** 三类资产 mutation 使用的完整 ownership target。 */
+export type ScopeTarget = { scope: 'global' } | { scope: 'project'; projectId: string };
+
 // ========== Skill DTOs ==========
 
 /** mirrors src-tauri/src/services/skill.rs:SkillApps */
@@ -55,6 +72,8 @@ export interface InstalledSkill {
   installedAt: number;
   contentHash?: string;
   updatedAt: number;
+  /** 记录的完整 ownership target；所有既有资产 mutation 必须从此处派生。 */
+  target: ScopeTarget;
 }
 
 /** mirrors src-tauri/src/services/skill.rs:DiscoverableSkill */
@@ -67,6 +86,8 @@ export interface DiscoverableSkill {
   repoOwner: string;
   repoName: string;
   repoBranch: string;
+  /** 当前明确 discovery target 下的安装状态。 */
+  installed: boolean;
 }
 
 /** mirrors src-tauri/src/services/skill.rs:SkillRepo */
@@ -128,16 +149,21 @@ export interface ImportSkillSelection {
   sourcePath?: string;
 }
 
-// ========== Prompt DTOs ==========
+// ========== Long-term instruction DTOs ==========
 
-/** mirrors src-tauri/src/services/prompt.rs:Prompt */
-export interface Prompt {
-  id: string;
-  name: string;
+/** 长期指令仅支持两个固定文档产物；Gemini CLI 不在此能力范围内。 */
+export type InstructionDocumentKind = 'claude' | 'agents';
+
+export type InstructionAgent = 'claude-code' | 'codex' | 'opencode';
+
+/** mirrors src-tauri/src/services/instruction.rs:InstructionDocument */
+export interface InstructionDocument {
+  kind: InstructionDocumentKind;
+  fileName: 'CLAUDE.md' | 'AGENTS.md';
+  appliesTo: InstructionAgent[];
+  target: ScopeTarget;
   content: string;
-  description?: string;
-  enabled: boolean;
-  createdAt?: number;
+  exists: boolean;
   updatedAt?: number;
 }
 
@@ -165,6 +191,8 @@ export interface InstalledSubagent {
   installedAt: number;
   contentHash?: string;
   updatedAt: number;
+  /** 记录的完整 ownership target；所有既有资产 mutation 必须从此处派生。 */
+  target: ScopeTarget;
 }
 
 /** mirrors src-tauri/src/services/subagent.rs:DiscoverableSubagent */
@@ -178,6 +206,8 @@ export interface DiscoverableSubagent {
   repoOwner: string;
   repoName: string;
   repoBranch: string;
+  /** 当前明确 discovery target 下的安装状态。 */
+  installed: boolean;
 }
 
 /** mirrors src-tauri/src/services/subagent.rs:SubagentRepo */

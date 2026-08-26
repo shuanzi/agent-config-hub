@@ -1,9 +1,16 @@
 // @vitest-environment jsdom
-import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, cleanup, waitFor } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
-import type { InstalledSubagent, SubagentUpdateInfo } from '../../../src/types';
+import type {
+  ConfigContext,
+  InstalledSubagent,
+  ProjectSummary,
+  ScopeTarget,
+  SubagentBackupEntry,
+  SubagentUpdateInfo,
+} from '../../../src/types';
 
 const mockApi = {
   getInstalledSubagents: vi.fn(),
@@ -23,13 +30,26 @@ const mockApi = {
 
 vi.mock('../../../src/lib/api/subagents', () => mockApi);
 
-const installedSubagent = (id: string, name: string): InstalledSubagent => ({
+const globalContext: ConfigContext = { kind: 'global' };
+const allContext: ConfigContext = { kind: 'all' };
+const globalTarget: ScopeTarget = { scope: 'global' };
+const projectTarget: ScopeTarget = { scope: 'project', projectId: 'project-alpha' };
+const projects: readonly ProjectSummary[] = [
+  { projectId: 'project-alpha', displayName: '项目 Alpha', rootPath: '/workspaces/alpha' },
+];
+
+const installedSubagent = (
+  id: string,
+  name: string,
+  target: ScopeTarget = globalTarget,
+): InstalledSubagent => ({
   id,
   name,
   directory: id,
   apps: { claudeCode: true, codex: false, geminiCli: false, opencode: false },
   installedAt: 1,
   updatedAt: 0,
+  target,
 });
 
 async function loadPanel() {
@@ -43,53 +63,194 @@ function createWrapper(queryClient: QueryClient) {
   };
 }
 
-describe('InstalledSubagentsPanel 全部更新部分失败', () => {
+function renderPanel(
+  Panel: Awaited<ReturnType<typeof loadPanel>>,
+  queryClient: QueryClient,
+  context: ConfigContext = globalContext,
+  activeApp: 'claude-code' | 'codex' = 'claude-code',
+) {
+  return render(<Panel activeApp={activeApp} context={context} projects={projects} />, {
+    wrapper: createWrapper(queryClient),
+  });
+}
+
+describe('InstalledSubagentsPanel scope contracts', () => {
   let queryClient: QueryClient;
 
   beforeEach(() => {
-    queryClient = new QueryClient({
-      defaultOptions: { queries: { retry: false } },
-    });
+    queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     Object.values(mockApi).forEach((fn) => fn.mockReset());
     mockApi.getInstalledSubagents.mockResolvedValue([
       installedSubagent('sub-a', 'SubA'),
       installedSubagent('sub-b', 'SubB'),
     ]);
     mockApi.getSubagentBackups.mockResolvedValue([]);
-    const updates: SubagentUpdateInfo[] = [
-      { id: 'sub-a', name: 'SubA', remoteHash: 'h1' },
-      { id: 'sub-b', name: 'SubB', remoteHash: 'h2' },
-    ];
-    mockApi.checkSubagentUpdates.mockResolvedValue(updates);
-    mockApi.updateSubagent.mockImplementation((id: string) => {
-      if (id === 'sub-a') {
-        return Promise.resolve(installedSubagent('sub-a', 'SubA'));
-      }
-      return Promise.reject(
-        new Error(
-          JSON.stringify({ code: 'DOWNLOAD_FAILED', context: {}, suggestion: 'checkNetwork' }),
-        ),
-      );
-    });
   });
 
-  afterEach(() => {
-    cleanup();
-  });
+  afterEach(() => cleanup());
 
-  it('一成功一失败时摘要同时包含成功数与失败明细', async () => {
+  it('全部上下文未选操作目标时不检查更新；选择项目后更新传记录 target', async () => {
+    const projectSubagent = installedSubagent('project-sub', 'Project Sub', projectTarget);
+    mockApi.getInstalledSubagents.mockResolvedValue([projectSubagent]);
+    mockApi.checkSubagentUpdates.mockResolvedValue([
+      { id: 'project-sub', name: 'Project Sub', remoteHash: 'next' },
+    ] satisfies SubagentUpdateInfo[]);
+    mockApi.updateSubagent.mockResolvedValue(projectSubagent);
     const Panel = await loadPanel();
-    render(<Panel activeApp="claude-code" />, { wrapper: createWrapper(queryClient) });
+    renderPanel(Panel, queryClient, allContext);
 
-    fireEvent.click(await screen.findByRole('button', { name: /检查更新/ }));
-    const updateAllButton = await screen.findByRole('button', { name: /全部更新 \(2\)/ });
-    fireEvent.click(updateAllButton);
+    fireEvent.click(await screen.findByRole('button', { name: '检查更新' }));
+    expect(mockApi.checkSubagentUpdates).not.toHaveBeenCalled();
+    expect(screen.getByRole('alert').textContent).toContain(
+      '请先选择全局配置或一个项目配置作为操作目标。',
+    );
 
-    await waitFor(() => {
-      const error = document.querySelector('.subagent-error');
-      expect(error?.textContent).toContain('成功更新 1 个 Subagent');
-      expect(error?.textContent).toContain('SubB');
-      expect(error?.textContent).toContain('下载仓库失败');
+    fireEvent.change(screen.getByLabelText('选择 Subagent 操作目标'), {
+      target: { value: 'project:project-alpha' },
     });
+    fireEvent.click(screen.getByRole('button', { name: '检查更新' }));
+    fireEvent.click(await screen.findByRole('button', { name: /Project Sub/ }));
+    fireEvent.click(
+      within(await screen.findByLabelText('Project Sub 详情')).getByRole('button', {
+        name: '更新',
+      }),
+    );
+
+    await waitFor(() =>
+      expect(mockApi.updateSubagent).toHaveBeenCalledWith('project-sub', projectTarget),
+    );
+  });
+
+  it('toggle 和卸载从已安装行 target 派生', async () => {
+    const projectSubagent = installedSubagent('project-sub', 'Project Sub', projectTarget);
+    mockApi.getInstalledSubagents.mockResolvedValue([projectSubagent]);
+    mockApi.uninstallSubagent.mockResolvedValue({ backupPath: '/tmp/project-sub' });
+    const Panel = await loadPanel();
+    renderPanel(Panel, queryClient, allContext);
+
+    fireEvent.click(await screen.findByRole('button', { name: /Project Sub/ }));
+    const detail = await screen.findByLabelText('Project Sub 详情');
+    const claudeToggle = within(detail).getByRole('checkbox', { name: 'Claude Code：已启用' });
+    fireEvent.click(claudeToggle);
+    await waitFor(() =>
+      expect(mockApi.toggleSubagentApp).toHaveBeenCalledWith(
+        'project-sub',
+        projectTarget,
+        'claude-code',
+        false,
+      ),
+    );
+
+    fireEvent.click(within(detail).getByRole('button', { name: '卸载' }));
+    fireEvent.click(
+      within(await screen.findByRole('dialog', { name: '确认卸载' })).getByRole('button', {
+        name: '卸载',
+      }),
+    );
+    await waitFor(() =>
+      expect(mockApi.uninstallSubagent).toHaveBeenCalledWith('project-sub', projectTarget),
+    );
+  });
+
+  it('项目级 Codex toggle 禁用且不调用 mutation', async () => {
+    const projectSubagent = installedSubagent('project-sub', 'Project Sub', projectTarget);
+    mockApi.getInstalledSubagents.mockResolvedValue([projectSubagent]);
+    const Panel = await loadPanel();
+    renderPanel(Panel, queryClient, allContext, 'codex');
+
+    fireEvent.click(await screen.findByRole('button', { name: /Project Sub/ }));
+    const codexToggle = await screen.findByRole('checkbox', { name: 'Codex：项目配置不支持' });
+    expect(codexToggle).toHaveProperty('disabled', true);
+    fireEvent.click(codexToggle);
+    expect(mockApi.toggleSubagentApp).not.toHaveBeenCalled();
+  });
+
+  it('备份读取与恢复、删除均使用备份记录 target', async () => {
+    const backup: SubagentBackupEntry = {
+      backupId: 'backup-project-sub',
+      backupPath: '/tmp/backup-project-sub',
+      createdAt: 1,
+      subagent: installedSubagent('project-sub', 'Project Sub', projectTarget),
+    };
+    mockApi.getSubagentBackups.mockResolvedValue([backup]);
+    mockApi.restoreSubagentBackup.mockResolvedValue(backup.subagent);
+    mockApi.deleteSubagentBackup.mockResolvedValue(undefined);
+    const Panel = await loadPanel();
+    renderPanel(Panel, queryClient, allContext);
+
+    expect((await screen.findByRole('button', { name: '备份' })).hasAttribute('disabled')).toBe(
+      true,
+    );
+    expect(mockApi.getSubagentBackups).not.toHaveBeenCalled();
+
+    fireEvent.change(screen.getByLabelText('选择 Subagent 操作目标'), {
+      target: { value: 'project:project-alpha' },
+    });
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: '备份' }).hasAttribute('disabled')).toBe(false),
+    );
+    fireEvent.click(screen.getByRole('button', { name: '备份' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Subagent 备份' });
+    expect(mockApi.getSubagentBackups).toHaveBeenCalledWith(projectTarget);
+    fireEvent.click(await within(dialog).findByRole('button', { name: '恢复' }));
+    await waitFor(() =>
+      expect(mockApi.restoreSubagentBackup).toHaveBeenCalledWith(
+        'backup-project-sub',
+        projectTarget,
+      ),
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '备份' }));
+    const reopened = await screen.findByRole('dialog', { name: 'Subagent 备份' });
+    fireEvent.click(
+      await within(reopened).findByRole('button', { name: '删除 Project Sub 的备份' }),
+    );
+    await waitFor(() =>
+      expect(mockApi.deleteSubagentBackup).toHaveBeenCalledWith(
+        'backup-project-sub',
+        projectTarget,
+      ),
+    );
+  });
+
+  it('上下文切换清空详情选择并回到列表表面', async () => {
+    const Panel = await loadPanel();
+    const { rerender } = renderPanel(Panel, queryClient);
+
+    fireEvent.click(await screen.findByRole('button', { name: /SubA/ }));
+    await screen.findByLabelText('SubA 详情');
+    rerender(<Panel activeApp="claude-code" context={allContext} projects={projects} />);
+
+    await waitFor(() => expect(screen.queryByLabelText('SubA 详情')).toBeNull());
+    expect(screen.getByLabelText('已安装 Subagents')).toBeTruthy();
+  });
+});
+
+describe('InstalledSubagentsPanel 查询错误', () => {
+  let queryClient: QueryClient;
+
+  beforeEach(() => {
+    queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    Object.values(mockApi).forEach((fn) => fn.mockReset());
+  });
+
+  afterEach(() => cleanup());
+
+  it('将已安装查询的项目目录错误呈现为可读 alert', async () => {
+    mockApi.getInstalledSubagents.mockRejectedValue(
+      new Error(
+        JSON.stringify({
+          code: 'PROJECT_ROOT_UNAVAILABLE',
+          context: { projectId: 'project-alpha' },
+          suggestion: 'relinkProject',
+        }),
+      ),
+    );
+    const Panel = await loadPanel();
+    renderPanel(Panel, queryClient, { kind: 'project', projectId: 'project-alpha' });
+
+    const alert = await screen.findByRole('alert');
+    expect(alert.textContent).toContain('项目目录不可用');
+    expect(alert.textContent).not.toContain('PROJECT_ROOT_UNAVAILABLE');
   });
 });

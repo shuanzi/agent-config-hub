@@ -1,89 +1,44 @@
-import { useState } from 'react';
-import { ExternalLink, Download, Trash2, Loader2 } from 'lucide-react';
+import type { Ref } from 'react';
 import type { DiscoverableSubagent } from '../../types';
 
-export type SubagentCardSubagent = DiscoverableSubagent & { installed?: boolean };
+export type SubagentCardSubagent = DiscoverableSubagent & {
+  installed: boolean;
+  installedId: string | null;
+};
 
 interface SubagentCardProps {
   subagent: SubagentCardSubagent;
-  onInstall: (key: string) => Promise<void>;
-  onUninstall: (key: string) => void;
-  uninstallPending?: boolean;
+  selected: boolean;
+  onSelect: (key: string) => void;
+  selectionRef?: Ref<HTMLButtonElement>;
 }
 
-export function SubagentCard({
-  subagent,
-  onInstall,
-  onUninstall,
-  uninstallPending = false,
-}: SubagentCardProps) {
-  const [loading, setLoading] = useState(false);
-
-  const handleInstall = async () => {
-    setLoading(true);
-    try {
-      await onInstall(subagent.key);
-    } finally {
-      setLoading(false);
-    }
-  };
-
+/**
+ * 发现页的高密度条目。操作统一放在右侧详情，避免在窄窗口里把行撑成卡片。
+ */
+export function SubagentCard({ subagent, selected, onSelect, selectionRef }: SubagentCardProps) {
   return (
-    <article className="skill-card" data-subagent-key={subagent.key}>
-      <div className="skill-card-header">
-        <div>
-          <h3 className="skill-card-title">{subagent.name}</h3>
-          <div className="skill-card-meta">
-            {subagent.path !== subagent.name && (
-              <span className="skill-card-badge">{subagent.path}</span>
-            )}
-            <span className="skill-card-badge">
-              {subagent.repoOwner}/{subagent.repoName}
-            </span>
-            {subagent.installed && (
-              <span
-                className="skill-card-badge"
-                style={{ background: '#e6f4ea', borderColor: '#b7dfb9', color: '#1e8e3e' }}
-              >
-                已安装
-              </span>
-            )}
-          </div>
-        </div>
-      </div>
-      {subagent.description && <p className="skill-card-desc">{subagent.description}</p>}
-      <div className="skill-card-actions">
-        {subagent.readmeUrl ? (
-          <a
-            className="skill-card-badge"
-            href={subagent.readmeUrl}
-            target="_blank"
-            rel="noreferrer"
-            style={{ textDecoration: 'none', color: 'inherit' }}
-          >
-            <ExternalLink size={12} />
-            README
-          </a>
-        ) : (
-          <span className="skill-card-badge">README</span>
-        )}
-        {subagent.installed ? (
-          <button
-            type="button"
-            className="uninstall"
-            onClick={() => onUninstall(subagent.key)}
-            disabled={loading || uninstallPending}
-          >
-            {uninstallPending ? <Loader2 size={14} className="spin" /> : <Trash2 size={14} />}
-            {uninstallPending ? '卸载中…' : '卸载'}
-          </button>
-        ) : (
-          <button type="button" className="install" onClick={handleInstall} disabled={loading}>
-            {loading ? <Loader2 size={14} className="spin" /> : <Download size={14} />}
-            {loading ? '安装中…' : '安装'}
-          </button>
-        )}
-      </div>
+    <article
+      className={selected ? 'subagent-list-row is-selected' : 'subagent-list-row'}
+      data-subagent-key={subagent.key}
+    >
+      <button
+        type="button"
+        className="subagent-list-row-select"
+        ref={selectionRef}
+        onClick={() => onSelect(subagent.key)}
+        aria-current={selected ? 'true' : undefined}
+      >
+        <span className="subagent-list-row-copy">
+          <span className="skill-card-title">{subagent.name}</span>
+          <span className="subagent-list-row-meta">
+            {subagent.directory} · {subagent.repoOwner}/{subagent.repoName}
+          </span>
+        </span>
+        <span className={subagent.installed ? 'subagent-status is-enabled' : 'subagent-status'}>
+          {subagent.installed ? '已安装' : '可安装'}
+        </span>
+      </button>
     </article>
   );
 }

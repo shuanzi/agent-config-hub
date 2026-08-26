@@ -1,212 +1,623 @@
-import { useMemo, useState } from 'react';
-import { RefreshCw, Search, Settings } from 'lucide-react';
-import type { AgentType, DiscoverableSubagent } from '../../types';
+import { useEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import {
-  useDiscoverableSubagents,
-  useInstalledSubagents,
-  useSubagentRepos,
-  useInstallSubagent,
-  useUninstallSubagent,
+  ChevronLeft,
+  Download,
+  ExternalLink,
+  Loader2,
+  RefreshCw,
+  Search,
+  Settings,
+  Trash2,
+} from 'lucide-react';
+import type {
+  AgentType,
+  ConfigContext,
+  InstalledSubagent,
+  ProjectSummary,
+  ScopeTarget,
+} from '../../types';
+import {
   useAddSubagentRepo,
+  useDiscoverableSubagents,
+  useInstallSubagent,
+  useInstalledSubagents,
   useRemoveSubagentRepo,
+  useSubagentRepos,
+  useUninstallSubagent,
 } from '../../hooks/useSubagents';
-import { SubagentCard } from './SubagentCard';
-import { RepoManagerPanel } from './RepoManagerPanel';
 import { toUserError } from '../../lib/errors';
+import { AgentBrandMark, agentLabels, WORKBENCH_AGENTS } from '../workbench/AgentBrandMark';
+import { FocusedDialog } from '../workbench/FocusedDialog';
+import { RepoManagerPanel } from './RepoManagerPanel';
+import { SubagentCard, type SubagentCardSubagent } from './SubagentCard';
 import './subagents.css';
 
 interface SubagentsDiscoveryPageProps {
   activeApp: AgentType;
+  context: ConfigContext;
+  projects: readonly ProjectSummary[];
 }
 
 type StatusFilter = 'all' | 'installed' | 'uninstalled';
+type Notice = { tone: 'error' | 'status'; message: string } | null;
+type SubagentItem = SubagentCardSubagent;
 
-export function SubagentsDiscoveryPage({ activeApp }: SubagentsDiscoveryPageProps) {
+function targetForContext(context: ConfigContext): ScopeTarget | null {
+  if (context.kind === 'global') return { scope: 'global' };
+  if (context.kind === 'project') return { scope: 'project', projectId: context.projectId };
+  return null;
+}
+
+function contextKey(context: ConfigContext): string {
+  return context.kind === 'project' ? `project:${context.projectId}` : context.kind;
+}
+
+function sameTarget(left: ScopeTarget, right: ScopeTarget): boolean {
+  return (
+    left.scope === right.scope &&
+    (left.scope !== 'project' || (right.scope === 'project' && left.projectId === right.projectId))
+  );
+}
+
+function targetValue(target: ScopeTarget | null): string {
+  if (target === null) return '';
+  return target.scope === 'global' ? 'global' : `project:${target.projectId}`;
+}
+
+function targetFromValue(value: string): ScopeTarget | null {
+  if (value === 'global') return { scope: 'global' };
+  return value.startsWith('project:') ? { scope: 'project', projectId: value.slice(8) } : null;
+}
+
+function messageFor(error: unknown): string {
+  const userError = toUserError(error);
+  return [userError.message, userError.suggestion].filter(Boolean).join('\n');
+}
+
+function SubagentNotice({ notice }: { notice: Notice }) {
+  if (notice === null) return null;
+  return (
+    <div
+      className={notice.tone === 'error' ? 'subagent-error' : 'subagent-status-message'}
+      role={notice.tone === 'error' ? 'alert' : 'status'}
+      aria-live={notice.tone === 'error' ? 'assertive' : 'polite'}
+    >
+      {notice.message}
+    </div>
+  );
+}
+
+function mapAppField(app: AgentType): keyof InstalledSubagent['apps'] {
+  switch (app) {
+    case 'claude-code':
+      return 'claudeCode';
+    case 'codex':
+      return 'codex';
+    case 'gemini-cli':
+      return 'geminiCli';
+    case 'opencode':
+      return 'opencode';
+  }
+}
+
+function DiscoverableSubagentDetail({
+  subagent,
+  installedSubagent,
+  installPending,
+  installUnsupported,
+  uninstallPending,
+  onBack,
+  backButtonRef,
+  onInstall,
+  onUninstall,
+}: {
+  subagent: SubagentItem | null;
+  installedSubagent: InstalledSubagent | null;
+  installPending: boolean;
+  installUnsupported: boolean;
+  uninstallPending: boolean;
+  onBack: () => void;
+  backButtonRef: RefObject<HTMLButtonElement>;
+  onInstall: () => void;
+  onUninstall: () => void;
+}) {
+  if (subagent === null) {
+    return (
+      <aside className="subagent-detail-pane subagent-detail-empty" aria-label="Subagent 详情">
+        <p>选择左侧 Subagent 查看详情。</p>
+      </aside>
+    );
+  }
+
+  return (
+    <aside
+      className="subagent-detail-pane"
+      aria-label={`${subagent.name} 详情`}
+      data-subagent-key={subagent.key}
+      data-subagent-detail-key={subagent.key}
+    >
+      <button ref={backButtonRef} type="button" className="subagent-detail-back" onClick={onBack}>
+        <ChevronLeft size={16} aria-hidden="true" />
+        返回列表
+      </button>
+      <header className="subagent-detail-header">
+        <div>
+          <p className="subagent-eyebrow">
+            {subagent.installed ? '已安装 Subagent' : '发现 Subagent'}
+          </p>
+          <h2 className="skill-card-title">{subagent.name}</h2>
+          {subagent.description && <p>{subagent.description}</p>}
+        </div>
+        <span className={subagent.installed ? 'subagent-status is-enabled' : 'subagent-status'}>
+          {subagent.installed ? '已安装' : '可安装'}
+        </span>
+      </header>
+
+      <dl className="subagent-detail-facts">
+        <div>
+          <dt>目录</dt>
+          <dd>{subagent.directory}</dd>
+        </div>
+        <div>
+          <dt>路径</dt>
+          <dd>{subagent.path}</dd>
+        </div>
+        <div>
+          <dt>仓库</dt>
+          <dd>
+            {subagent.repoOwner}/{subagent.repoName}
+          </dd>
+        </div>
+        <div>
+          <dt>分支</dt>
+          <dd>{subagent.repoBranch || 'main'}</dd>
+        </div>
+      </dl>
+
+      {installedSubagent !== null && (
+        <section className="subagent-agent-state" aria-label="已启用 Agent">
+          <h3>已启用 Agent</h3>
+          <div>
+            {WORKBENCH_AGENTS.map((app) => {
+              const enabled = installedSubagent.apps[mapAppField(app)];
+              return (
+                <span
+                  key={app}
+                  className={
+                    enabled ? 'subagent-agent-state-mark is-enabled' : 'subagent-agent-state-mark'
+                  }
+                  title={`${agentLabels[app]}：${enabled ? '已启用' : '未启用'}`}
+                  data-subagent-agent-state={app}
+                >
+                  <AgentBrandMark app={app} size={18} />
+                  <span className="subagent-visually-hidden">
+                    {agentLabels[app]}：{enabled ? '已启用' : '未启用'}
+                  </span>
+                </span>
+              );
+            })}
+          </div>
+        </section>
+      )}
+
+      <div className="subagent-detail-actions">
+        {subagent.readmeUrl && (
+          <a className="subagent-button" href={subagent.readmeUrl} target="_blank" rel="noreferrer">
+            <ExternalLink size={14} aria-hidden="true" />
+            README
+          </a>
+        )}
+        {subagent.installed ? (
+          <button
+            type="button"
+            className="subagent-button is-danger uninstall"
+            onClick={onUninstall}
+            disabled={uninstallPending}
+          >
+            {uninstallPending ? (
+              <Loader2 size={14} className="spin" aria-hidden="true" />
+            ) : (
+              <Trash2 size={14} aria-hidden="true" />
+            )}
+            {uninstallPending ? '卸载中…' : '卸载'}
+          </button>
+        ) : (
+          <>
+            {installUnsupported && (
+              <p
+                id="subagent-install-unsupported"
+                className="subagent-install-unsupported"
+                role="status"
+              >
+                不支持 Codex 项目级 Subagent
+              </p>
+            )}
+            <button
+              type="button"
+              className="subagent-button is-primary install"
+              onClick={onInstall}
+              disabled={installPending || installUnsupported}
+              aria-describedby={installUnsupported ? 'subagent-install-unsupported' : undefined}
+            >
+              {installPending ? (
+                <Loader2 size={14} className="spin" aria-hidden="true" />
+              ) : (
+                <Download size={14} aria-hidden="true" />
+              )}
+              {installPending ? '安装中…' : '安装'}
+            </button>
+          </>
+        )}
+      </div>
+    </aside>
+  );
+}
+
+export function SubagentsDiscoveryPage({
+  activeApp,
+  context,
+  projects,
+}: SubagentsDiscoveryPageProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [filterRepo, setFilterRepo] = useState<string>('all');
   const [filterStatus, setFilterStatus] = useState<StatusFilter>('all');
   const [repoManagerOpen, setRepoManagerOpen] = useState(false);
-  const [errorMessage, setErrorMessage] = useState<string>('');
-  const [uninstallTarget, setUninstallTarget] = useState<SubagentItem | null>(null);
+  const [notice, setNotice] = useState<Notice>(null);
+  const [uninstallTarget, setUninstallTarget] = useState<InstalledSubagent | null>(null);
+  const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  const [detailOpen, setDetailOpen] = useState(false);
+  const [allDiscoveryTarget, setAllDiscoveryTarget] = useState<ScopeTarget | null>(null);
+  const initializedSelectionRef = useRef(false);
+  const selectedRowRef = useRef<HTMLButtonElement>(null);
+  const detailBackButtonRef = useRef<HTMLButtonElement>(null);
+  const panelRef = useRef<HTMLElement>(null);
+  const previousContextKeyRef = useRef(contextKey(context));
+  const scopedTarget = targetForContext(context);
+  const discoveryTarget = scopedTarget ?? allDiscoveryTarget;
+  const discoveryTargetValue = targetValue(discoveryTarget);
+  const previousDiscoveryTargetRef = useRef(discoveryTargetValue);
 
   const {
     data: discoverableSubagents,
     isLoading: loadingDiscoverable,
     refetch: refetchDiscoverable,
-  } = useDiscoverableSubagents();
-  const { data: installedSubagents } = useInstalledSubagents();
+  } = useDiscoverableSubagents(discoveryTarget, activeApp);
+  const { data: installedSubagents } = useInstalledSubagents(context, activeApp);
   const { data: repos = [] } = useSubagentRepos();
-
   const installMutation = useInstallSubagent();
   const uninstallMutation = useUninstallSubagent();
   const addRepoMutation = useAddSubagentRepo();
   const removeRepoMutation = useRemoveSubagentRepo();
 
-  // 以完整身份 `{owner}/{repo}:{path}` 标记已安装：同仓库允许存在
-  // a/reviewer.md 与 b/reviewer.md 这类 stem 相同的文件，不能按
-  // directory+repo 折叠。映射到已安装 id 供卸载使用。
-  const installedIdsByKey = useMemo(() => {
-    const map = new Map<string, string>();
-    for (const s of installedSubagents ?? []) {
-      map.set(s.id.toLowerCase(), s.id);
+  // 完整身份 `{owner}/{repo}:{path}` 是唯一关联键；同名 stem 不能合并。
+  const installedByKey = useMemo(() => {
+    const map = new Map<string, InstalledSubagent>();
+    for (const subagent of installedSubagents ?? []) {
+      if (discoveryTarget === null || !sameTarget(subagent.target, discoveryTarget)) continue;
+      map.set(subagent.id.toLowerCase(), subagent);
     }
     return map;
-  }, [installedSubagents]);
+  }, [discoveryTarget, installedSubagents]);
 
-  type SubagentItem = DiscoverableSubagent & { installed: boolean; installedId: string | null };
-
-  const subagents: SubagentItem[] = useMemo(() => {
+  const subagents = useMemo<SubagentItem[]>(() => {
     if (discoverableSubagents === undefined) return [];
     return discoverableSubagents.map((subagent) => {
-      const installedId = installedIdsByKey.get(subagent.key.toLowerCase()) ?? null;
-      return { ...subagent, installed: installedId !== null, installedId };
+      const installedSubagent = installedByKey.get(subagent.key.toLowerCase()) ?? null;
+      return {
+        ...subagent,
+        installed: subagent.installed,
+        installedId: installedSubagent?.id ?? null,
+      };
     });
-  }, [discoverableSubagents, installedIdsByKey]);
+  }, [discoverableSubagents, installedByKey]);
 
   const repoOptions = useMemo(() => {
-    const repoSet = new Set<string>();
-    subagents.forEach((s) => {
-      if (s.repoOwner && s.repoName) {
-        repoSet.add(`${s.repoOwner}/${s.repoName}`);
-      }
-    });
-    return Array.from(repoSet).sort();
+    const options = new Set<string>();
+    for (const subagent of subagents) options.add(`${subagent.repoOwner}/${subagent.repoName}`);
+    return [...options].sort();
   }, [subagents]);
 
   const filteredSubagents = useMemo(() => {
     let result = subagents;
     if (filterRepo !== 'all') {
-      result = result.filter((s) => `${s.repoOwner}/${s.repoName}` === filterRepo);
+      result = result.filter(
+        (subagent) => `${subagent.repoOwner}/${subagent.repoName}` === filterRepo,
+      );
     }
-    if (filterStatus === 'installed') {
-      result = result.filter((s) => s.installed);
-    } else if (filterStatus === 'uninstalled') {
-      result = result.filter((s) => !s.installed);
-    }
+    if (filterStatus === 'installed') result = result.filter((subagent) => subagent.installed);
+    if (filterStatus === 'uninstalled') result = result.filter((subagent) => !subagent.installed);
+
     const query = searchQuery.trim().toLowerCase();
-    if (query) {
-      result = result.filter((s) => {
-        const name = s.name.toLowerCase();
-        const repo = `${s.repoOwner}/${s.repoName}`.toLowerCase();
-        return name.includes(query) || repo.includes(query);
-      });
+    if (!query) return result;
+    return result.filter((subagent) =>
+      [
+        subagent.name,
+        subagent.key,
+        subagent.directory,
+        subagent.path,
+        subagent.repoOwner,
+        subagent.repoName,
+      ].some((value) => value.toLowerCase().includes(query)),
+    );
+  }, [filterRepo, filterStatus, searchQuery, subagents]);
+
+  useEffect(() => {
+    if (discoverableSubagents === undefined) return;
+    if (!initializedSelectionRef.current) {
+      initializedSelectionRef.current = true;
+      if (filteredSubagents.length > 0) setSelectedKey(filteredSubagents[0].key);
+      return;
     }
-    return result;
-  }, [subagents, filterRepo, filterStatus, searchQuery]);
+    if (
+      selectedKey !== null &&
+      !filteredSubagents.some((subagent) => subagent.key === selectedKey)
+    ) {
+      setSelectedKey(null);
+      setDetailOpen(false);
+    }
+  }, [discoverableSubagents, filteredSubagents, selectedKey]);
+
+  useEffect(() => {
+    if (
+      uninstallTarget !== null &&
+      !(installedSubagents ?? []).some(
+        (subagent) =>
+          subagent.id === uninstallTarget.id && sameTarget(subagent.target, uninstallTarget.target),
+      )
+    ) {
+      setUninstallTarget(null);
+    }
+  }, [installedSubagents, uninstallTarget]);
+
+  const selectedSubagent = useMemo(
+    () => filteredSubagents.find((subagent) => subagent.key === selectedKey) ?? null,
+    [filteredSubagents, selectedKey],
+  );
+  const selectedInstalledSubagent = useMemo(
+    () =>
+      selectedSubagent?.installedId === null ||
+      selectedSubagent === null ||
+      discoveryTarget === null
+        ? null
+        : (installedSubagents?.find(
+            (subagent) =>
+              subagent.id === selectedSubagent.installedId &&
+              sameTarget(subagent.target, discoveryTarget),
+          ) ?? null),
+    [discoveryTarget, installedSubagents, selectedSubagent],
+  );
+
+  useEffect(() => {
+    if (detailOpen && selectedSubagent !== null) detailBackButtonRef.current?.focus();
+  }, [detailOpen, selectedSubagent]);
+
+  useEffect(() => {
+    const nextContextKey = contextKey(context);
+    if (previousContextKeyRef.current === nextContextKey) return;
+
+    previousContextKeyRef.current = nextContextKey;
+    setAllDiscoveryTarget(null);
+    setSelectedKey(null);
+    setDetailOpen(false);
+    setUninstallTarget(null);
+    window.setTimeout(() => panelRef.current?.focus(), 0);
+  }, [context]);
+
+  useEffect(() => {
+    if (
+      allDiscoveryTarget?.scope === 'project' &&
+      !projects.some((project) => project.projectId === allDiscoveryTarget.projectId)
+    ) {
+      setAllDiscoveryTarget(null);
+    }
+  }, [allDiscoveryTarget, projects]);
+
+  useEffect(() => {
+    if (previousDiscoveryTargetRef.current === discoveryTargetValue) return;
+
+    previousDiscoveryTargetRef.current = discoveryTargetValue;
+    setSelectedKey(null);
+    setDetailOpen(false);
+    setUninstallTarget(null);
+    window.setTimeout(() => panelRef.current?.focus(), 0);
+  }, [discoveryTargetValue]);
+
+  const requireDiscoveryTarget = (): ScopeTarget | null => {
+    if (discoveryTarget !== null) return discoveryTarget;
+    setNotice({ tone: 'error', message: '请先选择全局配置或一个项目配置作为发现和安装目标。' });
+    return null;
+  };
+
+  const selectSubagent = (key: string) => {
+    setNotice(null);
+    setSelectedKey(key);
+    setDetailOpen(true);
+  };
+
+  const closeDetail = () => {
+    setDetailOpen(false);
+    window.setTimeout(() => selectedRowRef.current?.focus(), 0);
+  };
 
   const handleInstall = async (key: string) => {
-    const subagent = subagents.find((s) => s.key === key);
+    const subagent = subagents.find((candidate) => candidate.key === key);
     if (subagent === undefined) return;
-    setErrorMessage('');
+    setNotice(null);
+    const target = requireDiscoveryTarget();
+    if (target === null) return;
+    if (target.scope === 'project' && activeApp === 'codex') {
+      setNotice({ tone: 'error', message: '不支持 Codex 项目级 Subagent。' });
+      return;
+    }
     try {
-      await installMutation.mutateAsync({ subagent, currentApp: activeApp });
+      const { installedId: _installedId, ...discoverable } = subagent;
+      await installMutation.mutateAsync({ subagent: discoverable, target, currentApp: activeApp });
+      setNotice({ tone: 'status', message: `已安装 ${subagent.name}。` });
     } catch (error) {
-      const userError = toUserError(error);
-      setErrorMessage([userError.message, userError.suggestion].filter(Boolean).join('\n'));
+      setNotice({ tone: 'error', message: messageFor(error) });
     }
   };
 
   const handleUninstall = (key: string) => {
-    const subagent = subagents.find((s) => s.key === key);
-    if (subagent === undefined || subagent.installedId === null) return;
-    setErrorMessage('');
-    setUninstallTarget(subagent);
+    const subagent = subagents.find((candidate) => candidate.key === key);
+    if (subagent === undefined || subagent.installedId === null || discoveryTarget === null) return;
+    const installedSubagent = (installedSubagents ?? []).find(
+      (candidate) =>
+        candidate.id === subagent.installedId && sameTarget(candidate.target, discoveryTarget),
+    );
+    if (installedSubagent === undefined) return;
+    setNotice(null);
+    setUninstallTarget(installedSubagent);
   };
 
   const handleConfirmUninstall = async () => {
-    const subagent = uninstallTarget;
-    if (subagent === null || subagent.installedId === null) return;
+    if (uninstallTarget === null) return;
+    const { id, name, target } = uninstallTarget;
     setUninstallTarget(null);
-    setErrorMessage('');
+    setNotice(null);
     try {
-      await uninstallMutation.mutateAsync(subagent.installedId);
-      setErrorMessage(`已卸载 ${subagent.name}。`);
+      await uninstallMutation.mutateAsync({ id, target });
+      setNotice({ tone: 'status', message: `已卸载 ${name}。` });
     } catch (error) {
-      const userError = toUserError(error);
-      setErrorMessage([userError.message, userError.suggestion].filter(Boolean).join('\n'));
+      setNotice({ tone: 'error', message: messageFor(error) });
     }
   };
 
   const handleAddRepo = async (repo: Parameters<typeof addRepoMutation.mutateAsync>[0]) => {
-    setErrorMessage('');
+    setNotice(null);
     try {
       await addRepoMutation.mutateAsync(repo);
-      await refetchDiscoverable();
+      if (discoveryTarget !== null) await refetchDiscoverable();
+      setNotice({ tone: 'status', message: `已添加 ${repo.owner}/${repo.name}。` });
     } catch (error) {
-      const userError = toUserError(error);
-      setErrorMessage([userError.message, userError.suggestion].filter(Boolean).join('\n'));
+      setNotice({ tone: 'error', message: messageFor(error) });
       throw error;
     }
   };
 
   const handleRemoveRepo = async (owner: string, name: string) => {
-    setErrorMessage('');
+    setNotice(null);
     try {
       await removeRepoMutation.mutateAsync({ owner, name });
+      setNotice({ tone: 'status', message: `已移除 ${owner}/${name}。` });
     } catch (error) {
-      const userError = toUserError(error);
-      setErrorMessage([userError.message, userError.suggestion].filter(Boolean).join('\n'));
+      setNotice({ tone: 'error', message: messageFor(error) });
     }
   };
 
   return (
-    <section className="subagent-panel" aria-label="发现 Subagents">
+    <section
+      ref={panelRef}
+      className="subagent-panel"
+      aria-label="发现 Subagents"
+      data-subagent-panel="discovery"
+      tabIndex={-1}
+    >
       <div className="subagent-toolbar">
-        <div style={{ position: 'relative' }}>
-          <Search
-            size={14}
-            style={{ position: 'absolute', left: 8, top: '50%', transform: 'translateY(-50%)' }}
-          />
+        <label className="subagent-search-field" htmlFor="subagent-discovery-search">
+          <Search size={15} aria-hidden="true" />
+          <span className="subagent-visually-hidden">搜索 Subagent 名称、路径或仓库</span>
           <input
             id="subagent-discovery-search"
-            type="text"
-            placeholder="搜索 subagent 名称或仓库"
+            type="search"
+            placeholder="搜索 Subagent、路径或仓库"
             value={searchQuery}
             onChange={(event) => setSearchQuery(event.target.value)}
-            style={{ paddingLeft: 28 }}
           />
+        </label>
+        <label className="subagent-select-field">
+          <span className="subagent-visually-hidden">仓库过滤</span>
+          <select
+            value={filterRepo}
+            onChange={(event) => setFilterRepo(event.target.value)}
+            aria-label="仓库过滤"
+          >
+            <option value="all">全部仓库</option>
+            {repoOptions.map((repo) => (
+              <option key={repo} value={repo}>
+                {repo}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="subagent-select-field">
+          <span className="subagent-visually-hidden">安装状态过滤</span>
+          <select
+            value={filterStatus}
+            onChange={(event) => setFilterStatus(event.target.value as StatusFilter)}
+            aria-label="安装状态过滤"
+          >
+            <option value="all">全部状态</option>
+            <option value="installed">已安装</option>
+            <option value="uninstalled">未安装</option>
+          </select>
+        </label>
+        <div className="subagent-toolbar-actions">
+          <button
+            type="button"
+            className="subagent-button"
+            onClick={() => {
+              if (requireDiscoveryTarget() !== null) void refetchDiscoverable();
+            }}
+            disabled={discoveryTarget === null}
+          >
+            <RefreshCw size={14} aria-hidden="true" />
+            刷新
+          </button>
+          <button
+            type="button"
+            className="subagent-button"
+            onClick={() => setRepoManagerOpen(true)}
+          >
+            <Settings size={14} aria-hidden="true" />
+            仓库管理
+          </button>
         </div>
-        <select value={filterRepo} onChange={(event) => setFilterRepo(event.target.value)}>
-          <option value="all">全部仓库</option>
-          {repoOptions.map((repo) => (
-            <option key={repo} value={repo}>
-              {repo}
-            </option>
-          ))}
-        </select>
-        <select
-          value={filterStatus}
-          onChange={(event) => setFilterStatus(event.target.value as StatusFilter)}
-        >
-          <option value="all">全部状态</option>
-          <option value="installed">已安装</option>
-          <option value="uninstalled">未安装</option>
-        </select>
-        <button type="button" onClick={() => refetchDiscoverable()}>
-          <RefreshCw size={14} />
-          刷新
-        </button>
-        <button type="button" onClick={() => setRepoManagerOpen(true)}>
-          <Settings size={14} />
-          仓库管理
-        </button>
+        {context.kind === 'all' && (
+          <label className="subagent-target-field" htmlFor="subagent-discovery-target">
+            <span>发现目标</span>
+            <select
+              id="subagent-discovery-target"
+              aria-label="选择 Subagent 发现目标"
+              value={targetValue(allDiscoveryTarget)}
+              onChange={(event) => setAllDiscoveryTarget(targetFromValue(event.target.value))}
+            >
+              <option value="">选择全局或项目配置</option>
+              <option value="global">全局配置</option>
+              {projects.map((project) => (
+                <option key={project.projectId} value={`project:${project.projectId}`}>
+                  项目配置：{project.displayName}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
         {searchQuery && (
-          <span style={{ fontSize: 13, color: '#555' }}>共 {filteredSubagents.length} 个结果</span>
+          <span className="subagent-results-count">{filteredSubagents.length} 个结果</span>
         )}
       </div>
 
-      {errorMessage && <div className="subagent-error">{errorMessage}</div>}
+      <SubagentNotice notice={notice} />
 
-      {loadingDiscoverable ? (
-        <div className="subagent-empty">
-          <RefreshCw size={24} className="spin" />
+      {context.kind === 'all' && discoveryTarget === null ? (
+        <div className="subagent-empty" role="status">
+          <h3>先选择发现目标</h3>
+          <p>请选择全局配置或一个项目配置后，再查看相对该目标的安装状态。</p>
+        </div>
+      ) : loadingDiscoverable ? (
+        <div className="subagent-empty" role="status">
+          <Loader2 size={24} className="spin" aria-hidden="true" />
           <p>正在加载…</p>
         </div>
       ) : subagents.length === 0 ? (
         <div className="subagent-empty">
           <h3>没有发现可安装的 Subagent</h3>
           <p>请添加仓库后点击刷新。</p>
-          <button type="button" className="primary" onClick={() => setRepoManagerOpen(true)}>
+          <button
+            type="button"
+            className="subagent-button is-primary"
+            onClick={() => setRepoManagerOpen(true)}
+          >
             管理仓库
           </button>
         </div>
@@ -216,16 +627,35 @@ export function SubagentsDiscoveryPage({ activeApp }: SubagentsDiscoveryPageProp
           <p>请调整搜索或过滤条件。</p>
         </div>
       ) : (
-        <div className="subagent-list">
-          {filteredSubagents.map((subagent) => (
-            <SubagentCard
-              key={subagent.key}
-              subagent={subagent}
-              onInstall={handleInstall}
-              onUninstall={handleUninstall}
-              uninstallPending={uninstallMutation.isPending}
-            />
-          ))}
+        <div className="subagent-master-detail" data-detail-open={detailOpen || undefined}>
+          <div className="subagent-list-pane" aria-label="发现的 Subagent 列表">
+            <div className="subagent-list">
+              {filteredSubagents.map((subagent) => (
+                <SubagentCard
+                  key={subagent.key}
+                  subagent={subagent}
+                  selected={subagent.key === selectedKey}
+                  onSelect={selectSubagent}
+                  selectionRef={subagent.key === selectedKey ? selectedRowRef : undefined}
+                />
+              ))}
+            </div>
+          </div>
+          <DiscoverableSubagentDetail
+            subagent={selectedSubagent}
+            installedSubagent={selectedInstalledSubagent}
+            installPending={installMutation.isPending}
+            installUnsupported={discoveryTarget?.scope === 'project' && activeApp === 'codex'}
+            uninstallPending={uninstallMutation.isPending}
+            onBack={closeDetail}
+            backButtonRef={detailBackButtonRef}
+            onInstall={() => {
+              if (selectedSubagent !== null) void handleInstall(selectedSubagent.key);
+            }}
+            onUninstall={() => {
+              if (selectedSubagent !== null) handleUninstall(selectedSubagent.key);
+            }}
+          />
         </div>
       )}
 
@@ -240,32 +670,34 @@ export function SubagentsDiscoveryPage({ activeApp }: SubagentsDiscoveryPageProp
       )}
 
       {uninstallTarget !== null && (
-        <div className="skill-dialog-overlay" onClick={() => setUninstallTarget(null)}>
-          <div
-            className="skill-dialog"
-            onClick={(event) => event.stopPropagation()}
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="uninstall-confirm-title"
-          >
-            <div className="skill-dialog-header">
-              <h3 id="uninstall-confirm-title">确认卸载</h3>
-            </div>
-            <div className="skill-dialog-body">
-              <p style={{ fontSize: 13 }}>
-                确定要卸载 {uninstallTarget.name} 吗？该 Subagent 将从所有应用移除。
-              </p>
-            </div>
-            <div className="skill-dialog-footer">
-              <button type="button" onClick={() => setUninstallTarget(null)}>
+        <FocusedDialog
+          open
+          title="确认卸载"
+          onClose={() => setUninstallTarget(null)}
+          footer={
+            <>
+              <button
+                type="button"
+                className="subagent-button"
+                onClick={() => setUninstallTarget(null)}
+              >
                 取消
               </button>
-              <button type="button" className="uninstall" onClick={handleConfirmUninstall}>
+              <button
+                type="button"
+                className="subagent-button is-danger"
+                onClick={() => void handleConfirmUninstall()}
+                disabled={uninstallMutation.isPending}
+              >
                 卸载
               </button>
-            </div>
-          </div>
-        </div>
+            </>
+          }
+        >
+          <p className="subagent-dialog-confirm-copy">
+            确定要卸载 {uninstallTarget.name} 吗？该 Subagent 将从该配置目标的所有 Agent 移除。
+          </p>
+        </FocusedDialog>
       )}
     </section>
   );

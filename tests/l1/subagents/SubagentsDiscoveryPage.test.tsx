@@ -1,9 +1,15 @@
 // @vitest-environment jsdom
-import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, cleanup, waitFor, within } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
-import type { DiscoverableSubagent, InstalledSubagent } from '../../../src/types';
+import type {
+  ConfigContext,
+  DiscoverableSubagent,
+  InstalledSubagent,
+  ProjectSummary,
+  ScopeTarget,
+} from '../../../src/types';
 
 const mockApi = {
   getInstalledSubagents: vi.fn(),
@@ -17,7 +23,16 @@ const mockApi = {
 
 vi.mock('../../../src/lib/api/subagents', () => mockApi);
 
-const discoverable: DiscoverableSubagent = {
+const globalContext: ConfigContext = { kind: 'global' };
+const allContext: ConfigContext = { kind: 'all' };
+const projectContext: ConfigContext = { kind: 'project', projectId: 'project-alpha' };
+const globalTarget: ScopeTarget = { scope: 'global' };
+const projectTarget: ScopeTarget = { scope: 'project', projectId: 'project-alpha' };
+const projects: readonly ProjectSummary[] = [
+  { projectId: 'project-alpha', displayName: '项目 Alpha', rootPath: '/workspaces/alpha' },
+];
+
+const discoverable = (overrides: Partial<DiscoverableSubagent> = {}): DiscoverableSubagent => ({
   key: 'a/b:reviewer.md',
   name: 'Reviewer',
   description: 'desc',
@@ -26,9 +41,11 @@ const discoverable: DiscoverableSubagent = {
   repoOwner: 'a',
   repoName: 'b',
   repoBranch: 'main',
-};
+  installed: false,
+  ...overrides,
+});
 
-const installed: InstalledSubagent = {
+const installed = (target: ScopeTarget = globalTarget): InstalledSubagent => ({
   id: 'a/b:reviewer.md',
   name: 'Reviewer',
   directory: 'reviewer',
@@ -37,7 +54,8 @@ const installed: InstalledSubagent = {
   apps: { claudeCode: true, codex: false, geminiCli: false, opencode: false },
   installedAt: 1,
   updatedAt: 0,
-};
+  target,
+});
 
 async function loadPage() {
   const mod = await import('../../../src/components/subagents/SubagentsDiscoveryPage');
@@ -50,119 +68,136 @@ function createWrapper(queryClient: QueryClient) {
   };
 }
 
-describe('SubagentsDiscoveryPage 卸载已安装 Subagent', () => {
+function renderPage(
+  Page: Awaited<ReturnType<typeof loadPage>>,
+  queryClient: QueryClient,
+  context: ConfigContext = globalContext,
+  activeApp: 'claude-code' | 'codex' = 'claude-code',
+) {
+  return render(<Page activeApp={activeApp} context={context} projects={projects} />, {
+    wrapper: createWrapper(queryClient),
+  });
+}
+
+describe('SubagentsDiscoveryPage scope contracts', () => {
   let queryClient: QueryClient;
 
   beforeEach(() => {
-    queryClient = new QueryClient({
-      defaultOptions: { queries: { retry: false } },
-    });
+    queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     Object.values(mockApi).forEach((fn) => fn.mockReset());
-    mockApi.discoverAvailableSubagents.mockResolvedValue([discoverable]);
+    mockApi.discoverAvailableSubagents.mockResolvedValue([discoverable()]);
+    mockApi.getInstalledSubagents.mockResolvedValue([]);
     mockApi.getSubagentRepos.mockResolvedValue([]);
+    mockApi.installSubagent.mockResolvedValue(installed());
+  });
+
+  afterEach(() => cleanup());
+
+  it('全部上下文未选目标不查询或安装；选择全局和项目后带完整 target', async () => {
+    const Page = await loadPage();
+    renderPage(Page, queryClient, allContext);
+
+    expect(await screen.findByText('先选择发现目标')).toBeTruthy();
+    expect(mockApi.discoverAvailableSubagents).not.toHaveBeenCalled();
+    expect(mockApi.installSubagent).not.toHaveBeenCalled();
+
+    fireEvent.change(screen.getByLabelText('选择 Subagent 发现目标'), {
+      target: { value: 'global' },
+    });
+    fireEvent.click((await screen.findAllByRole('button', { name: /Reviewer/ }))[0]);
+    fireEvent.click(await screen.findByRole('button', { name: '安装' }));
+    await waitFor(() =>
+      expect(mockApi.installSubagent).toHaveBeenCalledWith(
+        expect.objectContaining({ key: 'a/b:reviewer.md' }),
+        globalTarget,
+        'claude-code',
+      ),
+    );
+
+    fireEvent.change(screen.getByLabelText('选择 Subagent 发现目标'), {
+      target: { value: 'project:project-alpha' },
+    });
+    fireEvent.click(await screen.findByRole('button', { name: /Reviewer/ }));
+    fireEvent.click(await screen.findByRole('button', { name: '安装' }));
+    await waitFor(() =>
+      expect(mockApi.installSubagent).toHaveBeenLastCalledWith(
+        expect.objectContaining({ key: 'a/b:reviewer.md' }),
+        projectTarget,
+        'claude-code',
+      ),
+    );
+  });
+
+  it('项目级 Codex 安装入口禁用且不写入', async () => {
+    const Page = await loadPage();
+    renderPage(Page, queryClient, projectContext, 'codex');
+
+    fireEvent.click(await screen.findByRole('button', { name: /Reviewer/ }));
+    const install = await screen.findByRole('button', { name: '安装' });
+    expect(install).toHaveProperty('disabled', true);
+    fireEvent.click(install);
+    expect(mockApi.installSubagent).not.toHaveBeenCalled();
+    expect(screen.getByRole('status').textContent).toContain('不支持 Codex 项目级 Subagent');
+  });
+
+  it('卸载发现项从已安装记录派生 target', async () => {
+    mockApi.discoverAvailableSubagents.mockResolvedValue([discoverable({ installed: true })]);
+    mockApi.getInstalledSubagents.mockResolvedValue([installed(projectTarget)]);
     mockApi.uninstallSubagent.mockResolvedValue({ backupPath: '/tmp/bak' });
-  });
-
-  afterEach(() => {
-    cleanup();
-  });
-
-  it('点击卸载先弹出确认对话框，不调用卸载接口，安装态不变', async () => {
-    mockApi.getInstalledSubagents.mockResolvedValue([installed]);
     const Page = await loadPage();
-    render(<Page activeApp="claude-code" />, { wrapper: createWrapper(queryClient) });
+    renderPage(Page, queryClient, allContext);
 
-    const uninstallButton = await screen.findByRole('button', { name: '卸载' });
-    fireEvent.click(uninstallButton);
-
-    const dialog = await screen.findByRole('dialog');
-    expect(within(dialog).getByText(/确定要卸载 Reviewer/)).toBeTruthy();
-    expect(mockApi.uninstallSubagent).not.toHaveBeenCalled();
-    // 安装态不变：卡片仍显示卸载按钮
-    expect(screen.getAllByRole('button', { name: '卸载' }).length).toBeGreaterThan(0);
-    expect(screen.queryByRole('button', { name: '安装' })).toBeNull();
+    fireEvent.change(await screen.findByLabelText('选择 Subagent 发现目标'), {
+      target: { value: 'project:project-alpha' },
+    });
+    fireEvent.click(await screen.findByRole('button', { name: /Reviewer/ }));
+    fireEvent.click(await screen.findByRole('button', { name: '卸载' }));
+    fireEvent.click(
+      within(await screen.findByRole('dialog', { name: '确认卸载' })).getByRole('button', {
+        name: '卸载',
+      }),
+    );
+    await waitFor(() =>
+      expect(mockApi.uninstallSubagent).toHaveBeenCalledWith('a/b:reviewer.md', projectTarget),
+    );
   });
 
-  it('取消确认后不调用卸载接口且安装态不变', async () => {
-    mockApi.getInstalledSubagents.mockResolvedValue([installed]);
-    const Page = await loadPage();
-    render(<Page activeApp="claude-code" />, { wrapper: createWrapper(queryClient) });
-
-    const uninstallButton = await screen.findByRole('button', { name: '卸载' });
-    fireEvent.click(uninstallButton);
-
-    const dialog = await screen.findByRole('dialog');
-    fireEvent.click(within(dialog).getByRole('button', { name: '取消' }));
-
-    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
-    expect(mockApi.uninstallSubagent).not.toHaveBeenCalled();
-    expect(screen.getByRole('button', { name: '卸载' })).toBeTruthy();
-    expect(screen.queryByRole('button', { name: '安装' })).toBeNull();
-  });
-
-  it('确认卸载后调用卸载接口并更新安装态', async () => {
-    mockApi.getInstalledSubagents.mockResolvedValueOnce([installed]).mockResolvedValue([]);
-    const Page = await loadPage();
-    render(<Page activeApp="claude-code" />, { wrapper: createWrapper(queryClient) });
-
-    const uninstallButton = await screen.findByRole('button', { name: '卸载' });
-    fireEvent.click(uninstallButton);
-
-    const dialog = await screen.findByRole('dialog');
-    fireEvent.click(within(dialog).getByRole('button', { name: '卸载' }));
-
-    await waitFor(() => expect(mockApi.uninstallSubagent).toHaveBeenCalledTimes(1));
-    expect(mockApi.uninstallSubagent.mock.calls[0][0]).toBe('a/b:reviewer.md');
-
-    // 安装态更新：卡片回到未安装状态并给出成功反馈
-    await screen.findByRole('button', { name: '安装' });
-    expect(screen.queryByRole('button', { name: '卸载' })).toBeNull();
-    expect(screen.getByText('已卸载 Reviewer。')).toBeTruthy();
-  });
-
-  it('卸载失败时展示错误反馈，安装态保持不变', async () => {
-    mockApi.getInstalledSubagents.mockResolvedValue([installed]);
+  it('完整 key 选择、错误 alert 与上下文切换保持独立', async () => {
+    const other = discoverable({
+      key: 'other/repo:reviewer.md',
+      repoOwner: 'other',
+      repoName: 'repo',
+    });
+    mockApi.discoverAvailableSubagents.mockResolvedValue([
+      discoverable({ installed: true }),
+      other,
+    ]);
+    mockApi.getInstalledSubagents.mockResolvedValue([installed()]);
     mockApi.uninstallSubagent.mockRejectedValue(new Error('boom'));
     const Page = await loadPage();
-    render(<Page activeApp="claude-code" />, { wrapper: createWrapper(queryClient) });
+    const { rerender } = renderPage(Page, queryClient);
 
-    const uninstallButton = await screen.findByRole('button', { name: '卸载' });
-    fireEvent.click(uninstallButton);
-
-    const dialog = await screen.findByRole('dialog');
-    fireEvent.click(within(dialog).getByRole('button', { name: '卸载' }));
-
-    await waitFor(() => expect(mockApi.uninstallSubagent).toHaveBeenCalledTimes(1));
-    expect(mockApi.uninstallSubagent.mock.calls[0][0]).toBe('a/b:reviewer.md');
-    await screen.findByText('操作失败，请稍后重试。');
-    expect(screen.getByRole('button', { name: '卸载' })).toBeTruthy();
-  });
-
-  it('卸载执行期间卸载入口禁用并给出 pending 反馈，不可重复提交', async () => {
-    let resolveUninstall: (value: { backupPath: string }) => void = () => {};
-    mockApi.uninstallSubagent.mockImplementation(
-      () =>
-        new Promise((resolve) => {
-          resolveUninstall = resolve;
-        }),
+    fireEvent.click((await screen.findAllByRole('button', { name: /Reviewer/ }))[0]);
+    const firstDetail = await screen.findByLabelText('Reviewer 详情');
+    fireEvent.click(within(firstDetail).getByRole('button', { name: '卸载' }));
+    fireEvent.click(
+      within(await screen.findByRole('dialog', { name: '确认卸载' })).getByRole('button', {
+        name: '卸载',
+      }),
     );
-    mockApi.getInstalledSubagents.mockResolvedValue([installed]);
-    const Page = await loadPage();
-    render(<Page activeApp="claude-code" />, { wrapper: createWrapper(queryClient) });
+    expect((await screen.findByRole('alert')).textContent).toContain('操作失败，请稍后重试。');
 
-    fireEvent.click(await screen.findByRole('button', { name: '卸载' }));
-    const dialog = await screen.findByRole('dialog');
-    fireEvent.click(within(dialog).getByRole('button', { name: '卸载' }));
-    await waitFor(() => expect(mockApi.uninstallSubagent).toHaveBeenCalledTimes(1));
+    const otherRow = document.querySelector<HTMLButtonElement>(
+      '[data-subagent-key="other/repo:reviewer.md"] .subagent-list-row-select',
+    );
+    expect(otherRow).not.toBeNull();
+    fireEvent.click(otherRow!);
+    expect((await screen.findByLabelText('Reviewer 详情')).dataset.subagentDetailKey).toBe(
+      'other/repo:reviewer.md',
+    );
+    rerender(<Page activeApp="claude-code" context={allContext} projects={projects} />);
 
-    // mutation pending：卡片卸载按钮禁用并显示 pending 反馈，点击不再触发
-    const pendingButton = await screen.findByRole('button', { name: '卸载中…' });
-    expect(pendingButton).toHaveProperty('disabled', true);
-    fireEvent.click(pendingButton);
-    expect(mockApi.uninstallSubagent).toHaveBeenCalledTimes(1);
-    expect(screen.queryByRole('dialog')).toBeNull();
-
-    resolveUninstall({ backupPath: '/tmp/bak' });
-    await screen.findByText('已卸载 Reviewer。');
+    await waitFor(() => expect(screen.queryByLabelText('Reviewer 详情')).toBeNull());
+    expect(screen.getByText('先选择发现目标')).toBeTruthy();
   });
 });

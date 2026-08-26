@@ -4,25 +4,41 @@
 
 use crate::database::{lock_conn, Database};
 use crate::error::AppError;
+use crate::services::project::ScopeTarget;
 use crate::services::skill::{InstalledSkill, SkillApps, SkillRepo};
 use indexmap::IndexMap;
 use rusqlite::params;
 
 impl Database {
     /// 获取所有已安装的 Skills
-    pub fn get_all_installed_skills(&self) -> Result<IndexMap<String, InstalledSkill>, AppError> {
+    pub fn get_global_installed_skills(
+        &self,
+    ) -> Result<IndexMap<String, InstalledSkill>, AppError> {
+        self.get_all_installed_skills_for_target(&ScopeTarget::Global)
+    }
+
+    /// 按完整 scope target 获取已安装 Skills。
+    pub fn get_all_installed_skills_for_target(
+        &self,
+        target: &ScopeTarget,
+    ) -> Result<IndexMap<String, InstalledSkill>, AppError> {
+        target.validate()?;
+        let (scope, project_id) = skill_target_parts(target);
         let conn = lock_conn!(self.conn);
         let mut stmt = conn
             .prepare(
                 "SELECT id, name, description, directory, repo_owner, repo_name, repo_branch,
                         readme_url, enabled_claude_code, enabled_codex, enabled_gemini_cli, enabled_opencode,
                         installed_at, content_hash, updated_at
-                 FROM skills ORDER BY name ASC",
+                 FROM skills
+                 WHERE scope = ?1 AND project_id IS ?2
+                 ORDER BY name ASC, id ASC",
             )
             .map_err(|e| AppError::Database(e.to_string()))?;
 
+        let target = target.clone();
         let skill_iter = stmt
-            .query_map([], |row| {
+            .query_map(params![scope, project_id], move |row| {
                 Ok(InstalledSkill {
                     id: row.get(0)?,
                     name: row.get(1)?,
@@ -41,6 +57,7 @@ impl Database {
                     installed_at: row.get(12)?,
                     content_hash: row.get(13)?,
                     updated_at: row.get::<_, i64>(14).unwrap_or(0),
+                    target: target.clone(),
                 })
             })
             .map_err(|e| AppError::Database(e.to_string()))?;
@@ -54,18 +71,30 @@ impl Database {
     }
 
     /// 获取单个已安装的 Skill
-    pub fn get_installed_skill(&self, id: &str) -> Result<Option<InstalledSkill>, AppError> {
+    pub fn get_global_installed_skill(&self, id: &str) -> Result<Option<InstalledSkill>, AppError> {
+        self.get_installed_skill_for_target(id, &ScopeTarget::Global)
+    }
+
+    /// 按完整 scope target 获取单个已安装的 Skill。
+    pub fn get_installed_skill_for_target(
+        &self,
+        id: &str,
+        target: &ScopeTarget,
+    ) -> Result<Option<InstalledSkill>, AppError> {
+        target.validate()?;
+        let (scope, project_id) = skill_target_parts(target);
         let conn = lock_conn!(self.conn);
         let mut stmt = conn
             .prepare(
                 "SELECT id, name, description, directory, repo_owner, repo_name, repo_branch,
                         readme_url, enabled_claude_code, enabled_codex, enabled_gemini_cli, enabled_opencode,
                         installed_at, content_hash, updated_at
-                 FROM skills WHERE id = ?1",
+                 FROM skills WHERE id = ?1 AND scope = ?2 AND project_id IS ?3",
             )
             .map_err(|e| AppError::Database(e.to_string()))?;
 
-        let result = stmt.query_row([id], |row| {
+        let target = target.clone();
+        let result = stmt.query_row(params![id, scope, project_id], |row| {
             Ok(InstalledSkill {
                 id: row.get(0)?,
                 name: row.get(1)?,
@@ -84,6 +113,7 @@ impl Database {
                 installed_at: row.get(12)?,
                 content_hash: row.get(13)?,
                 updated_at: row.get::<_, i64>(14).unwrap_or(0),
+                target: target.clone(),
             })
         });
 
@@ -96,13 +126,15 @@ impl Database {
 
     /// 保存 Skill（添加或更新）
     pub fn save_skill(&self, skill: &InstalledSkill) -> Result<(), AppError> {
+        skill.target.validate()?;
+        let (scope, project_id) = skill_target_parts(&skill.target);
         let conn = lock_conn!(self.conn);
         conn.execute(
             "INSERT OR REPLACE INTO skills
              (id, name, description, directory, repo_owner, repo_name, repo_branch,
               readme_url, enabled_claude_code, enabled_codex, enabled_gemini_cli, enabled_opencode,
-              installed_at, content_hash, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+              installed_at, content_hash, updated_at, scope, project_id)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
             params![
                 skill.id,
                 skill.name,
@@ -119,6 +151,8 @@ impl Database {
                 skill.installed_at,
                 skill.content_hash,
                 skill.updated_at,
+                scope,
+                project_id,
             ],
         )
         .map_err(|e| AppError::Database(e.to_string()))?;
@@ -127,6 +161,8 @@ impl Database {
 
     /// 仅更新已安装 Skill 的元数据，不修改各 Agent 的启用状态。
     pub fn update_skill_metadata(&self, skill: &InstalledSkill) -> Result<bool, AppError> {
+        skill.target.validate()?;
+        let (scope, project_id) = skill_target_parts(&skill.target);
         let conn = lock_conn!(self.conn);
         let affected = conn
             .execute(
@@ -141,7 +177,7 @@ impl Database {
                      installed_at = ?8,
                      content_hash = ?9,
                      updated_at = ?10
-                 WHERE id = ?11 AND installed_at = ?12",
+                 WHERE id = ?11 AND installed_at = ?12 AND scope = ?13 AND project_id IS ?14",
                 params![
                     skill.name,
                     skill.description,
@@ -155,6 +191,8 @@ impl Database {
                     skill.updated_at,
                     skill.id,
                     skill.installed_at,
+                    scope,
+                    project_id,
                 ],
             )
             .map_err(|e| AppError::Database(e.to_string()))?;
@@ -162,46 +200,98 @@ impl Database {
     }
 
     /// 删除 Skill
-    pub fn delete_skill(&self, id: &str) -> Result<bool, AppError> {
+    pub fn delete_global_skill(&self, id: &str) -> Result<bool, AppError> {
+        self.delete_skill_for_target(id, &ScopeTarget::Global)
+    }
+
+    /// 按完整 scope target 删除 Skill。
+    pub fn delete_skill_for_target(
+        &self,
+        id: &str,
+        target: &ScopeTarget,
+    ) -> Result<bool, AppError> {
+        target.validate()?;
+        let (scope, project_id) = skill_target_parts(target);
         let conn = lock_conn!(self.conn);
         let affected = conn
-            .execute("DELETE FROM skills WHERE id = ?1", params![id])
+            .execute(
+                "DELETE FROM skills WHERE id = ?1 AND scope = ?2 AND project_id IS ?3",
+                params![id, scope, project_id],
+            )
             .map_err(|e| AppError::Database(e.to_string()))?;
         Ok(affected > 0)
     }
 
     /// 清空所有 Skills（用于迁移）
-    pub fn clear_skills(&self) -> Result<(), AppError> {
+    pub fn clear_global_skills(&self) -> Result<(), AppError> {
+        self.clear_skills_for_target(&ScopeTarget::Global)
+    }
+
+    /// 仅清空明确 target 内的 Skills。
+    pub fn clear_skills_for_target(&self, target: &ScopeTarget) -> Result<(), AppError> {
+        target.validate()?;
+        let (scope, project_id) = skill_target_parts(target);
         let conn = lock_conn!(self.conn);
-        conn.execute("DELETE FROM skills", [])
-            .map_err(|e| AppError::Database(e.to_string()))?;
+        conn.execute(
+            "DELETE FROM skills WHERE scope = ?1 AND project_id IS ?2",
+            params![scope, project_id],
+        )
+        .map_err(|e| AppError::Database(e.to_string()))?;
         Ok(())
     }
 
     /// 更新 Skill 的 Agent 启用状态
-    pub fn update_skill_apps(&self, id: &str, apps: &SkillApps) -> Result<bool, AppError> {
+    pub fn update_global_skill_apps(&self, id: &str, apps: &SkillApps) -> Result<bool, AppError> {
+        self.update_skill_apps_for_target(id, &ScopeTarget::Global, apps)
+    }
+
+    /// 按完整 scope target 更新 Skill 的 Agent 启用状态。
+    pub fn update_skill_apps_for_target(
+        &self,
+        id: &str,
+        target: &ScopeTarget,
+        apps: &SkillApps,
+    ) -> Result<bool, AppError> {
+        target.validate()?;
+        let (scope, project_id) = skill_target_parts(target);
         let conn = lock_conn!(self.conn);
         let affected = conn
             .execute(
-                "UPDATE skills SET enabled_claude_code = ?1, enabled_codex = ?2, enabled_gemini_cli = ?3, enabled_opencode = ?4 WHERE id = ?5",
-                params![apps.claude_code, apps.codex, apps.gemini_cli, apps.opencode, id],
+                "UPDATE skills
+                 SET enabled_claude_code = ?1, enabled_codex = ?2, enabled_gemini_cli = ?3, enabled_opencode = ?4
+                 WHERE id = ?5 AND scope = ?6 AND project_id IS ?7",
+                params![apps.claude_code, apps.codex, apps.gemini_cli, apps.opencode, id, scope, project_id],
             )
             .map_err(|e| AppError::Database(e.to_string()))?;
         Ok(affected > 0)
     }
 
     /// 更新 Skill 的内容哈希和更新时间
-    pub fn update_skill_hash(
+    pub fn update_global_skill_hash(
         &self,
         id: &str,
         content_hash: &str,
         updated_at: i64,
     ) -> Result<bool, AppError> {
+        self.update_skill_hash_for_target(id, &ScopeTarget::Global, content_hash, updated_at)
+    }
+
+    /// 按完整 scope target 更新 Skill 的内容哈希和更新时间。
+    pub fn update_skill_hash_for_target(
+        &self,
+        id: &str,
+        target: &ScopeTarget,
+        content_hash: &str,
+        updated_at: i64,
+    ) -> Result<bool, AppError> {
+        target.validate()?;
+        let (scope, project_id) = skill_target_parts(target);
         let conn = lock_conn!(self.conn);
         let affected = conn
             .execute(
-                "UPDATE skills SET content_hash = ?1, updated_at = ?2 WHERE id = ?3",
-                params![content_hash, updated_at, id],
+                "UPDATE skills SET content_hash = ?1, updated_at = ?2
+                 WHERE id = ?3 AND scope = ?4 AND project_id IS ?5",
+                params![content_hash, updated_at, id, scope, project_id],
             )
             .map_err(|e| AppError::Database(e.to_string()))?;
         Ok(affected > 0)
@@ -283,9 +373,17 @@ impl Database {
     }
 }
 
+fn skill_target_parts(target: &ScopeTarget) -> (&str, Option<&str>) {
+    match target {
+        ScopeTarget::Global => ("global", None),
+        ScopeTarget::Project { project_id } => ("project", Some(project_id)),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::services::project::ScopeTarget;
     use crate::services::skill::AgentType;
 
     fn skill(id: &str, name: &str, apps: SkillApps) -> InstalledSkill {
@@ -302,6 +400,7 @@ mod tests {
             installed_at: 1,
             content_hash: Some(format!("{name}-hash")),
             updated_at: 2,
+            target: ScopeTarget::Global,
         }
     }
 
@@ -325,7 +424,7 @@ mod tests {
             .expect("update metadata"));
 
         let stored = db
-            .get_installed_skill(&original.id)
+            .get_global_installed_skill(&original.id)
             .expect("query skill")
             .expect("skill remains installed");
         assert_eq!(stored.name, candidate.name);
@@ -351,7 +450,7 @@ mod tests {
             .update_skill_metadata(&candidate)
             .expect("missing update is not an error"));
         assert!(db
-            .get_installed_skill(&candidate.id)
+            .get_global_installed_skill(&candidate.id)
             .expect("query skill")
             .is_none());
     }
@@ -378,7 +477,7 @@ mod tests {
             .expect("stale generation update is not an error"));
 
         let stored = db
-            .get_installed_skill(&reinstalled.id)
+            .get_global_installed_skill(&reinstalled.id)
             .expect("query skill")
             .expect("reinstalled generation remains");
         assert_eq!(stored.name, reinstalled.name);
@@ -396,5 +495,50 @@ mod tests {
 
         let count2 = db.init_default_skill_repos().expect("seed again");
         assert_eq!(count2, 0);
+    }
+
+    #[test]
+    fn same_skill_id_is_independent_per_target() {
+        let db = Database::memory().expect("memory db");
+        {
+            let conn = db.conn.lock().expect("database lock");
+            conn.execute(
+                "INSERT INTO projects (project_id, display_name, root_path) VALUES (?1, ?2, ?3)",
+                params!["project-a", "Project A", "/project-a"],
+            )
+            .expect("seed project");
+        }
+        let global = skill(
+            "owner/repo:shared",
+            "global",
+            SkillApps::only(&AgentType::ClaudeCode),
+        );
+        let project_target = ScopeTarget::Project {
+            project_id: "project-a".to_string(),
+        };
+        let mut project = skill(
+            "owner/repo:shared",
+            "project",
+            SkillApps::only(&AgentType::Codex),
+        );
+        project.target = project_target.clone();
+
+        db.save_skill(&global).expect("save global skill");
+        db.save_skill(&project).expect("save project skill");
+
+        assert_eq!(
+            db.get_installed_skill_for_target("owner/repo:shared", &ScopeTarget::Global)
+                .expect("read global")
+                .expect("global skill")
+                .name,
+            "global"
+        );
+        assert_eq!(
+            db.get_installed_skill_for_target("owner/repo:shared", &project_target)
+                .expect("read project")
+                .expect("project skill")
+                .name,
+            "project"
+        );
     }
 }

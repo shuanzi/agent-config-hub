@@ -1,47 +1,56 @@
 import { invoke } from './invoke';
 import type {
   AgentType,
+  ConfigContext,
   DiscoverableSubagent,
   InstalledSubagent,
+  ScopeTarget,
   SubagentBackupEntry,
   SubagentRepo,
   SubagentUninstallResult,
   SubagentUpdateInfo,
 } from '../../types';
 
-export async function getInstalledSubagents(): Promise<InstalledSubagent[]> {
-  return invoke('get_installed_subagents');
+export async function getInstalledSubagents(context: ConfigContext): Promise<InstalledSubagent[]> {
+  return invoke('get_installed_subagents', { context });
 }
 
-export async function discoverAvailableSubagents(): Promise<DiscoverableSubagent[]> {
-  return invoke('discover_available_subagents');
+export async function discoverAvailableSubagents(
+  target: ScopeTarget,
+): Promise<DiscoverableSubagent[]> {
+  return invoke('discover_available_subagents', { target });
 }
 
 export async function installSubagent(
   subagent: DiscoverableSubagent,
+  target: ScopeTarget,
   currentApp: AgentType,
 ): Promise<InstalledSubagent> {
-  return invoke('install_subagent', { subagent, currentApp });
+  return invoke('install_subagent', { subagent, target, currentApp });
 }
 
-export async function uninstallSubagent(id: string): Promise<SubagentUninstallResult> {
-  return invoke('uninstall_subagent', { id });
+export async function uninstallSubagent(
+  id: string,
+  target: ScopeTarget,
+): Promise<SubagentUninstallResult> {
+  return invoke('uninstall_subagent', { id, target });
 }
 
 export async function toggleSubagentApp(
   id: string,
+  target: ScopeTarget,
   app: AgentType,
   enabled: boolean,
 ): Promise<void> {
-  return invoke('toggle_subagent_app', { id, app, enabled });
+  return invoke('toggle_subagent_app', { id, target, app, enabled });
 }
 
-export async function checkSubagentUpdates(): Promise<SubagentUpdateInfo[]> {
-  return invoke('check_subagent_updates');
+export async function checkSubagentUpdates(target: ScopeTarget): Promise<SubagentUpdateInfo[]> {
+  return invoke('check_subagent_updates', { target });
 }
 
-export async function updateSubagent(id: string): Promise<InstalledSubagent> {
-  return invoke('update_subagent', { id });
+export async function updateSubagent(id: string, target: ScopeTarget): Promise<InstalledSubagent> {
+  return invoke('update_subagent', { id, target });
 }
 
 export async function getSubagentRepos(): Promise<SubagentRepo[]> {
@@ -56,17 +65,17 @@ export async function removeSubagentRepo(owner: string, name: string): Promise<v
   return invoke('remove_subagent_repo', { owner, name });
 }
 
-export async function getSubagentBackups(): Promise<SubagentBackupEntry[]> {
-  return invoke('get_subagent_backups');
+export async function getSubagentBackups(target: ScopeTarget): Promise<SubagentBackupEntry[]> {
+  return invoke('get_subagent_backups', { target });
 }
 
 export async function restoreSubagentBackup(
   backupId: string,
-  currentApp: AgentType,
+  target: ScopeTarget,
 ): Promise<InstalledSubagent> {
-  return invoke('restore_subagent_backup', { backupId, currentApp });
+  return invoke('restore_subagent_backup', { backupId, target });
 }
 
-export async function deleteSubagentBackup(backupId: string): Promise<void> {
-  return invoke('delete_subagent_backup', { backupId });
+export async function deleteSubagentBackup(backupId: string, target: ScopeTarget): Promise<void> {
+  return invoke('delete_subagent_backup', { backupId, target });
 }

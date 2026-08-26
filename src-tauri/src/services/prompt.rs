@@ -54,42 +54,6 @@ pub fn prompt_file_path(app: &AgentType) -> PathBuf {
     }
 }
 
-/// 把一段被覆盖的 live 内容持久化为禁用的备份预设（`backup-<timestamp>`）。
-/// 内容为空或与任一已有预设一致时不创建，返回是否新建了备份。
-pub(crate) fn save_live_backup_prompt(
-    db: &Database,
-    app: &AgentType,
-    content: &str,
-) -> Result<bool, AppError> {
-    if content.trim().is_empty() {
-        return Ok(false);
-    }
-    let prompts = db.get_prompts(app.as_str())?;
-    if prompts.values().any(|p| p.content.trim() == content.trim()) {
-        return Ok(false);
-    }
-
-    let timestamp = get_unix_timestamp()?;
-    let mut backup_id = format!("backup-{timestamp}");
-    let mut suffix = 1;
-    while prompts.contains_key(&backup_id) {
-        backup_id = format!("backup-{timestamp}-{suffix}");
-        suffix += 1;
-    }
-    let backup_prompt = Prompt {
-        id: backup_id.clone(),
-        name: format!("原始指令 {}", chrono::Local::now().format("%Y-%m-%d %H:%M")),
-        content: content.to_string(),
-        description: Some("自动备份的原始指令".to_string()),
-        enabled: false,
-        created_at: Some(timestamp),
-        updated_at: Some(timestamp),
-    };
-    log::info!("创建 live 内容备份: {backup_id}");
-    db.save_prompt(app.as_str(), &backup_prompt)?;
-    Ok(true)
-}
-
 fn get_unix_timestamp() -> Result<i64, AppError> {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

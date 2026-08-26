@@ -8,6 +8,7 @@ import { createServer, type ViteDevServer } from 'vite';
 import type {} from 'webdriverio';
 
 let viteServer: ViteDevServer | null = null;
+const l2Port = Number(process.env.UI_TEST_PORT ?? '1420');
 
 // 注：@wdio/types 9.30 的 Options.Testrunner 漏声明 `capabilities`（运行时仍读取），
 // 故此处用类型断言补齐，不改依赖。
@@ -30,7 +31,7 @@ export const config = {
     },
   ],
   logLevel: 'warn',
-  baseUrl: 'http://localhost:1420',
+  baseUrl: `http://localhost:${l2Port}`,
   waitforTimeout: 10000,
   framework: 'mocha',
   reporters: ['spec'],
@@ -39,7 +40,10 @@ export const config = {
     timeout: 60000,
   },
   onPrepare: async () => {
-    viteServer = await createServer({ logLevel: 'warn' });
+    viteServer = await createServer({
+      logLevel: 'warn',
+      server: { host: '127.0.0.1', port: l2Port, strictPort: true },
+    });
     await viteServer.listen();
   },
   onComplete: async () => {

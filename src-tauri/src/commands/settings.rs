@@ -5,9 +5,10 @@ use std::sync::Arc;
 use crate::config;
 use crate::database::Database;
 use crate::error::{format_skill_error, is_structured_error_payload, AppError};
-use crate::services::prompt::{
-    prompt_file_path, prompt_state_write_guard, save_live_backup_prompt,
+use crate::services::instruction::{
+    instruction_state_write_guard, relocate_global_projection_for_override, InstructionDocumentKind,
 };
+use crate::services::project::{ProjectService, ScopeTarget};
 use crate::services::skill::{skill_state_write_guard, AgentType, SkillService};
 use crate::services::subagent::{subagent_state_write_guard, SubagentService};
 use crate::settings::{
@@ -184,19 +185,38 @@ pub(crate) fn migrate_storage_combined(
     let _subagent_guard = subagent_state_write_guard();
 
     let old_location = get_settings().storage_location;
+    // 先于任一 Skill/Subagent 文件副作用核验所有 project root：任一不可用时整次
+    // storage migration 不会移动 global 或 project 数据。
+    for project in ProjectService::list_projects(db)? {
+        ProjectService::resolve_scope_target(
+            db,
+            &ScopeTarget::Project {
+                project_id: project.project_id,
+            },
+        )?;
+    }
     let skill_old_dir = skill_target_dir(old_location);
     let skill_new_dir = skill_target_dir(target);
     let subagent_old_dir = subagent_target_dir(old_location);
     let subagent_new_dir = subagent_target_dir(target);
 
-    let rollback_moves = |skill_moved: &[String], subagent_moved: &[String]| {
+    let rollback_moves = |skill_moved: &[String],
+                          skill_project_moved: &[String],
+                          subagent_moved: &[String],
+                          subagent_project_moved: &[String]| {
         let _ = std::fs::create_dir_all(&skill_old_dir);
         let _ = std::fs::create_dir_all(&subagent_old_dir);
         SkillService::rollback_skill_moves(&skill_old_dir, &skill_new_dir, skill_moved);
+        SkillService::rollback_project_skill_moves(old_location, target, skill_project_moved);
         SubagentService::rollback_subagent_moves(
             &subagent_old_dir,
             &subagent_new_dir,
             subagent_moved,
+        );
+        SubagentService::rollback_project_subagent_moves(
+            old_location,
+            target,
+            subagent_project_moved,
         );
     };
 
@@ -212,6 +232,25 @@ pub(crate) fn migrate_storage_combined(
                 projection_errors.push(format!("subagents/{}", app.as_str()));
             }
         }
+        for project in ProjectService::list_projects(db).unwrap_or_else(|error| {
+            log::warn!("迁移后读取项目 registry 失败: {error}");
+            projection_errors.push("skills/project".to_string());
+            Vec::new()
+        }) {
+            let target = ScopeTarget::Project {
+                project_id: project.project_id,
+            };
+            for app in AgentType::all() {
+                if let Err(e) = SkillService::sync_target_to_app_unlocked(db, &target, &app) {
+                    log::warn!("迁移后重建项目 Skill 的 {} 投影失败: {e}", app.as_str());
+                    projection_errors.push(format!("skills/project/{}", app.as_str()));
+                }
+                if let Err(e) = SubagentService::sync_target_to_app_unlocked(db, &target, &app) {
+                    log::warn!("迁移后重建项目 Subagent 的 {} 投影失败: {e}", app.as_str());
+                    projection_errors.push(format!("subagents/project/{}", app.as_str()));
+                }
+            }
+        }
         projection_errors
     };
 
@@ -222,15 +261,28 @@ pub(crate) fn migrate_storage_combined(
         Ok(outcome) => outcome.moved.clone(),
         Err(failure) => failure.moved.clone(),
     };
+    let skill_project_moved = match &skill_result {
+        Ok(outcome) => outcome.project_moved.clone(),
+        Err(failure) => failure.project_moved.clone(),
+    };
     let subagent_moved = match &subagent_result {
         Ok(outcome) => outcome.moved.clone(),
         Err(failure) => failure.moved.clone(),
+    };
+    let subagent_project_moved = match &subagent_result {
+        Ok(outcome) => outcome.project_moved.clone(),
+        Err(failure) => failure.project_moved.clone(),
     };
 
     let (skill_outcome, subagent_outcome) = match (skill_result, subagent_result) {
         (Ok(skill_outcome), Ok(subagent_outcome)) => (skill_outcome, subagent_outcome),
         (skill_result, subagent_result) => {
-            rollback_moves(&skill_moved, &subagent_moved);
+            rollback_moves(
+                &skill_moved,
+                &skill_project_moved,
+                &subagent_moved,
+                &subagent_project_moved,
+            );
 
             if let Err(failure) = skill_result {
                 return Err(failure.into_error());
@@ -245,7 +297,12 @@ pub(crate) fn migrate_storage_combined(
 
     // 设置持久化进入同一回滚边界：失败则搬回全部已移动项
     if let Err(e) = set_storage_location(target) {
-        rollback_moves(&skill_outcome.moved, &subagent_outcome.moved);
+        rollback_moves(
+            &skill_outcome.moved,
+            &skill_outcome.project_moved,
+            &subagent_outcome.moved,
+            &subagent_outcome.project_moved,
+        );
         return Err(e);
     }
 
@@ -255,7 +312,12 @@ pub(crate) fn migrate_storage_combined(
         if let Err(e) = set_storage_location(old_location) {
             log::error!("投影重建失败后恢复旧存储设置失败: {e}");
         }
-        rollback_moves(&skill_outcome.moved, &subagent_outcome.moved);
+        rollback_moves(
+            &skill_outcome.moved,
+            &skill_outcome.project_moved,
+            &subagent_outcome.moved,
+            &subagent_outcome.project_moved,
+        );
         let _ = rebuild_projections(db);
 
         return Err(AppError::Message(format_skill_error(
@@ -277,10 +339,10 @@ pub(crate) fn migrate_storage_combined(
 
 /// Persist a per-agent config-dir override and relocate managed projections.
 ///
-/// 流程：预校验新目标目录 -> 移除旧投影（失败则恢复已移除项）-> 搬迁启用中
-/// 指令的 live 文件 -> 持久化设置 -> 在新目录重建投影（逐目标快照）。中途失败
-/// 会尽力恢复设置、投影与 live 文件，并清理/恢复新目录中已重建的投影，
-/// 使状态可解释后再重试。
+/// 流程：预校验新目标目录 -> 移除旧投影（失败则恢复已移除项）-> 持久化设置
+/// -> 在新目录重建投影（逐目标快照）-> 迁移该 Agent 的固定 live 指令投影。
+/// 中途失败会尽力恢复设置与投影；指令迁移自身在文件操作失败时恢复新目标，
+/// 遇到内容冲突则零写入并返回结构化错误。
 #[tauri::command]
 pub async fn set_agent_override_dir(
     app: String,
@@ -307,6 +369,36 @@ fn current_override_for(app: &AgentType) -> Option<String> {
         AgentType::Codex => settings.codex_config_dir,
         AgentType::GeminiCli => settings.gemini_cli_config_dir,
         AgentType::OpenCode => settings.opencode_config_dir,
+    }
+}
+
+/// 一个 override 只迁移该 Agent 的 global 长期指令投影。Codex/OpenCode
+/// 共享逻辑 `AGENTS.md` 内容，但各自的有效文件路径独立；迁移一方时把另一方
+/// 作为只读 peer 传给指令服务，绝不删除或覆盖它。
+fn instruction_projection_for_override(
+    agent: &AgentType,
+    new_config_dir: &Path,
+) -> Option<(InstructionDocumentKind, PathBuf, PathBuf, Option<PathBuf>)> {
+    match agent {
+        AgentType::ClaudeCode => Some((
+            InstructionDocumentKind::Claude,
+            config::get_claude_prompt_file(),
+            new_config_dir.join("CLAUDE.md"),
+            None,
+        )),
+        AgentType::Codex => Some((
+            InstructionDocumentKind::Agents,
+            config::get_codex_prompt_file(),
+            new_config_dir.join("AGENTS.md"),
+            Some(config::get_opencode_prompt_file()),
+        )),
+        AgentType::OpenCode => Some((
+            InstructionDocumentKind::Agents,
+            config::get_opencode_prompt_file(),
+            new_config_dir.join("AGENTS.md"),
+            Some(config::get_codex_prompt_file()),
+        )),
+        AgentType::GeminiCli => None,
     }
 }
 
@@ -396,28 +488,21 @@ pub(crate) fn set_agent_override_dir_inner(
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty());
 
-    // 与 migrate_storage_combined 相同的固定锁顺序：skill -> subagent -> prompt
+    // 固定锁顺序：skill -> subagent -> instruction。
     let _skill_guard = skill_state_write_guard();
     let _subagent_guard = subagent_state_write_guard();
-    let _prompt_guard = prompt_state_write_guard();
+    let _instruction_guard = instruction_state_write_guard();
 
-    let skills = db.get_all_installed_skills()?;
+    // Agent override 仅重投影 global Skills；项目 Skills 永远使用项目根下固定路径。
+    let skills = db.get_all_installed_skills_for_target(&ScopeTarget::Global)?;
     let subagents = db.get_all_installed_subagents()?;
-    let enabled_prompt = db
-        .get_prompts(agent.as_str())?
-        .into_values()
-        .find(|p| p.enabled);
-    let old_live_file = prompt_file_path(&agent);
     let previous_override = current_override_for(&agent);
 
     let new_config_dir = dir
         .as_deref()
         .map(resolve_override_path)
         .unwrap_or_else(|| default_agent_config_dir(&agent));
-    let new_live_file = old_live_file
-        .file_name()
-        .map(|name| new_config_dir.join(name))
-        .unwrap_or_else(|| new_config_dir.clone());
+    let instruction_projection = instruction_projection_for_override(&agent, &new_config_dir);
 
     // 预校验新目标目录可写，再移除任何旧投影（skills/agents/指令文件均以此为准）
     for target_dir in [new_config_dir.join("skills"), new_config_dir.join("agents")] {
@@ -460,49 +545,10 @@ pub(crate) fn set_agent_override_dir_inner(
     }
 
     let mut persisted = false;
-    let mut new_live_written = false;
-    let mut removed_old_live: Option<String> = None;
-    // 新目录已有用户 live 文件时的备份（None 表示原本不存在）；失败回滚时
-    // 用于恢复磁盘内容，成功提交时转存为禁用的备份预设
-    let mut new_live_backup: Option<String> = None;
-    // 新目录中已重建投影的快照（按重建顺序）；sync 中途失败或后续
-    // save_live_backup_prompt 失败时，据此清理/恢复新目录中的目标
+    // 新目录中已重建投影的快照（按重建顺序）；sync 中途失败时据此恢复。
     let mut new_projection_snapshots: Vec<(PathBuf, NewTargetSnapshot)> = Vec::new();
 
     let mut commit = || -> Result<(), AppError> {
-        // 搬迁启用中指令的 live 文件
-        if let Some(prompt) = &enabled_prompt {
-            if new_live_file != old_live_file {
-                // 目标已存在用户自己的 live 文件时先备份内容：失败回滚用于恢复，
-                // 成功提交后转存为禁用备份预设
-                if new_live_backup.is_none() && new_live_file.exists() {
-                    new_live_backup = Some(
-                        std::fs::read_to_string(&new_live_file)
-                            .map_err(|e| AppError::io(&new_live_file, e))?,
-                    );
-                }
-                config::write_text_file(&new_live_file, &prompt.content)?;
-                new_live_written = true;
-
-                // 旧 live 仅在与启用预设内容一致时移除；否则保留并记录
-                if old_live_file.exists() {
-                    match std::fs::read_to_string(&old_live_file) {
-                        Ok(content) if content == prompt.content => {
-                            std::fs::remove_file(&old_live_file)
-                                .map_err(|e| AppError::io(&old_live_file, e))?;
-                            removed_old_live = Some(content);
-                        }
-                        _ => {
-                            log::warn!(
-                                "旧 live 文件内容与启用预设不一致，已保留（{}）",
-                                agent.as_str()
-                            );
-                        }
-                    }
-                }
-            }
-        }
-
         set_agent_config_dir_override(agent.as_str(), dir.clone())?;
         persisted = true;
 
@@ -541,18 +587,22 @@ pub(crate) fn set_agent_override_dir_inner(
             return Err(e);
         }
 
-        // 被启用预设覆盖的用户原有 live 内容持久化为禁用备份预设
-        // （幂等：内容为空或已存在相同内容的预设时跳过）。失败会走整体回滚，
-        // 用户内容仍由 new_live_backup 恢复到磁盘。
-        if let Some(content) = &new_live_backup {
-            save_live_backup_prompt(db, &agent, content)?;
+        // 指令迁移放在最后：它自身会在文件操作失败时回滚新目标，而成功后没有
+        // 后续会失败的步骤。Codex/OpenCode 的 peer 路径只用于冲突检测与保留。
+        if let Some((kind, old_path, new_path, peer_path)) = &instruction_projection {
+            relocate_global_projection_for_override(
+                *kind,
+                old_path,
+                new_path,
+                peer_path.as_deref(),
+            )?;
         }
 
         Ok(())
     };
 
     if let Err(err) = commit() {
-        // 尽力恢复：先还原设置，再清理/恢复新目录投影、重建旧投影、还原 live 文件
+        // 尽力恢复：先还原设置，再清理/恢复新目录投影并重建旧投影。
         if persisted {
             if let Err(restore_err) =
                 set_agent_config_dir_override(agent.as_str(), previous_override)
@@ -561,27 +611,13 @@ pub(crate) fn set_agent_override_dir_inner(
             }
         }
         // 清理/恢复新目录中已重建的投影（sync 中途失败时 commit 内已回滚，
-        // 这里覆盖 save_live_backup_prompt 等后续失败路径；列表已排空时为 no-op）
+        // 此处覆盖指令迁移前的失败路径；列表已排空时为 no-op）。
         rollback_new_projections(&mut new_projection_snapshots);
         for directory in &removed_skills {
             let _ = SkillService::sync_to_app_dir(directory, &agent);
         }
         for directory in &removed_subagents {
             let _ = SubagentService::sync_to_app_dir(directory, &agent);
-        }
-        if let Some(content) = &removed_old_live {
-            let _ = config::write_text_file(&old_live_file, content);
-        }
-        if new_live_written && new_live_file != old_live_file {
-            match &new_live_backup {
-                // 原本存在用户 live 文件：恢复备份内容而不是删除
-                Some(content) => {
-                    let _ = config::write_text_file(&new_live_file, content);
-                }
-                None => {
-                    let _ = std::fs::remove_file(&new_live_file);
-                }
-            }
         }
         return Err(err);
     }
@@ -650,6 +686,7 @@ mod tests {
             installed_at: 1,
             content_hash: None,
             updated_at: 0,
+            target: ScopeTarget::Global,
         }
     }
 
@@ -667,6 +704,7 @@ mod tests {
             installed_at: 1,
             content_hash: None,
             updated_at: 0,
+            target: ScopeTarget::Global,
         }
     }
 
@@ -847,6 +885,140 @@ mod tests {
 
     #[test]
     #[serial]
+    fn migrate_storage_combined_moves_project_skill_sibling_and_rebuilds_projection() {
+        let tmp = tempdir().unwrap();
+        let _guard = TestHomeGuard::set(tmp.path());
+        let db = Arc::new(Database::memory().unwrap());
+        let project_root = tmp.path().join("workspace");
+        fs::create_dir(&project_root).unwrap();
+        let project = ProjectService::add_project(&db, &project_root, None).unwrap();
+        let target = ScopeTarget::Project {
+            project_id: project.project_id.clone(),
+        };
+
+        let old_project_ssot = SkillService::get_ssot_dir_for_target(&db, &target).unwrap();
+        write_skill(&old_project_ssot.join("project-skill"), "Project Skill");
+        let mut skill = skill_fixture("project-skill");
+        skill.target = target.clone();
+        db.save_skill(&skill).unwrap();
+
+        SkillService::sync_to_app_dir_for_target(
+            &db,
+            &target,
+            "project-skill",
+            &AgentType::ClaudeCode,
+        )
+        .unwrap();
+        let project_projection = Path::new(&project.root_path)
+            .join(".claude")
+            .join("skills")
+            .join("project-skill");
+        assert!(project_projection.join("SKILL.md").is_file());
+
+        migrate_storage_combined(&db, StorageLocation::Unified)
+            .expect("project Skill migration succeeds");
+
+        let new_project_ssot = config::get_home_dir()
+            .join(".agents")
+            .join("projects")
+            .join(&project.project_id)
+            .join("skills");
+        assert!(new_project_ssot
+            .join("project-skill")
+            .join("SKILL.md")
+            .is_file());
+        assert!(!old_project_ssot.exists());
+        assert!(
+            project_projection.join("SKILL.md").is_file(),
+            "project projection must be rebuilt against the moved sibling"
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn migrate_storage_combined_rejects_unavailable_project_before_global_moves() {
+        let tmp = tempdir().unwrap();
+        let _guard = TestHomeGuard::set(tmp.path());
+        let db = Arc::new(Database::memory().unwrap());
+        write_skill(
+            &SkillService::get_ssot_dir().unwrap().join("global-skill"),
+            "Global Skill",
+        );
+        db.save_skill(&skill_fixture("global-skill")).unwrap();
+
+        let project_root = tmp.path().join("workspace");
+        fs::create_dir(&project_root).unwrap();
+        ProjectService::add_project(&db, &project_root, None).unwrap();
+        fs::remove_dir_all(&project_root).unwrap();
+
+        let error = migrate_storage_combined(&db, StorageLocation::Unified)
+            .expect_err("unavailable project must abort before any storage move");
+        assert!(error.to_string().contains("PROJECT_ROOT_UNAVAILABLE"));
+        assert!(SkillService::get_ssot_dir()
+            .unwrap()
+            .join("global-skill")
+            .join("SKILL.md")
+            .is_file());
+        assert!(!config::get_home_dir()
+            .join(".agents")
+            .join("skills")
+            .join("global-skill")
+            .exists());
+        assert_eq!(
+            crate::settings::get_settings().storage_location,
+            StorageLocation::Hub
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn migrate_storage_combined_rolls_back_project_sibling_after_projection_failure() {
+        let tmp = tempdir().unwrap();
+        let _guard = TestHomeGuard::set(tmp.path());
+        let db = Arc::new(Database::memory().unwrap());
+        let project_root = tmp.path().join("workspace");
+        fs::create_dir(&project_root).unwrap();
+        let project = ProjectService::add_project(&db, &project_root, None).unwrap();
+        let target = ScopeTarget::Project {
+            project_id: project.project_id.clone(),
+        };
+
+        let old_project_ssot = SkillService::get_ssot_dir_for_target(&db, &target).unwrap();
+        write_skill(&old_project_ssot.join("project-skill"), "Project Skill");
+        let mut skill = skill_fixture("project-skill");
+        skill.target = target;
+        db.save_skill(&skill).unwrap();
+
+        let custom_dir = tmp.path().join("custom-claude");
+        fs::create_dir_all(&custom_dir).unwrap();
+        fs::write(custom_dir.join("skills"), "not a directory").unwrap();
+        crate::settings::set_agent_config_dir_override(
+            "claude-code",
+            Some(custom_dir.to_string_lossy().to_string()),
+        )
+        .unwrap();
+
+        let error = migrate_storage_combined(&db, StorageLocation::Unified)
+            .expect_err("projection failure must roll back project sibling");
+        assert!(error.to_string().contains("MIGRATION_ABORTED"));
+        assert!(old_project_ssot
+            .join("project-skill")
+            .join("SKILL.md")
+            .is_file());
+        assert!(!config::get_home_dir()
+            .join(".agents")
+            .join("projects")
+            .join(&project.project_id)
+            .join("skills")
+            .exists());
+        assert_eq!(
+            crate::settings::get_settings().storage_location,
+            StorageLocation::Hub
+        );
+    }
+
+    #[test]
+    #[serial]
     fn migrate_storage_combined_waits_for_skill_and_subagent_readers() {
         let tmp = tempdir().unwrap();
         let _guard = TestHomeGuard::set(tmp.path());
@@ -960,16 +1132,14 @@ mod tests {
 
     #[test]
     #[serial]
-    fn set_agent_override_dir_relocates_enabled_prompt_live_file() {
+    fn set_agent_override_dir_ignores_legacy_prompt_and_moves_fixed_document() {
         let tmp = tempdir().unwrap();
         let _guard = TestHomeGuard::set(tmp.path());
         let db = Arc::new(Database::memory().unwrap());
-
-        // 启用一个 claude 指令预设，并把 live 文件写成同样的内容
         let prompt = crate::services::prompt::Prompt {
-            id: "p1".to_string(),
-            name: "P1".to_string(),
-            content: "enabled instructions".to_string(),
+            id: "legacy".to_string(),
+            name: "Legacy".to_string(),
+            content: "legacy preset instructions".to_string(),
             description: None,
             enabled: true,
             created_at: Some(1),
@@ -977,41 +1147,7 @@ mod tests {
         };
         db.save_prompt("claude-code", &prompt).unwrap();
         let old_live = config::get_claude_prompt_file();
-        config::write_text_file(&old_live, "enabled instructions").unwrap();
-
-        let custom_dir = tmp.path().join("custom-claude");
-        let custom_str = custom_dir.to_string_lossy().to_string();
-        set_agent_override_dir_inner("claude-code", Some(custom_str.clone()), &db)
-            .expect("set override");
-
-        // 新位置写出启用预设的 live 文件；旧 live 因内容一致被移除
-        assert_eq!(
-            fs::read_to_string(custom_dir.join("CLAUDE.md")).unwrap(),
-            "enabled instructions"
-        );
-        assert!(!old_live.exists());
-    }
-
-    #[test]
-    #[serial]
-    fn set_agent_override_dir_keeps_diverged_old_live_file() {
-        let tmp = tempdir().unwrap();
-        let _guard = TestHomeGuard::set(tmp.path());
-        let db = Arc::new(Database::memory().unwrap());
-
-        let prompt = crate::services::prompt::Prompt {
-            id: "p1".to_string(),
-            name: "P1".to_string(),
-            content: "enabled instructions".to_string(),
-            description: None,
-            enabled: true,
-            created_at: Some(1),
-            updated_at: Some(1),
-        };
-        db.save_prompt("claude-code", &prompt).unwrap();
-        // 用户手动改过 live 文件：内容与启用预设不一致
-        let old_live = config::get_claude_prompt_file();
-        config::write_text_file(&old_live, "user edited content").unwrap();
+        config::write_text_file(&old_live, "fixed live instructions").unwrap();
 
         let custom_dir = tmp.path().join("custom-claude");
         set_agent_override_dir_inner(
@@ -1021,15 +1157,113 @@ mod tests {
         )
         .expect("set override");
 
-        // 新 live 写入启用预设内容；旧 live 保留不动
         assert_eq!(
             fs::read_to_string(custom_dir.join("CLAUDE.md")).unwrap(),
-            "enabled instructions"
+            "fixed live instructions"
+        );
+        assert!(!old_live.exists());
+        assert_eq!(
+            db.get_prompts("claude-code").unwrap()["legacy"].content,
+            "legacy preset instructions"
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn set_agent_override_dir_does_not_reproject_project_skills() {
+        let tmp = tempdir().unwrap();
+        let _guard = TestHomeGuard::set(tmp.path());
+        let db = Arc::new(Database::memory().unwrap());
+        let project_root = tmp.path().join("workspace");
+        fs::create_dir(&project_root).unwrap();
+        let project = ProjectService::add_project(&db, &project_root, None).unwrap();
+        let target = ScopeTarget::Project {
+            project_id: project.project_id,
+        };
+        write_skill(
+            &SkillService::get_ssot_dir_for_target(&db, &target)
+                .unwrap()
+                .join("project-skill"),
+            "Project Skill",
+        );
+        let mut skill = skill_fixture("project-skill");
+        skill.target = target.clone();
+        db.save_skill(&skill).unwrap();
+        SkillService::sync_to_app_dir_for_target(
+            &db,
+            &target,
+            "project-skill",
+            &AgentType::ClaudeCode,
+        )
+        .unwrap();
+
+        let project_projection = project_root
+            .join(".claude")
+            .join("skills")
+            .join("project-skill");
+        assert!(project_projection.join("SKILL.md").is_file());
+
+        let custom_dir = tmp.path().join("custom-claude");
+        set_agent_override_dir_inner(
+            "claude-code",
+            Some(custom_dir.to_string_lossy().to_string()),
+            &db,
+        )
+        .expect("set global override");
+
+        assert!(project_projection.join("SKILL.md").is_file());
+        assert!(!custom_dir.join("skills").join("project-skill").exists());
+    }
+
+    #[test]
+    #[serial]
+    fn set_agent_override_dir_relocates_live_claude_document() {
+        let tmp = tempdir().unwrap();
+        let _guard = TestHomeGuard::set(tmp.path());
+        let db = Arc::new(Database::memory().unwrap());
+
+        let old_live = config::get_claude_prompt_file();
+        config::write_text_file(&old_live, "live Claude instructions").unwrap();
+
+        let custom_dir = tmp.path().join("custom-claude");
+        let custom_str = custom_dir.to_string_lossy().to_string();
+        set_agent_override_dir_inner("claude-code", Some(custom_str.clone()), &db)
+            .expect("set override");
+
+        // 新位置写出 live 文档；旧投影迁移后不存在。
+        assert_eq!(
+            fs::read_to_string(custom_dir.join("CLAUDE.md")).unwrap(),
+            "live Claude instructions"
+        );
+        assert!(!old_live.exists());
+    }
+
+    #[test]
+    #[serial]
+    fn set_agent_override_dir_keeps_opencode_agents_projection_when_codex_moves() {
+        let tmp = tempdir().unwrap();
+        let _guard = TestHomeGuard::set(tmp.path());
+        let db = Arc::new(Database::memory().unwrap());
+
+        let old_codex = config::get_codex_prompt_file();
+        let opencode = config::get_opencode_prompt_file();
+        config::write_text_file(&old_codex, "shared AGENTS instructions").unwrap();
+        config::write_text_file(&opencode, "shared AGENTS instructions").unwrap();
+
+        let custom_dir = tmp.path().join("custom-codex");
+        set_agent_override_dir_inner("codex", Some(custom_dir.to_string_lossy().to_string()), &db)
+            .expect("set override");
+
+        // Codex 的投影迁往新目录，OpenCode 的独立投影仍保留同一内容。
+        assert_eq!(
+            fs::read_to_string(custom_dir.join("AGENTS.md")).unwrap(),
+            "shared AGENTS instructions"
         );
         assert_eq!(
-            fs::read_to_string(&old_live).unwrap(),
-            "user edited content"
+            fs::read_to_string(&opencode).unwrap(),
+            "shared AGENTS instructions"
         );
+        assert!(!old_codex.exists());
     }
 
     #[test]
@@ -1068,24 +1302,13 @@ mod tests {
 
     #[test]
     #[serial]
-    fn set_agent_override_dir_restores_preexisting_new_live_on_commit_failure() {
+    fn set_agent_override_dir_keeps_live_documents_unchanged_when_setting_persist_fails() {
         let tmp = tempdir().unwrap();
         let _guard = TestHomeGuard::set(tmp.path());
         let db = Arc::new(Database::memory().unwrap());
 
-        // 启用一个 claude 指令预设，旧 live 与启用预设内容一致
-        let prompt = crate::services::prompt::Prompt {
-            id: "p1".to_string(),
-            name: "P1".to_string(),
-            content: "enabled instructions".to_string(),
-            description: None,
-            enabled: true,
-            created_at: Some(1),
-            updated_at: Some(1),
-        };
-        db.save_prompt("claude-code", &prompt).unwrap();
         let old_live = config::get_claude_prompt_file();
-        config::write_text_file(&old_live, "enabled instructions").unwrap();
+        config::write_text_file(&old_live, "old live instructions").unwrap();
 
         // 新目录已经存在用户自己的 live 文件
         let custom_dir = tmp.path().join("custom-claude");
@@ -1105,15 +1328,14 @@ mod tests {
         .expect_err("persist failure must abort the command");
         let _ = err;
 
-        // 用户原有的 live 文件内容被恢复，而不是被删除
+        // 设置写入在 live 文档迁移之前失败，因此新旧内容均保持不变。
         assert_eq!(
             fs::read_to_string(&new_live).unwrap(),
             "user's own instructions"
         );
-        // 旧 live 也被还原
         assert_eq!(
             fs::read_to_string(&old_live).unwrap(),
-            "enabled instructions"
+            "old live instructions"
         );
 
         // 清理目录障碍后读到的设置未变更
@@ -1129,19 +1351,8 @@ mod tests {
         let _guard = TestHomeGuard::set(tmp.path());
         let db = Arc::new(Database::memory().unwrap());
 
-        // 启用一个 claude 指令预设，旧 live 与启用预设内容一致
-        let prompt = crate::services::prompt::Prompt {
-            id: "p1".to_string(),
-            name: "P1".to_string(),
-            content: "enabled instructions".to_string(),
-            description: None,
-            enabled: true,
-            created_at: Some(1),
-            updated_at: Some(1),
-        };
-        db.save_prompt("claude-code", &prompt).unwrap();
         let old_live = config::get_claude_prompt_file();
-        config::write_text_file(&old_live, "enabled instructions").unwrap();
+        config::write_text_file(&old_live, "live Claude instructions").unwrap();
 
         // UI 输入带尾随空格：所有副作用都必须落在 trim 后的目录上
         let custom_dir = tmp.path().join("custom-claude");
@@ -1152,7 +1363,7 @@ mod tests {
         // live 文件写入 trim 后的目录，带尾随空格的目录从未被创建
         assert_eq!(
             fs::read_to_string(custom_dir.join("CLAUDE.md")).unwrap(),
-            "enabled instructions"
+            "live Claude instructions"
         );
         assert!(!tmp.path().join("custom-claude ").exists());
         assert!(!old_live.exists());
@@ -1227,104 +1438,65 @@ mod tests {
 
     #[test]
     #[serial]
-    fn set_agent_override_dir_backs_up_overwritten_live_as_disabled_preset() {
+    fn set_agent_override_dir_rejects_different_new_claude_document() {
         let tmp = tempdir().unwrap();
         let _guard = TestHomeGuard::set(tmp.path());
         let db = Arc::new(Database::memory().unwrap());
 
-        // 启用一个 claude 指令预设，旧 live 与启用预设内容一致
-        let prompt = crate::services::prompt::Prompt {
-            id: "p1".to_string(),
-            name: "P1".to_string(),
-            content: "enabled instructions".to_string(),
-            description: None,
-            enabled: true,
-            created_at: Some(1),
-            updated_at: Some(1),
-        };
-        db.save_prompt("claude-code", &prompt).unwrap();
         let old_live = config::get_claude_prompt_file();
-        config::write_text_file(&old_live, "enabled instructions").unwrap();
+        config::write_text_file(&old_live, "old live instructions").unwrap();
 
-        // 新目录预置用户自己的 live 文件
         let custom_dir = tmp.path().join("custom-claude");
         fs::create_dir_all(&custom_dir).unwrap();
         let new_live = custom_dir.join("CLAUDE.md");
         fs::write(&new_live, "user's own instructions").unwrap();
 
-        set_agent_override_dir_inner(
+        let err = set_agent_override_dir_inner(
             "claude-code",
             Some(custom_dir.to_string_lossy().to_string()),
             &db,
         )
-        .expect("set override");
+        .expect_err("different destination document must reject the override");
 
-        // 新 live 是启用预设内容
+        assert!(err
+            .to_string()
+            .contains("INSTRUCTION_OVERRIDE_TARGET_CONFLICT"));
+        assert_eq!(
+            fs::read_to_string(&old_live).unwrap(),
+            "old live instructions"
+        );
         assert_eq!(
             fs::read_to_string(&new_live).unwrap(),
-            "enabled instructions"
+            "user's own instructions"
         );
-
-        // 被覆盖的用户内容保存为一个禁用的备份预设
-        let prompts = db.get_prompts("claude-code").unwrap();
-        let backups: Vec<_> = prompts
-            .values()
-            .filter(|p| p.id.starts_with("backup-"))
-            .collect();
-        assert_eq!(backups.len(), 1);
-        assert_eq!(backups[0].content, "user's own instructions");
-        assert!(!backups[0].enabled);
-        // 启用预设不受影响
-        assert!(prompts["p1"].enabled);
+        assert_eq!(crate::settings::get_settings().claude_code_config_dir, None);
     }
 
     #[test]
     #[serial]
-    fn set_agent_override_dir_skips_backup_when_content_already_exists() {
+    fn set_agent_override_dir_rejects_diverged_agents_projections() {
         let tmp = tempdir().unwrap();
         let _guard = TestHomeGuard::set(tmp.path());
         let db = Arc::new(Database::memory().unwrap());
 
-        // 启用预设 + 一个内容与新目录 live 相同的既有预设（去重对象）
-        let prompt = crate::services::prompt::Prompt {
-            id: "p1".to_string(),
-            name: "P1".to_string(),
-            content: "enabled instructions".to_string(),
-            description: None,
-            enabled: true,
-            created_at: Some(1),
-            updated_at: Some(1),
-        };
-        db.save_prompt("claude-code", &prompt).unwrap();
-        let existing = crate::services::prompt::Prompt {
-            id: "existing".to_string(),
-            name: "Existing".to_string(),
-            content: "user's own instructions".to_string(),
-            description: None,
-            enabled: false,
-            created_at: Some(1),
-            updated_at: Some(1),
-        };
-        db.save_prompt("claude-code", &existing).unwrap();
-        let old_live = config::get_claude_prompt_file();
-        config::write_text_file(&old_live, "enabled instructions").unwrap();
+        let codex = config::get_codex_prompt_file();
+        let opencode = config::get_opencode_prompt_file();
+        config::write_text_file(&codex, "Codex content").unwrap();
+        config::write_text_file(&opencode, "OpenCode content").unwrap();
 
-        // 新目录预置的用户 live 内容与既有预设一致
-        let custom_dir = tmp.path().join("custom-claude");
-        fs::create_dir_all(&custom_dir).unwrap();
-        fs::write(custom_dir.join("CLAUDE.md"), "user's own instructions").unwrap();
-
-        set_agent_override_dir_inner(
-            "claude-code",
+        let custom_dir = tmp.path().join("custom-codex");
+        let err = set_agent_override_dir_inner(
+            "codex",
             Some(custom_dir.to_string_lossy().to_string()),
             &db,
         )
-        .expect("set override");
+        .expect_err("diverged AGENTS projections must reject the override");
 
-        // 不新增备份预设：预设总数不变，且没有任何 backup-* 预设
-        let prompts = db.get_prompts("claude-code").unwrap();
-        assert_eq!(prompts.len(), 2);
-        assert!(!prompts.keys().any(|id| id.starts_with("backup-")));
+        assert!(err.to_string().contains("INSTRUCTION_PROJECTIONS_DIVERGED"));
+        assert_eq!(fs::read_to_string(&codex).unwrap(), "Codex content");
+        assert_eq!(fs::read_to_string(&opencode).unwrap(), "OpenCode content");
+        assert!(!custom_dir.join("AGENTS.md").exists());
+        assert_eq!(crate::settings::get_settings().codex_config_dir, None);
     }
 
     #[test]

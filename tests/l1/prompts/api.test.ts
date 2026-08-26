@@ -1,5 +1,5 @@
-import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
-import type { Prompt } from '../../../src/types';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { ConfigContext, ScopeTarget } from '../../../src/types';
 
 const mockInvoke = vi.fn();
 
@@ -7,12 +7,12 @@ vi.mock('@tauri-apps/api/core', () => ({
   invoke: mockInvoke,
 }));
 
-async function loadPromptsApi() {
+async function loadInstructionsApi() {
   const mod = await import('../../../src/lib/api/prompts');
   return mod;
 }
 
-describe('prompts API wrappers', () => {
+describe('长期指令 API wrappers', () => {
   beforeEach(() => {
     mockInvoke.mockReset();
   });
@@ -24,75 +24,44 @@ describe('prompts API wrappers', () => {
     }
   });
 
-  it('getPrompts invokes the correct command', async () => {
-    const expected: Record<string, Prompt> = {
-      'prompt-1': {
-        id: 'prompt-1',
-        name: 'Default',
-        content: 'hello',
-        enabled: true,
+  it('按配置上下文读取固定的两类文档', async () => {
+    const context: ConfigContext = { kind: 'project', projectId: 'project-alpha' };
+    const expected = [
+      {
+        kind: 'claude',
+        fileName: 'CLAUDE.md',
+        appliesTo: ['claude-code'],
+        target: { scope: 'project', projectId: 'project-alpha' },
+        content: '',
+        exists: false,
       },
-    };
+      {
+        kind: 'agents',
+        fileName: 'AGENTS.md',
+        appliesTo: ['codex', 'opencode'],
+        target: { scope: 'project', projectId: 'project-alpha' },
+        content: '# Shared',
+        exists: true,
+      },
+    ];
     mockInvoke.mockResolvedValue(expected);
-    const api = await loadPromptsApi();
-    const result = await api.getPrompts('codex');
-    expect(mockInvoke).toHaveBeenCalledWith('get_prompts', { app: 'codex' });
+    const api = await loadInstructionsApi();
+    const result = await api.getInstructionDocuments(context);
+
+    expect(mockInvoke).toHaveBeenCalledWith('get_instruction_documents', { context });
     expect(result).toBe(expected);
   });
 
-  it('upsertPrompt forwards app, id and prompt', async () => {
+  it('以 ownership target、文档种类和内容保存，不携带 Agent 或 enabled', async () => {
     mockInvoke.mockResolvedValue(undefined);
-    const api = await loadPromptsApi();
-    const prompt: Prompt = {
-      id: 'prompt-2',
-      name: 'New',
-      content: 'content',
-      description: 'desc',
-      enabled: false,
-    };
-    await api.upsertPrompt('claude-code', 'prompt-2', prompt);
-    expect(mockInvoke).toHaveBeenCalledWith('upsert_prompt', {
-      app: 'claude-code',
-      id: 'prompt-2',
-      prompt,
-    });
-  });
+    const target: ScopeTarget = { scope: 'global' };
+    const api = await loadInstructionsApi();
+    await api.upsertInstructionDocument(target, 'agents', '# Shared instructions');
 
-  it('deletePrompt forwards app and id', async () => {
-    mockInvoke.mockResolvedValue(undefined);
-    const api = await loadPromptsApi();
-    await api.deletePrompt('gemini-cli', 'prompt-3');
-    expect(mockInvoke).toHaveBeenCalledWith('delete_prompt', {
-      app: 'gemini-cli',
-      id: 'prompt-3',
+    expect(mockInvoke).toHaveBeenCalledWith('upsert_instruction_document', {
+      target,
+      kind: 'agents',
+      content: '# Shared instructions',
     });
-  });
-
-  it('enablePrompt forwards app and id', async () => {
-    mockInvoke.mockResolvedValue(undefined);
-    const api = await loadPromptsApi();
-    await api.enablePrompt('opencode', 'prompt-4');
-    expect(mockInvoke).toHaveBeenCalledWith('enable_prompt', {
-      app: 'opencode',
-      id: 'prompt-4',
-    });
-  });
-
-  it('importPromptFromFile invokes the correct command', async () => {
-    mockInvoke.mockResolvedValue('imported-1');
-    const api = await loadPromptsApi();
-    const result = await api.importPromptFromFile('codex');
-    expect(mockInvoke).toHaveBeenCalledWith('import_prompt_from_file', { app: 'codex' });
-    expect(result).toBe('imported-1');
-  });
-
-  it('getCurrentPromptFileContent invokes the correct command', async () => {
-    mockInvoke.mockResolvedValue('live content');
-    const api = await loadPromptsApi();
-    const result = await api.getCurrentPromptFileContent('claude-code');
-    expect(mockInvoke).toHaveBeenCalledWith('get_current_prompt_file_content', {
-      app: 'claude-code',
-    });
-    expect(result).toBe('live content');
   });
 });

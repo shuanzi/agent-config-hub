@@ -18,6 +18,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use crate::config;
 use crate::database::Database;
 use crate::error::{format_skill_error, AppError};
+use crate::services::project::{ConfigContext, ProjectService, ScopeTarget};
 use crate::settings::{get_settings, StorageLocation, SyncMethod};
 
 // ========== Skills state coordination ==========
@@ -169,6 +170,9 @@ pub struct InstalledSkill {
     pub content_hash: Option<String>,
     #[serde(default)]
     pub updated_at: i64,
+    /// 资产的完整归属 target。旧的备份元数据缺失该字段时按 global 读取。
+    #[serde(default)]
+    pub target: ScopeTarget,
 }
 
 /// 可发现的技能（来自仓库）。
@@ -183,6 +187,9 @@ pub struct DiscoverableSkill {
     pub repo_owner: String,
     pub repo_name: String,
     pub repo_branch: String,
+    /// 相对于当前明确 target 的安装状态；发现源本身不携带全局状态。
+    #[serde(default)]
+    pub installed: bool,
 }
 
 /// 仓库配置。
@@ -343,10 +350,12 @@ impl Default for SkillService {
 pub(crate) struct SkillMigrationOutcome {
     pub result: MigrationResult,
     pub moved: Vec<String>,
+    pub project_moved: Vec<String>,
 }
 
 pub(crate) struct SkillMigrationFailure {
     pub moved: Vec<String>,
+    pub project_moved: Vec<String>,
     pub failures: Vec<String>,
 }
 
@@ -417,6 +426,53 @@ impl SkillService {
         Ok(dir)
     }
 
+    /// 按完整 target 解析 Skill SSOT。项目 target 先由 registry 验证，再进入
+    /// 存储位置对应的 project sibling；绝不回退到 global SSOT。
+    pub(crate) fn get_ssot_dir_for_target(
+        db: &Arc<Database>,
+        target: &ScopeTarget,
+    ) -> Result<PathBuf, AppError> {
+        match target {
+            ScopeTarget::Global => Self::get_ssot_dir(),
+            ScopeTarget::Project { project_id } => {
+                ProjectService::resolve_scope_target(db, target)?;
+                let dir = Self::project_ssot_dir_for_location(
+                    get_settings().storage_location,
+                    project_id,
+                );
+                fs::create_dir_all(&dir).map_err(|e| AppError::io(&dir, e))?;
+                Ok(dir)
+            }
+        }
+    }
+
+    fn project_ssot_dir_for_location(location: StorageLocation, project_id: &str) -> PathBuf {
+        let base = match location {
+            StorageLocation::Hub => config::get_hub_dir(),
+            StorageLocation::Unified => config::get_home_dir().join(".agents"),
+        };
+        base.join("projects").join(project_id).join("skills")
+    }
+
+    pub(crate) fn rollback_project_skill_moves(
+        old_location: StorageLocation,
+        new_location: StorageLocation,
+        project_ids: &[String],
+    ) {
+        for project_id in project_ids {
+            let old_ssot = Self::project_ssot_dir_for_location(old_location, project_id);
+            let new_ssot = Self::project_ssot_dir_for_location(new_location, project_id);
+            let Some(old_parent) = old_ssot.parent() else {
+                continue;
+            };
+            let Some(new_parent) = new_ssot.parent() else {
+                continue;
+            };
+            let _ = fs::create_dir_all(old_parent);
+            Self::rollback_skill_moves(old_parent, new_parent, &["skills".to_string()]);
+        }
+    }
+
     fn get_backup_dir() -> Result<PathBuf, AppError> {
         let dir = config::get_hub_skill_backups_dir();
         fs::create_dir_all(&dir).map_err(|e| AppError::io(&dir, e))?;
@@ -431,6 +487,31 @@ impl SkillService {
             AgentType::OpenCode => config::get_opencode_skills_dir(),
         };
         Ok(dir)
+    }
+
+    /// 按完整 target 解析 Agent 投影目录。项目 target 只使用项目根下的固定目录，
+    /// 不读取任何全局 Agent override。
+    pub(crate) fn get_app_skills_dir_for_target(
+        db: &Arc<Database>,
+        target: &ScopeTarget,
+        app: &AgentType,
+    ) -> Result<PathBuf, AppError> {
+        match target {
+            ScopeTarget::Global => Self::get_app_skills_dir(app),
+            ScopeTarget::Project { .. } => {
+                let resolved = ProjectService::resolve_scope_target(db, target)?;
+                let root = resolved
+                    .project_root
+                    .expect("project target resolution always has a project root");
+                let dir = match app {
+                    AgentType::ClaudeCode => root.join(".claude").join("skills"),
+                    AgentType::Codex => root.join(".agents").join("skills"),
+                    AgentType::GeminiCli => root.join(".gemini").join("skills"),
+                    AgentType::OpenCode => root.join(".opencode").join("skills"),
+                };
+                Ok(dir)
+            }
+        }
     }
 
     pub(crate) fn paths_alias(left: &Path, right: &Path) -> bool {
@@ -495,6 +576,17 @@ impl SkillService {
         Ok(app_dir)
     }
 
+    fn get_distinct_app_skills_dir_for_target(
+        db: &Arc<Database>,
+        target: &ScopeTarget,
+        ssot_dir: &Path,
+        app: &AgentType,
+    ) -> Result<PathBuf, AppError> {
+        let app_dir = Self::get_app_skills_dir_for_target(db, target, app)?;
+        Self::ensure_distinct_skill_roots(ssot_dir, &app_dir, app)?;
+        Ok(app_dir)
+    }
+
     fn validate_skill_storage_destination(ssot_dir: &Path) -> Result<(), AppError> {
         for app in AgentType::all() {
             let app_dir = Self::get_app_skills_dir(&app)?;
@@ -506,17 +598,73 @@ impl SkillService {
     // ========== Installed skill queries ==========
 
     pub fn get_all_installed(db: &Arc<Database>) -> Result<Vec<InstalledSkill>, AppError> {
-        let skills = db.get_all_installed_skills()?;
+        let skills = db.get_global_installed_skills()?;
         Ok(skills.into_values().collect())
     }
 
-    fn reuse_existing_install(
+    /// 按 UI 读取上下文组装 Skills。返回顺序即展示顺序；每项自身携带完整 target，
+    /// 因而无需引入额外的跨资产 section 模型。
+    pub fn get_installed_for_context(
         db: &Arc<Database>,
+        context: &ConfigContext,
+    ) -> Result<Vec<InstalledSkill>, AppError> {
+        match context {
+            ConfigContext::Global => Ok(db
+                .get_all_installed_skills_for_target(&ScopeTarget::Global)?
+                .into_values()
+                .collect()),
+            ConfigContext::All => {
+                let mut skills: Vec<InstalledSkill> = db
+                    .get_all_installed_skills_for_target(&ScopeTarget::Global)?
+                    .into_values()
+                    .collect();
+                for project in ProjectService::list_projects(db)? {
+                    let target = ScopeTarget::Project {
+                        project_id: project.project_id,
+                    };
+                    // `all` 视图跳过 root 已不可用的项目段；不得借此返回缓存记录
+                    // 或把项目资产回退为 global。
+                    if ProjectService::resolve_scope_target(db, &target).is_err() {
+                        continue;
+                    }
+                    skills.extend(
+                        db.get_all_installed_skills_for_target(&target)?
+                            .into_values(),
+                    );
+                }
+                Ok(skills)
+            }
+            ConfigContext::Project { .. } => {
+                let target = context.require_mutation_target()?;
+                // 单项目视图需要验证项目 root，以确保后续“适用”的 global Skill
+                // 不会被静默显示成可投影到一个已失效的项目。
+                ProjectService::resolve_scope_target(db, &target)?;
+                let mut skills: Vec<InstalledSkill> = db
+                    .get_all_installed_skills_for_target(&target)?
+                    .into_values()
+                    .collect();
+                skills.extend(
+                    db.get_all_installed_skills_for_target(&ScopeTarget::Global)?
+                        .into_values()
+                        .filter(Self::global_skill_is_explicitly_applicable),
+                );
+                Ok(skills)
+            }
+        }
+    }
+
+    fn global_skill_is_explicitly_applicable(skill: &InstalledSkill) -> bool {
+        !skill.apps.is_empty()
+    }
+
+    fn reuse_existing_install_for_target(
+        db: &Arc<Database>,
+        target: &ScopeTarget,
         skill: &DiscoverableSkill,
         install_name: &str,
         current_app: &AgentType,
     ) -> Result<Option<InstalledSkill>, AppError> {
-        let existing_skills = db.get_all_installed_skills()?;
+        let existing_skills = db.get_all_installed_skills_for_target(target)?;
         for existing in existing_skills.values() {
             if !existing.directory.eq_ignore_ascii_case(install_name) {
                 continue;
@@ -533,14 +681,17 @@ impl SkillService {
                     updated.apps.set_enabled_for(current_app, true);
                     // 先同步投影成功再落库：同步失败时 DB 保持原启用标志，
                     // 避免出现"已启用但无可用投影"的中间状态
-                    Self::sync_to_app_dir(&updated.directory, current_app)?;
+                    Self::sync_to_app_dir_for_target(db, target, &updated.directory, current_app)?;
                     if let Err(error) = db.save_skill(&updated) {
                         // 落库失败：移除本次新建的投影，恢复到操作前状态；
                         // 操作前已启用的投影先于本次操作存在，保留不动
                         if !existing.apps.is_enabled_for(current_app) {
-                            if let Err(rollback_error) =
-                                Self::remove_from_app(&updated.directory, current_app)
-                            {
+                            if let Err(rollback_error) = Self::remove_from_app_for_target(
+                                db,
+                                target,
+                                &updated.directory,
+                                current_app,
+                            ) {
                                 log::error!(
                                     "保存 Skill {} 失败后移除 {} 投影也失败: {rollback_error}",
                                     updated.name,
@@ -628,7 +779,19 @@ impl SkillService {
         skill: &DiscoverableSkill,
         current_app: &AgentType,
     ) -> Result<InstalledSkill, AppError> {
-        let ssot_dir = Self::get_ssot_dir()?;
+        self.install_for_target(db, &ScopeTarget::Global, skill, current_app)
+            .await
+    }
+
+    pub async fn install_for_target(
+        &self,
+        db: &Arc<Database>,
+        target: &ScopeTarget,
+        skill: &DiscoverableSkill,
+        current_app: &AgentType,
+    ) -> Result<InstalledSkill, AppError> {
+        ProjectService::resolve_scope_target(db, target)?;
+        let ssot_dir = Self::get_ssot_dir_for_target(db, target)?;
 
         let source_rel = Self::sanitize_skill_source_path(&skill.directory).ok_or_else(|| {
             AppError::Message(format_skill_error(
@@ -651,9 +814,13 @@ impl SkillService {
 
         {
             let _state_guard = skill_state_write_guard();
-            if let Some(existing) =
-                Self::reuse_existing_install(db, skill, &install_name, current_app)?
-            {
+            if let Some(existing) = Self::reuse_existing_install_for_target(
+                db,
+                target,
+                skill,
+                &install_name,
+                current_app,
+            )? {
                 return Ok(existing);
             }
         }
@@ -722,6 +889,7 @@ impl SkillService {
 
         Self::finish_install_under_lock(
             db,
+            target,
             skill,
             &install_name,
             current_app,
@@ -735,8 +903,11 @@ impl SkillService {
 
     /// 安装落盘段：持写锁执行。目标 SSOT 路径在锁内重新解析，
     /// 避免下载期间发生的存储迁移把新 skill 写入旧根。
+    // 保持事务输入显式，避免仅为 clippy 创建一次性参数对象。
+    #[allow(clippy::too_many_arguments)]
     fn finish_install_under_lock(
         db: &Arc<Database>,
+        target: &ScopeTarget,
         skill: &DiscoverableSkill,
         install_name: &str,
         current_app: &AgentType,
@@ -745,13 +916,14 @@ impl SkillService {
         downloaded_source: Option<&Path>,
     ) -> Result<InstalledSkill, AppError> {
         let _state_guard = skill_state_write_guard();
-        if let Some(existing) = Self::reuse_existing_install(db, skill, install_name, current_app)?
+        if let Some(existing) =
+            Self::reuse_existing_install_for_target(db, target, skill, install_name, current_app)?
         {
             return Ok(existing);
         }
 
         // 写锁内重新解析目标 SSOT：下载期间存储位置可能已迁移
-        let dest = Self::get_ssot_dir()?.join(install_name);
+        let dest = Self::get_ssot_dir_for_target(db, target)?.join(install_name);
 
         // 磁盘上已有同名目录但 DB 无记录：未托管内容，拒绝冒名接管
         Self::ensure_no_unmanaged_destination(&dest, install_name)?;
@@ -796,9 +968,16 @@ impl SkillService {
             installed_at: chrono::Utc::now().timestamp(),
             content_hash,
             updated_at: 0,
+            target: target.clone(),
         };
 
-        Self::persist_and_sync_new_skill(db, &installed_skill, current_app, Some(&dest))?;
+        Self::persist_and_sync_new_skill_for_target(
+            db,
+            target,
+            &installed_skill,
+            current_app,
+            Some(&dest),
+        )?;
 
         log::info!(
             "Skill {} 安装成功，已启用 {}",
@@ -809,11 +988,9 @@ impl SkillService {
         Ok(installed_skill)
     }
 
-    /// `fresh_ssot_dir` 仅当是本次安装新建的 SSOT 目录时传入：
-    /// 回滚时连同该目录一起删除，避免残留"非受管内容"导致下次安装被拒。
-    /// 接管/复用的既有目录绝不删除。
-    fn persist_and_sync_new_skill(
+    fn persist_and_sync_new_skill_for_target(
         db: &Arc<Database>,
+        target: &ScopeTarget,
         skill: &InstalledSkill,
         app: &AgentType,
         fresh_ssot_dir: Option<&Path>,
@@ -830,8 +1007,8 @@ impl SkillService {
             cleanup_fresh_ssot_dir();
             return Err(error);
         }
-        if let Err(error) = Self::sync_to_app_dir(&skill.directory, app) {
-            if let Err(rollback_error) = db.delete_skill(&skill.id) {
+        if let Err(error) = Self::sync_to_app_dir_for_target(db, target, &skill.directory, app) {
+            if let Err(rollback_error) = db.delete_skill_for_target(&skill.id, target) {
                 log::error!(
                     "Failed to roll back Skill {} after sync error: {rollback_error}",
                     skill.id
@@ -846,10 +1023,19 @@ impl SkillService {
     // ========== Uninstall ==========
 
     pub fn uninstall(db: &Arc<Database>, id: &str) -> Result<SkillUninstallResult, AppError> {
+        Self::uninstall_for_target(db, &ScopeTarget::Global, id)
+    }
+
+    pub fn uninstall_for_target(
+        db: &Arc<Database>,
+        target: &ScopeTarget,
+        id: &str,
+    ) -> Result<SkillUninstallResult, AppError> {
         let _state_guard = skill_state_write_guard();
+        ProjectService::resolve_scope_target(db, target)?;
 
         let skill = db
-            .get_installed_skill(id)?
+            .get_installed_skill_for_target(id, target)?
             .ok_or_else(|| AppError::InvalidInput(format!("Skill not found: {id}")))?;
 
         let directory = match Self::require_valid_directory(&skill.directory) {
@@ -859,17 +1045,17 @@ impl SkillService {
                     "Skill {id} 的 directory 非法（{:?}），跳过文件清理，仅删除数据库记录: {err}",
                     skill.directory
                 );
-                db.delete_skill(id)?;
+                db.delete_skill_for_target(id, target)?;
                 return Ok(SkillUninstallResult { backup_path: None });
             }
         };
 
-        let ssot_dir = Self::get_ssot_dir()?;
+        let ssot_dir = Self::get_ssot_dir_for_target(db, target)?;
 
         let mut projection_failures: Vec<AgentType> = Vec::new();
         // 只清理实际启用的 Agent 投影：未启用 Agent 下的同名路径可能是用户自有内容
         for app in skill.apps.enabled_apps() {
-            if let Err(e) = Self::remove_from_app(&directory, &app) {
+            if let Err(e) = Self::remove_from_app_for_target(db, target, &directory, &app) {
                 log::warn!(
                     "移除 Skill {} 在 {} 上的投影失败: {e}",
                     skill.name,
@@ -893,15 +1079,15 @@ impl SkillService {
             )));
         }
 
-        let backup_path =
-            Self::create_uninstall_backup(&skill)?.map(|path| path.to_string_lossy().to_string());
+        let backup_path = Self::create_uninstall_backup_for_target(db, &skill)?
+            .map(|path| path.to_string_lossy().to_string());
 
         let skill_path = ssot_dir.join(&directory);
         if skill_path.exists() {
             fs::remove_dir_all(&skill_path).map_err(|e| AppError::io(&skill_path, e))?;
         }
 
-        db.delete_skill(id)?;
+        db.delete_skill_for_target(id, target)?;
 
         log::info!(
             "Skill {} 卸载成功{}",
@@ -1053,7 +1239,17 @@ impl SkillService {
         &self,
         db: &Arc<Database>,
     ) -> Result<Vec<SkillUpdateInfo>, AppError> {
-        let skills = db.get_all_installed_skills()?;
+        self.check_updates_for_target(db, &ScopeTarget::Global)
+            .await
+    }
+
+    pub async fn check_updates_for_target(
+        &self,
+        db: &Arc<Database>,
+        target: &ScopeTarget,
+    ) -> Result<Vec<SkillUpdateInfo>, AppError> {
+        ProjectService::resolve_scope_target(db, target)?;
+        let skills = db.get_all_installed_skills_for_target(target)?;
         let mut updates = Vec::new();
 
         let mut repo_groups: HashMap<(String, String, String), Vec<InstalledSkill>> =
@@ -1072,7 +1268,7 @@ impl SkillService {
                 .push(skill);
         }
 
-        let ssot_dir = Self::get_ssot_dir()?;
+        let ssot_dir = Self::get_ssot_dir_for_target(db, target)?;
         let client = self.download_client();
 
         for ((owner, name, branch), group_skills) in &repo_groups {
@@ -1124,7 +1320,7 @@ impl SkillService {
                 ) {
                     Some((h, freshly_computed)) => {
                         if freshly_computed {
-                            let _ = db.update_skill_hash(&skill.id, &h, 0);
+                            let _ = db.update_skill_hash_for_target(&skill.id, target, &h, 0);
                         }
                         Some(h)
                     }
@@ -1156,9 +1352,10 @@ impl SkillService {
             )));
         }
 
-        db.get_installed_skill(&updated_skill.id)?.ok_or_else(|| {
-            AppError::InvalidInput(format!("Skill no longer installed: {}", updated_skill.id))
-        })
+        db.get_installed_skill_for_target(&updated_skill.id, &updated_skill.target)?
+            .ok_or_else(|| {
+                AppError::InvalidInput(format!("Skill no longer installed: {}", updated_skill.id))
+            })
     }
 
     /// 用 `source` 整体替换 SSOT 目录 `dest`。
@@ -1199,7 +1396,12 @@ impl SkillService {
                 Self::restore_ssot_from_backup(backup_path, dest);
                 let _ = db.save_skill(previous);
                 for app in previous.apps.enabled_apps() {
-                    let _ = Self::sync_to_app_dir(&previous.directory, &app);
+                    let _ = Self::sync_to_app_dir_for_target(
+                        db,
+                        &previous.target,
+                        &previous.directory,
+                        &app,
+                    );
                 }
                 Err(err)
             }
@@ -1211,8 +1413,19 @@ impl SkillService {
         db: &Arc<Database>,
         skill_id: &str,
     ) -> Result<InstalledSkill, AppError> {
+        self.update_skill_for_target(db, &ScopeTarget::Global, skill_id)
+            .await
+    }
+
+    pub async fn update_skill_for_target(
+        &self,
+        db: &Arc<Database>,
+        target: &ScopeTarget,
+        skill_id: &str,
+    ) -> Result<InstalledSkill, AppError> {
+        ProjectService::resolve_scope_target(db, target)?;
         let skill = db
-            .get_installed_skill(skill_id)?
+            .get_installed_skill_for_target(skill_id, target)?
             .ok_or_else(|| AppError::InvalidInput(format!("Skill not found: {skill_id}")))?;
 
         Self::require_valid_directory(&skill.directory)?;
@@ -1266,13 +1479,14 @@ impl SkillService {
                 ))
             })?;
 
-        Self::apply_downloaded_update(db, &skill, &owner, &name, used_branch, &source)
+        Self::apply_downloaded_update(db, target, &skill, &owner, &name, used_branch, &source)
     }
 
     /// 更新落盘段：持写锁执行。目标 SSOT 路径在锁内才解析，
     /// 避免下载期间发生的存储迁移把新版本写入旧根（而备份/投影解析的是新根）。
     fn apply_downloaded_update(
         db: &Arc<Database>,
+        target: &ScopeTarget,
         expected: &InstalledSkill,
         owner: &str,
         name: &str,
@@ -1281,9 +1495,11 @@ impl SkillService {
     ) -> Result<InstalledSkill, AppError> {
         let _state_guard = skill_state_write_guard();
 
-        let current_skill = db.get_installed_skill(&expected.id)?.ok_or_else(|| {
-            AppError::InvalidInput(format!("Skill no longer installed: {}", expected.id))
-        })?;
+        let current_skill = db
+            .get_installed_skill_for_target(&expected.id, target)?
+            .ok_or_else(|| {
+                AppError::InvalidInput(format!("Skill no longer installed: {}", expected.id))
+            })?;
         if current_skill.directory != expected.directory
             || current_skill.repo_owner != expected.repo_owner
             || current_skill.repo_name != expected.repo_name
@@ -1299,9 +1515,9 @@ impl SkillService {
         let skill = current_skill;
 
         // 写锁内解析目标 SSOT：下载期间存储位置可能已迁移
-        let dest = Self::get_ssot_dir()?.join(&skill.directory);
+        let dest = Self::get_ssot_dir_for_target(db, target)?.join(&skill.directory);
 
-        let backup_path = Self::create_uninstall_backup(&skill)?;
+        let backup_path = Self::create_uninstall_backup_for_target(db, &skill)?;
 
         // SSOT 替换失败时必须先从备份恢复，避免 SSOT 目录丢失
         if let Err(err) = Self::replace_ssot_dir(source, &dest) {
@@ -1333,6 +1549,7 @@ impl SkillService {
             installed_at: skill.installed_at,
             content_hash: new_hash,
             updated_at: chrono::Utc::now().timestamp(),
+            target: target.clone(),
         };
 
         let updated_skill = Self::persist_skill_update_or_restore(
@@ -1345,7 +1562,9 @@ impl SkillService {
 
         let mut sync_failures: Vec<AgentType> = Vec::new();
         for app in updated_skill.apps.enabled_apps() {
-            if let Err(e) = Self::sync_to_app_dir(&updated_skill.directory, &app) {
+            if let Err(e) =
+                Self::sync_to_app_dir_for_target(db, target, &updated_skill.directory, &app)
+            {
                 log::warn!("同步更新后的 skill 到 {} 失败: {e}", app.as_str());
                 sync_failures.push(app);
             }
@@ -1356,7 +1575,7 @@ impl SkillService {
             Self::restore_ssot_from_backup(backup_path.as_ref(), &dest);
             let _ = db.save_skill(&skill);
             for app in skill.apps.enabled_apps() {
-                let _ = Self::sync_to_app_dir(&skill.directory, &app);
+                let _ = Self::sync_to_app_dir_for_target(db, target, &skill.directory, &app);
             }
 
             return Err(AppError::Message(format_skill_error(
@@ -1379,7 +1598,7 @@ impl SkillService {
 
     pub fn backfill_content_hashes(db: &Arc<Database>) -> Result<usize, AppError> {
         let _state_guard = skill_state_write_guard();
-        let skills = db.get_all_installed_skills()?;
+        let skills = db.get_global_installed_skills()?;
         let ssot_dir = Self::get_ssot_dir()?;
         let mut count = 0;
 
@@ -1397,7 +1616,7 @@ impl SkillService {
             }
             match Self::compute_dir_hash(&skill_dir) {
                 Ok(hash) => {
-                    let _ = db.update_skill_hash(&skill.id, &hash, 0);
+                    let _ = db.update_global_skill_hash(&skill.id, &hash, 0);
                     count += 1;
                 }
                 Err(e) => {
@@ -1489,10 +1708,39 @@ impl SkillService {
         db: &Arc<Database>,
         target: StorageLocation,
     ) -> Result<SkillMigrationOutcome, SkillMigrationFailure> {
+        // 任何 project sibling 文件移动之前，必须先确认所有已登记项目当前仍可用。
+        // 此预检失败时不创建目标 SSOT、不变更设置、也不移动任何文件。
+        let projects = match ProjectService::list_projects(db) {
+            Ok(projects) => projects,
+            Err(e) => {
+                log::warn!("读取项目 registry 失败: {e}");
+                return Err(SkillMigrationFailure {
+                    moved: vec![],
+                    project_moved: vec![],
+                    failures: vec!["readProjects".to_string()],
+                });
+            }
+        };
+        for project in &projects {
+            let project_target = ScopeTarget::Project {
+                project_id: project.project_id.clone(),
+            };
+            if let Err(e) = ProjectService::resolve_scope_target(db, &project_target) {
+                log::warn!("项目 {} 不可用于 Skill 存储迁移: {e}", project.project_id);
+                return Err(SkillMigrationFailure {
+                    moved: vec![],
+                    project_moved: vec![],
+                    failures: vec!["resolveProject".to_string()],
+                });
+            }
+        }
+
+        let old_location = get_settings().storage_location;
         let old_dir = Self::get_ssot_dir().map_err(|e| {
             log::warn!("读取 Skill SSOT 目录失败: {e}");
             SkillMigrationFailure {
                 moved: vec![],
+                project_moved: vec![],
                 failures: vec!["resolveSourceDir".to_string()],
             }
         })?;
@@ -1504,6 +1752,7 @@ impl SkillService {
             log::warn!("创建 Skill 迁移目标目录失败: {e}");
             return Err(SkillMigrationFailure {
                 moved: vec![],
+                project_moved: vec![],
                 failures: vec!["createTargetDir".to_string()],
             });
         }
@@ -1511,16 +1760,18 @@ impl SkillService {
             log::warn!("Skill 迁移目标校验失败: {e}");
             return Err(SkillMigrationFailure {
                 moved: vec![],
+                project_moved: vec![],
                 failures: vec!["validateDestination".to_string()],
             });
         }
 
-        let skills = match db.get_all_installed_skills() {
+        let skills = match db.get_all_installed_skills_for_target(&ScopeTarget::Global) {
             Ok(skills) => skills,
             Err(e) => {
                 log::warn!("读取已安装 Skill 列表失败: {e}");
                 return Err(SkillMigrationFailure {
                     moved: vec![],
+                    project_moved: vec![],
                     failures: vec!["readInstalled".to_string()],
                 });
             }
@@ -1532,6 +1783,7 @@ impl SkillService {
             errors: vec![],
         };
         let mut moved = Vec::new();
+        let mut project_moved = Vec::new();
         let mut failures = Vec::new();
 
         for skill in skills.values() {
@@ -1583,16 +1835,84 @@ impl SkillService {
             }
         }
 
+        // 项目目录按 sibling 整体搬迁，既保留当前已登记记录，也保留项目 SSOT 中
+        // 尚未入库但属于该项目的内容；固定 backup root 永远不参与此迁移。
+        for project in &projects {
+            let src = Self::project_ssot_dir_for_location(old_location, &project.project_id);
+            let dst = Self::project_ssot_dir_for_location(target, &project.project_id);
+            if !src.exists() {
+                continue;
+            }
+            if dst.exists() {
+                failures.push(format!("project:{}", project.project_id));
+                continue;
+            }
+            let Some(parent) = dst.parent() else {
+                failures.push(format!("project:{}", project.project_id));
+                continue;
+            };
+            if let Err(e) = fs::create_dir_all(parent) {
+                log::warn!("创建项目 Skill 迁移目标目录失败: {e}");
+                failures.push(format!("project:{}", project.project_id));
+                continue;
+            }
+
+            match fs::rename(&src, &dst) {
+                Ok(()) => {
+                    result.migrated_count += 1;
+                    project_moved.push(project.project_id.clone());
+                }
+                Err(_) => match Self::copy_dir_recursive(&src, &dst) {
+                    Ok(()) => {
+                        if let Err(e) = fs::remove_dir_all(&src) {
+                            log::warn!("迁移项目 Skill sibling 失败：源目录删除失败: {e}");
+                            Self::restore_migration_source(
+                                &src,
+                                &dst,
+                                &format!("project:{}", project.project_id),
+                            );
+                            failures.push(format!("project:{}", project.project_id));
+                            continue;
+                        }
+                        result.migrated_count += 1;
+                        project_moved.push(project.project_id.clone());
+                    }
+                    Err(e) => {
+                        log::warn!("迁移项目 Skill sibling 失败: {e}");
+                        failures.push(format!("project:{}", project.project_id));
+                    }
+                },
+            }
+        }
+
         if failures.is_empty() {
-            Ok(SkillMigrationOutcome { result, moved })
+            Ok(SkillMigrationOutcome {
+                result,
+                moved,
+                project_moved,
+            })
         } else {
-            Err(SkillMigrationFailure { moved, failures })
+            Err(SkillMigrationFailure {
+                moved,
+                project_moved,
+                failures,
+            })
         }
     }
 
     // ========== Backups ==========
 
     pub fn list_backups() -> Result<Vec<SkillBackupEntry>, AppError> {
+        Self::list_backups_for_target(&ScopeTarget::Global)
+    }
+
+    /// 仅列出元数据归属于明确 target 的备份。该操作只读取固定 backup root，
+    /// 不解析 project root。
+    pub fn list_backups_for_target(
+        target: &ScopeTarget,
+    ) -> Result<Vec<SkillBackupEntry>, AppError> {
+        target.validate()?;
+        let _state_guard = skill_state_read_guard();
         let backup_dir = Self::get_backup_dir()?;
         let mut entries = Vec::new();
 
@@ -1610,12 +1930,15 @@ impl SkillService {
             }
 
             match Self::read_backup_metadata(&path) {
-                Ok(metadata) => entries.push(SkillBackupEntry {
-                    backup_id: entry.file_name().to_string_lossy().to_string(),
-                    backup_path: path.to_string_lossy().to_string(),
-                    created_at: metadata.backup_created_at,
-                    skill: metadata.skill,
-                }),
+                Ok(metadata) if metadata.skill.target == *target => {
+                    entries.push(SkillBackupEntry {
+                        backup_id: entry.file_name().to_string_lossy().to_string(),
+                        backup_path: path.to_string_lossy().to_string(),
+                        created_at: metadata.backup_created_at,
+                        skill: metadata.skill,
+                    })
+                }
+                Ok(_) => {}
                 Err(err) => {
                     log::warn!("解析 Skill 备份失败 {}: {err:#}", path.display());
                 }
@@ -1627,6 +1950,13 @@ impl SkillService {
     }
 
     pub fn delete_backup(backup_id: &str) -> Result<(), AppError> {
+        Self::delete_backup_for_target(backup_id, &ScopeTarget::Global)
+    }
+
+    /// 删除归属于明确 target 的备份。此处仅检查 backup metadata，不访问项目根。
+    pub fn delete_backup_for_target(backup_id: &str, target: &ScopeTarget) -> Result<(), AppError> {
+        target.validate()?;
+        let _state_guard = skill_state_write_guard();
         let backup_path = Self::backup_path_for_id(backup_id)?;
         let metadata =
             fs::symlink_metadata(&backup_path).map_err(|e| AppError::io(&backup_path, e))?;
@@ -1638,10 +1968,46 @@ impl SkillService {
             )));
         }
 
+        let backup = Self::read_backup_metadata(&backup_path)?;
+        if backup.skill.target != *target {
+            return Err(AppError::Message(format_skill_error(
+                "BACKUP_TARGET_MISMATCH",
+                &[],
+                Some("selectOriginalTarget"),
+            )));
+        }
+
         fs::remove_dir_all(&backup_path).map_err(|e| AppError::io(&backup_path, e))?;
 
         log::info!("Skill 备份已删除: {}", backup_path.display());
         Ok(())
+    }
+
+    /// 项目移除前使用的窄查询：仅检查固定 Skill backup root，绝不扫描项目 root。
+    /// 调用者负责先取得 Skill state lock，以保证其后数据库检查的锁顺序。
+    pub(crate) fn has_backup_for_target(project_id: &str) -> Result<bool, AppError> {
+        Self::has_backup_for_target_unlocked(project_id)
+    }
+
+    pub(crate) fn has_backup_for_target_unlocked(project_id: &str) -> Result<bool, AppError> {
+        let target = ScopeTarget::Project {
+            project_id: project_id.to_string(),
+        };
+        target.validate()?;
+        let backup_dir = Self::get_backup_dir()?;
+        for entry in fs::read_dir(&backup_dir).map_err(|e| AppError::io(&backup_dir, e))? {
+            let Ok(entry) = entry else { continue };
+            let path = entry.path();
+            if !path.is_dir() {
+                continue;
+            }
+            if let Ok(metadata) = Self::read_backup_metadata(&path) {
+                if metadata.skill.target == target {
+                    return Ok(true);
+                }
+            }
+        }
+        Ok(false)
     }
 
     pub fn restore_from_backup(
@@ -1650,9 +2016,29 @@ impl SkillService {
         // 恢复以备份中记录的启用状态为准；current_app 仅保留以维持命令层签名
         _current_app: &AgentType,
     ) -> Result<InstalledSkill, AppError> {
+        Self::restore_from_backup_for_target(db, backup_id, &ScopeTarget::Global)
+    }
+
+    /// 恢复只能回到备份 metadata 记录的原 target；调用方给出的 target 仅用于确认，
+    /// 不会改变恢复目的地。
+    pub fn restore_from_backup_for_target(
+        db: &Arc<Database>,
+        backup_id: &str,
+        target: &ScopeTarget,
+    ) -> Result<InstalledSkill, AppError> {
+        target.validate()?;
         let _state_guard = skill_state_write_guard();
         let backup_path = Self::backup_path_for_id(backup_id)?;
         let metadata = Self::read_backup_metadata(&backup_path)?;
+        if metadata.skill.target != *target {
+            return Err(AppError::Message(format_skill_error(
+                "BACKUP_TARGET_MISMATCH",
+                &[],
+                Some("selectOriginalTarget"),
+            )));
+        }
+        // 对项目备份，root 不可用时在任何 DB/SSOT/投影写入前失败，备份保持原样。
+        ProjectService::resolve_scope_target(db, target)?;
         let backup_skill_dir = backup_path.join("skill");
         if !backup_skill_dir.join("SKILL.md").exists() {
             return Err(AppError::InvalidInput(format!(
@@ -1661,7 +2047,7 @@ impl SkillService {
             )));
         }
 
-        let existing_skills = db.get_all_installed_skills()?;
+        let existing_skills = db.get_all_installed_skills_for_target(target)?;
         if existing_skills.contains_key(&metadata.skill.id)
             || existing_skills.values().any(|skill| {
                 skill
@@ -1677,7 +2063,7 @@ impl SkillService {
 
         let directory = Self::require_valid_directory(&metadata.skill.directory)?;
 
-        let ssot_dir = Self::get_ssot_dir()?;
+        let ssot_dir = Self::get_ssot_dir_for_target(db, target)?;
         let restore_path = ssot_dir.join(&directory);
         if restore_path.exists() || Self::is_symlink(&restore_path) {
             return Err(AppError::InvalidInput(format!(
@@ -1704,11 +2090,16 @@ impl SkillService {
         // 为所有启用的 Agent 重建投影；任一失败时连同本次已创建的前序投影一并清理
         let mut synced_apps: Vec<AgentType> = Vec::new();
         for app in restored_skill.apps.enabled_apps() {
-            if let Err(err) = Self::sync_to_app_dir(&restored_skill.directory, &app) {
+            if let Err(err) =
+                Self::sync_to_app_dir_for_target(db, target, &restored_skill.directory, &app)
+            {
                 for synced_app in &synced_apps {
-                    if let Err(rollback_error) =
-                        Self::remove_from_app(&restored_skill.directory, synced_app)
-                    {
+                    if let Err(rollback_error) = Self::remove_from_app_for_target(
+                        db,
+                        target,
+                        &restored_skill.directory,
+                        synced_app,
+                    ) {
                         log::error!(
                             "恢复 Skill {} 失败后移除 {} 投影也失败: {rollback_error}",
                             restored_skill.name,
@@ -1716,7 +2107,7 @@ impl SkillService {
                         );
                     }
                 }
-                let _ = db.delete_skill(&restored_skill.id);
+                let _ = db.delete_skill_for_target(&restored_skill.id, target);
                 let _ = fs::remove_dir_all(&restore_path);
                 return Err(err);
             }
@@ -1740,29 +2131,40 @@ impl SkillService {
         app: &AgentType,
         enabled: bool,
     ) -> Result<(), AppError> {
+        Self::toggle_app_for_target(db, &ScopeTarget::Global, id, app, enabled)
+    }
+
+    pub fn toggle_app_for_target(
+        db: &Arc<Database>,
+        target: &ScopeTarget,
+        id: &str,
+        app: &AgentType,
+        enabled: bool,
+    ) -> Result<(), AppError> {
         let _state_guard = skill_state_write_guard();
+        ProjectService::resolve_scope_target(db, target)?;
 
         let mut skill = db
-            .get_installed_skill(id)?
+            .get_installed_skill_for_target(id, target)?
             .ok_or_else(|| AppError::InvalidInput(format!("Skill not found: {id}")))?;
 
         let was_enabled = skill.apps.is_enabled_for(app);
         skill.apps.set_enabled_for(app, enabled);
 
         if enabled {
-            Self::sync_to_app_dir(&skill.directory, app)?;
+            Self::sync_to_app_dir_for_target(db, target, &skill.directory, app)?;
         } else {
-            Self::remove_from_app(&skill.directory, app)?;
+            Self::remove_from_app_for_target(db, target, &skill.directory, app)?;
         }
 
-        if let Err(error) = db.update_skill_apps(id, &skill.apps) {
+        if let Err(error) = db.update_skill_apps_for_target(id, target, &skill.apps) {
             // 落库失败：撤销刚才的投影变更，恢复到操作前状态；
             // 撤销失败仅记日志，不掩盖原始的落库错误
             if was_enabled != enabled {
                 let rollback_result = if enabled {
-                    Self::remove_from_app(&skill.directory, app)
+                    Self::remove_from_app_for_target(db, target, &skill.directory, app)
                 } else {
-                    Self::sync_to_app_dir(&skill.directory, app)
+                    Self::sync_to_app_dir_for_target(db, target, &skill.directory, app)
                 };
                 if let Err(rollback_error) = rollback_result {
                     log::error!(
@@ -1788,8 +2190,16 @@ impl SkillService {
     // ========== Unmanaged scan & import ==========
 
     pub fn scan_unmanaged(db: &Arc<Database>) -> Result<Vec<UnmanagedSkill>, AppError> {
+        Self::scan_unmanaged_for_target(db, &ScopeTarget::Global)
+    }
+
+    pub fn scan_unmanaged_for_target(
+        db: &Arc<Database>,
+        target: &ScopeTarget,
+    ) -> Result<Vec<UnmanagedSkill>, AppError> {
+        ProjectService::resolve_scope_target(db, target)?;
         let _state_guard = skill_state_read_guard();
-        let managed_skills = db.get_all_installed_skills()?;
+        let managed_skills = db.get_all_installed_skills_for_target(target)?;
         let managed_dirs: HashSet<String> = managed_skills
             .values()
             .map(|s| s.directory.clone())
@@ -1797,14 +2207,16 @@ impl SkillService {
 
         let mut scan_sources: Vec<(PathBuf, String)> = Vec::new();
         for app in AgentType::all() {
-            if let Ok(d) = Self::get_app_skills_dir(&app) {
+            if let Ok(d) = Self::get_app_skills_dir_for_target(db, target, &app) {
                 scan_sources.push((d, app.as_str().to_string()));
             }
         }
-        if let Some(agents_dir) = get_agents_skills_dir() {
-            scan_sources.push((agents_dir, "agents".to_string()));
+        if matches!(target, ScopeTarget::Global) {
+            if let Some(agents_dir) = get_agents_skills_dir() {
+                scan_sources.push((agents_dir, "agents".to_string()));
+            }
         }
-        if let Ok(ssot_dir) = Self::get_ssot_dir() {
+        if let Ok(ssot_dir) = Self::get_ssot_dir_for_target(db, target) {
             scan_sources.push((ssot_dir, "hub".to_string()));
         }
 
@@ -1859,6 +2271,15 @@ impl SkillService {
         db: &Arc<Database>,
         imports: Vec<ImportSkillSelection>,
     ) -> Result<Vec<InstalledSkill>, AppError> {
+        Self::import_from_apps_for_target(db, &ScopeTarget::Global, imports)
+    }
+
+    pub fn import_from_apps_for_target(
+        db: &Arc<Database>,
+        target: &ScopeTarget,
+        imports: Vec<ImportSkillSelection>,
+    ) -> Result<Vec<InstalledSkill>, AppError> {
+        ProjectService::resolve_scope_target(db, target)?;
         let _state_guard = skill_state_write_guard();
 
         // 批次级校验：同一 directory 出现两次时，两个选择映射到同一 SSOT 目标，
@@ -1875,7 +2296,7 @@ impl SkillService {
             }
         }
 
-        let ssot_dir = Self::get_ssot_dir()?;
+        let ssot_dir = Self::get_ssot_dir_for_target(db, target)?;
         let agents_lock = parse_agents_lock();
         let mut imported = Vec::new();
 
@@ -1887,12 +2308,14 @@ impl SkillService {
 
         let mut search_sources: Vec<(PathBuf, String)> = Vec::new();
         for app in AgentType::all() {
-            if let Ok(d) = Self::get_app_skills_dir(&app) {
+            if let Ok(d) = Self::get_app_skills_dir_for_target(db, target, &app) {
                 search_sources.push((d, app.as_str().to_string()));
             }
         }
-        if let Some(agents_dir) = get_agents_skills_dir() {
-            search_sources.push((agents_dir, "agents".to_string()));
+        if matches!(target, ScopeTarget::Global) {
+            if let Some(agents_dir) = get_agents_skills_dir() {
+                search_sources.push((agents_dir, "agents".to_string()));
+            }
         }
         search_sources.push((ssot_dir.clone(), "hub".to_string()));
 
@@ -1983,6 +2406,7 @@ impl SkillService {
                 installed_at: chrono::Utc::now().timestamp(),
                 content_hash,
                 updated_at: 0,
+                target: target.clone(),
             };
 
             if let Err(e) = db.save_skill(&skill) {
@@ -2006,7 +2430,7 @@ impl SkillService {
             let rollback_prior_progress = |synced_apps: &[ProjectionSnapshot]| {
                 for synced in synced_apps {
                     if let Err(rollback_error) =
-                        Self::remove_from_app(&skill.directory, &synced.app)
+                        Self::remove_from_app_for_target(db, target, &skill.directory, &synced.app)
                     {
                         log::error!(
                             "导入 Skill {} 后同步失败，且移除 {} 投影也失败: {rollback_error}",
@@ -2016,7 +2440,7 @@ impl SkillService {
                     }
                     Self::restore_projection_target(&synced.target, synced.snapshot.as_ref());
                 }
-                if let Err(rollback_error) = db.delete_skill(&skill.id) {
+                if let Err(rollback_error) = db.delete_skill_for_target(&skill.id, target) {
                     log::error!(
                         "导入 Skill {} 后同步失败，且回滚数据库记录也失败: {rollback_error}",
                         skill.id
@@ -2034,12 +2458,13 @@ impl SkillService {
             for app in skill.apps.enabled_apps() {
                 // 取 app 目录、同步前快照与同步本身属于同一 fallible 段：
                 // 任一步失败都进入同一回滚路径，避免快照失败绕过既有回滚
-                let prepared = Self::get_app_skills_dir(&app).and_then(|app_dir| {
-                    let target = app_dir.join(&skill.directory);
-                    let snapshot = Self::snapshot_projection_target(&target)?;
-                    Ok((target, snapshot))
-                });
-                let (target, snapshot) = match prepared {
+                let prepared =
+                    Self::get_app_skills_dir_for_target(db, target, &app).and_then(|app_dir| {
+                        let projection_path = app_dir.join(&skill.directory);
+                        let snapshot = Self::snapshot_projection_target(&projection_path)?;
+                        Ok((projection_path, snapshot))
+                    });
+                let (projection_path, snapshot) = match prepared {
                     Ok(prepared) => prepared,
                     Err(e) => {
                         // 当前 target 尚未被本次导入触碰，无需恢复它本身
@@ -2047,16 +2472,17 @@ impl SkillService {
                         return Err(e);
                     }
                 };
-                if let Err(e) = Self::sync_to_app_dir(&skill.directory, &app) {
+                if let Err(e) = Self::sync_to_app_dir_for_target(db, target, &skill.directory, &app)
+                {
                     // 先恢复本次同步失败的 Agent 的现场（同步可能已破坏其原目标），
                     // 再回滚前序已成功的 Agent
-                    Self::restore_projection_target(&target, snapshot.as_ref());
+                    Self::restore_projection_target(&projection_path, snapshot.as_ref());
                     rollback_prior_progress(&synced_apps);
                     return Err(e);
                 }
                 synced_apps.push(ProjectionSnapshot {
                     app,
-                    target,
+                    target: projection_path,
                     snapshot,
                 });
             }
@@ -2132,14 +2558,33 @@ impl SkillService {
     }
 
     pub fn sync_to_app_dir(directory: &str, app: &AgentType) -> Result<(), AppError> {
-        let directory = Self::require_valid_directory(directory)?;
-
         let ssot_dir = Self::get_ssot_dir()?;
+        let app_dir = Self::get_distinct_app_skills_dir(&ssot_dir, app)?;
+        Self::sync_to_app_dir_with_roots(directory, app, ssot_dir, app_dir)
+    }
+
+    /// 将明确 target 的 SSOT Skill 同步到该 target 的 Agent 投影。
+    pub(crate) fn sync_to_app_dir_for_target(
+        db: &Arc<Database>,
+        target: &ScopeTarget,
+        directory: &str,
+        app: &AgentType,
+    ) -> Result<(), AppError> {
+        let ssot_dir = Self::get_ssot_dir_for_target(db, target)?;
+        let app_dir = Self::get_distinct_app_skills_dir_for_target(db, target, &ssot_dir, app)?;
+        Self::sync_to_app_dir_with_roots(directory, app, ssot_dir, app_dir)
+    }
+
+    fn sync_to_app_dir_with_roots(
+        directory: &str,
+        app: &AgentType,
+        ssot_dir: PathBuf,
+        app_dir: PathBuf,
+    ) -> Result<(), AppError> {
+        let directory = Self::require_valid_directory(directory)?;
         let source = ssot_dir.join(&directory);
 
         Self::validate_sync_source_dir(&source, &directory)?;
-
-        let app_dir = Self::get_distinct_app_skills_dir(&ssot_dir, app)?;
         fs::create_dir_all(&app_dir).map_err(|e| AppError::io(&app_dir, e))?;
 
         let dest = app_dir.join(&directory);
@@ -2307,6 +2752,34 @@ impl SkillService {
         Ok(())
     }
 
+    /// 从明确 target 的 Agent 投影移除 Skill。项目 root 无法解析时失败，绝不触碰
+    /// global 投影。
+    pub(crate) fn remove_from_app_for_target(
+        db: &Arc<Database>,
+        target: &ScopeTarget,
+        directory: &str,
+        app: &AgentType,
+    ) -> Result<(), AppError> {
+        let directory = Self::require_valid_directory(directory)?;
+        let ssot_dir = Self::get_ssot_dir_for_target(db, target)?;
+        let app_dir = Self::get_distinct_app_skills_dir_for_target(db, target, &ssot_dir, app)?;
+        let skill_path = app_dir.join(&directory);
+
+        if skill_path.exists() || Self::is_symlink(&skill_path) {
+            Self::remove_path(&skill_path)?;
+            log::debug!(
+                "Skill {directory} 已从 {} 的 {} target 删除",
+                app.as_str(),
+                match target {
+                    ScopeTarget::Global => "global",
+                    ScopeTarget::Project { .. } => "project",
+                }
+            );
+        }
+
+        Ok(())
+    }
+
     pub fn sync_to_app(db: &Arc<Database>, app: &AgentType) -> Result<(), AppError> {
         let _state_guard = skill_state_read_guard();
         Self::sync_to_app_unlocked(db, app)
@@ -2316,7 +2789,7 @@ impl SkillService {
         db: &Arc<Database>,
         app: &AgentType,
     ) -> Result<(), AppError> {
-        let skills = db.get_all_installed_skills()?;
+        let skills = db.get_global_installed_skills()?;
         let ssot_dir = Self::get_ssot_dir()?;
         let app_dir = Self::get_distinct_app_skills_dir(&ssot_dir, app)?;
 
@@ -2373,6 +2846,47 @@ impl SkillService {
         Ok(())
     }
 
+    /// 在外部已持有 Skill 写锁时，重建一个明确 target 的单个 Agent 投影。
+    /// storage migration 用它重连项目 sibling 已移动后的投影；项目 root 解析
+    /// 失败必须直接返回，绝不退回 global 目录。
+    pub(crate) fn sync_target_to_app_unlocked(
+        db: &Arc<Database>,
+        target: &ScopeTarget,
+        app: &AgentType,
+    ) -> Result<(), AppError> {
+        ProjectService::resolve_scope_target(db, target)?;
+        let skills = db.get_all_installed_skills_for_target(target)?;
+        let mut sync_failures = Vec::new();
+
+        for skill in skills.values() {
+            if !skill.apps.is_enabled_for(app) {
+                continue;
+            }
+            if let Err(err) = Self::sync_to_app_dir_for_target(db, target, &skill.directory, app) {
+                log::warn!(
+                    "同步 {} target 的 Skill {} 到 {} 失败: {err}",
+                    match target {
+                        ScopeTarget::Global => "global",
+                        ScopeTarget::Project { .. } => "project",
+                    },
+                    skill.directory,
+                    app.as_str()
+                );
+                sync_failures.push(skill.directory.clone());
+            }
+        }
+
+        if !sync_failures.is_empty() {
+            return Err(AppError::Message(format_skill_error(
+                "PROJECTION_SYNC_FAILED",
+                &[("app", app.as_str()), ("items", &sync_failures.join(", "))],
+                Some("checkPermission"),
+            )));
+        }
+
+        Ok(())
+    }
+
     // ========== Discovery ==========
 
     pub async fn discover_available(
@@ -2401,6 +2915,33 @@ impl SkillService {
         skills.sort_by_key(|skill| skill.name.to_lowercase());
 
         Ok(skills)
+    }
+
+    /// 发现结果的 installed 状态只能相对于调用方明确选择的 target 计算。
+    pub async fn discover_available_for_target(
+        &self,
+        db: &Arc<Database>,
+        target: &ScopeTarget,
+        repos: Vec<SkillRepo>,
+    ) -> Result<Vec<DiscoverableSkill>, AppError> {
+        let mut skills = self.discover_available(repos).await?;
+        Self::set_discoverable_installed_state_for_target(db, target, &mut skills)?;
+        Ok(skills)
+    }
+
+    /// 为已获取的发现候选标记明确 target 的安装状态。网络扫描和 ownership
+    /// 判断保持分离，避免 global 记录错误地污染 project discovery。
+    fn set_discoverable_installed_state_for_target(
+        db: &Arc<Database>,
+        target: &ScopeTarget,
+        skills: &mut [DiscoverableSkill],
+    ) -> Result<(), AppError> {
+        ProjectService::resolve_scope_target(db, target)?;
+        let installed = db.get_all_installed_skills_for_target(target)?;
+        for skill in skills {
+            skill.installed = installed.contains_key(&skill.key);
+        }
+        Ok(())
     }
 
     async fn fetch_repo_skills(
@@ -2482,6 +3023,7 @@ impl SkillService {
             repo_owner: repo.owner.clone(),
             repo_name: repo.name.clone(),
             repo_branch: repo.branch.clone(),
+            installed: false,
         })
     }
 
@@ -3160,6 +3702,16 @@ impl SkillService {
         zip_path: &Path,
         current_app: &AgentType,
     ) -> Result<Vec<InstalledSkill>, AppError> {
+        Self::install_from_zip_for_target(db, &ScopeTarget::Global, zip_path, current_app)
+    }
+
+    pub fn install_from_zip_for_target(
+        db: &Arc<Database>,
+        target: &ScopeTarget,
+        zip_path: &Path,
+        current_app: &AgentType,
+    ) -> Result<Vec<InstalledSkill>, AppError> {
+        ProjectService::resolve_scope_target(db, target)?;
         let temp_guard = Self::extract_local_zip(zip_path)?;
         let temp_dir = temp_guard.path();
 
@@ -3174,9 +3726,9 @@ impl SkillService {
         }
 
         let _state_guard = skill_state_write_guard();
-        let ssot_dir = Self::get_ssot_dir()?;
+        let ssot_dir = Self::get_ssot_dir_for_target(db, target)?;
         let mut installed = Vec::new();
-        let existing_skills = db.get_all_installed_skills()?;
+        let existing_skills = db.get_all_installed_skills_for_target(target)?;
         let zip_stem = zip_path
             .file_stem()
             .and_then(|s| s.to_str())
@@ -3184,12 +3736,15 @@ impl SkillService {
 
         // 预扫描：计算每个条目的最终安装名，先检测批内/磁盘冲突再落盘，
         // 冲突时整个批次不产生任何 SSOT/投影变更。
-        struct ZipEntry {
-            skill_dir: PathBuf,
-            meta: Option<SkillMetadata>,
-            install_name: String,
+        enum ZipEntry {
+            New {
+                skill_dir: PathBuf,
+                meta: Option<SkillMetadata>,
+                install_name: String,
+            },
+            Reuse(InstalledSkill),
         }
-        let mut entries: Vec<ZipEntry> = Vec::new();
+        let mut entries = Vec::new();
         let mut claimed_names: HashSet<String> = HashSet::new();
 
         for skill_dir in skill_dirs {
@@ -3235,19 +3790,6 @@ impl SkillService {
                 }
             };
 
-            let conflict = existing_skills
-                .values()
-                .find(|s| s.directory.eq_ignore_ascii_case(&install_name));
-
-            if let Some(existing) = conflict {
-                log::warn!(
-                    "Skill directory '{}' already exists (from {}), skipping",
-                    install_name,
-                    existing.id
-                );
-                continue;
-            }
-
             // 同一 ZIP 内两个条目解析出相同的最终安装名：拒绝整个批次
             if !claimed_names.insert(install_name.to_lowercase()) {
                 return Err(AppError::Message(format_skill_error(
@@ -3257,10 +3799,35 @@ impl SkillService {
                 )));
             }
 
+            if let Some(existing) = existing_skills
+                .values()
+                .find(|skill| skill.directory.eq_ignore_ascii_case(&install_name))
+            {
+                // ZIP 的既有来源身份是 `local:<install-name>`。同 target 内同一
+                // local identity 只复用并启用请求 Agent；已有远程来源则封闭失败，
+                // 不能静默跳过或覆盖。
+                let same_local_source = existing.id == format!("local:{install_name}")
+                    && existing.repo_owner.is_none()
+                    && existing.repo_name.is_none();
+                if !same_local_source {
+                    return Err(AppError::Message(format_skill_error(
+                        "SKILL_DIRECTORY_CONFLICT",
+                        &[
+                            ("directory", &install_name),
+                            ("existingRepo", existing.id.as_str()),
+                            ("newRepo", "local"),
+                        ],
+                        Some("uninstallFirst"),
+                    )));
+                }
+                entries.push(ZipEntry::Reuse(existing.clone()));
+                continue;
+            }
+
             // 目标目录已存在但数据库无记录：属于未托管内容，绝不覆盖删除
             Self::ensure_no_unmanaged_destination(&ssot_dir.join(&install_name), &install_name)?;
 
-            entries.push(ZipEntry {
+            entries.push(ZipEntry::New {
                 skill_dir,
                 meta,
                 install_name,
@@ -3268,11 +3835,39 @@ impl SkillService {
         }
 
         for entry in entries {
-            let ZipEntry {
-                skill_dir,
-                meta,
-                install_name,
-            } = entry;
+            let (skill_dir, meta, install_name) = match entry {
+                ZipEntry::Reuse(existing) => {
+                    if existing.apps.is_enabled_for(current_app) {
+                        installed.push(existing);
+                        continue;
+                    }
+
+                    let mut updated = existing.clone();
+                    updated.apps.set_enabled_for(current_app, true);
+                    Self::sync_to_app_dir_for_target(db, target, &updated.directory, current_app)?;
+                    if let Err(error) = db.save_skill(&updated) {
+                        if let Err(rollback_error) = Self::remove_from_app_for_target(
+                            db,
+                            target,
+                            &updated.directory,
+                            current_app,
+                        ) {
+                            log::error!(
+                                "复用 ZIP Skill {} 落库失败后移除投影也失败: {rollback_error}",
+                                updated.name
+                            );
+                        }
+                        return Err(error);
+                    }
+                    installed.push(updated);
+                    continue;
+                }
+                ZipEntry::New {
+                    skill_dir,
+                    meta,
+                    install_name,
+                } => (skill_dir, meta, install_name),
+            };
 
             let (name, description) = match meta {
                 Some(m) => (
@@ -3300,9 +3895,16 @@ impl SkillService {
                 installed_at: chrono::Utc::now().timestamp(),
                 content_hash,
                 updated_at: 0,
+                target: target.clone(),
             };
 
-            Self::persist_and_sync_new_skill(db, &skill, current_app, Some(&dest))?;
+            Self::persist_and_sync_new_skill_for_target(
+                db,
+                target,
+                &skill,
+                current_app,
+                Some(&dest),
+            )?;
 
             log::info!(
                 "Skill {} installed from ZIP, enabled for {:?}",
@@ -3425,21 +4027,18 @@ impl SkillService {
 
     // ========== Backup helpers ==========
 
-    fn resolve_uninstall_backup_source(
+    fn resolve_uninstall_backup_source_for_target(
+        db: &Arc<Database>,
         skill: &InstalledSkill,
     ) -> Result<Option<PathBuf>, AppError> {
         let directory = Self::require_valid_directory(&skill.directory)?;
-
-        let ssot_path = Self::get_ssot_dir()?.join(&directory);
+        let ssot_path = Self::get_ssot_dir_for_target(db, &skill.target)?.join(&directory);
         if ssot_path.is_dir() {
             return Ok(Some(ssot_path));
         }
 
         for app in AgentType::all() {
-            let app_dir = match Self::get_app_skills_dir(&app) {
-                Ok(dir) => dir,
-                Err(_) => continue,
-            };
+            let app_dir = Self::get_app_skills_dir_for_target(db, &skill.target, &app)?;
             let candidate = app_dir.join(&directory);
             if candidate.is_dir() {
                 return Ok(Some(candidate));
@@ -3515,8 +4114,19 @@ impl SkillService {
         serde_json::from_str(&content).map_err(|e| AppError::json(&metadata_path, e))
     }
 
-    fn create_uninstall_backup(skill: &InstalledSkill) -> Result<Option<PathBuf>, AppError> {
-        let Some(source_path) = Self::resolve_uninstall_backup_source(skill)? else {
+    fn create_uninstall_backup_for_target(
+        db: &Arc<Database>,
+        skill: &InstalledSkill,
+    ) -> Result<Option<PathBuf>, AppError> {
+        let source_path = Self::resolve_uninstall_backup_source_for_target(db, skill)?;
+        Self::create_uninstall_backup_from_source(skill, source_path)
+    }
+
+    fn create_uninstall_backup_from_source(
+        skill: &InstalledSkill,
+        source_path: Option<PathBuf>,
+    ) -> Result<Option<PathBuf>, AppError> {
+        let Some(source_path) = source_path else {
             log::warn!(
                 "Skill {} 卸载前未找到可备份的目录，将跳过备份",
                 skill.directory
@@ -3830,6 +4440,497 @@ mod tests {
         drop(second_reader);
         drop(first_reader);
         assert!(skill_state_lock().try_write().is_ok());
+    }
+
+    #[test]
+    #[serial]
+    fn project_target_uses_hub_sibling_and_fixed_agent_projections() {
+        let home = tempdir().expect("home");
+        let _home_guard = TestHomeGuard::set(home.path());
+        let project_root = home.path().join("workspace");
+        fs::create_dir(&project_root).expect("project root");
+        let db = Arc::new(Database::memory().expect("memory db"));
+        let project = ProjectService::add_project(&db, &project_root, Some("Workspace".into()))
+            .expect("register project");
+        let target = ScopeTarget::Project {
+            project_id: project.project_id.clone(),
+        };
+        let canonical_project_root = PathBuf::from(&project.root_path);
+
+        assert_eq!(
+            SkillService::get_ssot_dir_for_target(&db, &target).expect("project ssot"),
+            config::get_hub_dir()
+                .join("projects")
+                .join(&project.project_id)
+                .join("skills")
+        );
+
+        for (app, expected) in [
+            (
+                AgentType::ClaudeCode,
+                canonical_project_root.join(".claude").join("skills"),
+            ),
+            (
+                AgentType::Codex,
+                canonical_project_root.join(".agents").join("skills"),
+            ),
+            (
+                AgentType::GeminiCli,
+                canonical_project_root.join(".gemini").join("skills"),
+            ),
+            (
+                AgentType::OpenCode,
+                canonical_project_root.join(".opencode").join("skills"),
+            ),
+        ] {
+            assert_eq!(
+                SkillService::get_app_skills_dir_for_target(&db, &target, &app)
+                    .expect("project projection"),
+                expected,
+                "{} projection must be project-local",
+                app.as_str()
+            );
+        }
+    }
+
+    #[test]
+    #[serial]
+    fn project_toggle_and_uninstall_do_not_touch_global_skill_with_same_id() {
+        let home = tempdir().expect("home");
+        let _home_guard = TestHomeGuard::set(home.path());
+        let project_root = home.path().join("workspace");
+        fs::create_dir(&project_root).expect("project root");
+        let db = Arc::new(Database::memory().expect("memory db"));
+        let project = ProjectService::add_project(&db, &project_root, None).expect("project");
+        let project_target = ScopeTarget::Project {
+            project_id: project.project_id,
+        };
+
+        let global = installed_skill_fixture("owner/repo:shared", "shared");
+        write_skill(
+            &SkillService::get_ssot_dir()
+                .expect("global ssot")
+                .join("shared"),
+            "Global",
+        );
+        db.save_skill(&global).expect("save global");
+
+        let mut project_skill = installed_skill_fixture("owner/repo:shared", "shared");
+        project_skill.target = project_target.clone();
+        write_skill(
+            &SkillService::get_ssot_dir_for_target(&db, &project_target)
+                .expect("project ssot")
+                .join("shared"),
+            "Project",
+        );
+        db.save_skill(&project_skill).expect("save project");
+
+        SkillService::toggle_app_for_target(
+            &db,
+            &project_target,
+            &project_skill.id,
+            &AgentType::ClaudeCode,
+            true,
+        )
+        .expect("toggle project skill");
+        assert!(project_root
+            .join(".claude")
+            .join("skills")
+            .join("shared")
+            .exists());
+        assert!(
+            !config::get_claude_skills_dir().join("shared").exists(),
+            "project toggle must not create a global projection"
+        );
+
+        SkillService::uninstall_for_target(&db, &project_target, &project_skill.id)
+            .expect("uninstall project skill");
+        assert!(db
+            .get_installed_skill_for_target(&project_skill.id, &project_target)
+            .expect("project query")
+            .is_none());
+        assert!(db
+            .get_installed_skill_for_target(&global.id, &ScopeTarget::Global)
+            .expect("global query")
+            .is_some());
+        assert!(SkillService::get_ssot_dir()
+            .expect("global ssot")
+            .join("shared")
+            .exists());
+    }
+
+    #[test]
+    #[serial]
+    fn unavailable_project_target_does_not_toggle_same_id_global_skill() {
+        let home = tempdir().expect("home");
+        let _home_guard = TestHomeGuard::set(home.path());
+        let project_root = home.path().join("workspace");
+        fs::create_dir(&project_root).expect("project root");
+        let db = Arc::new(Database::memory().expect("memory db"));
+        let project = ProjectService::add_project(&db, &project_root, None).expect("project");
+        let project_target = ScopeTarget::Project {
+            project_id: project.project_id,
+        };
+
+        let mut global = installed_skill_fixture("owner/repo:shared", "shared");
+        global.apps = SkillApps::only(&AgentType::ClaudeCode);
+        db.save_skill(&global).expect("save global skill");
+        let mut project_skill = installed_skill_fixture("owner/repo:shared", "shared");
+        project_skill.target = project_target.clone();
+        db.save_skill(&project_skill).expect("save project skill");
+        fs::remove_dir_all(&project_root).expect("project root unavailable");
+
+        let error = SkillService::toggle_app_for_target(
+            &db,
+            &project_target,
+            &project_skill.id,
+            &AgentType::Codex,
+            true,
+        )
+        .expect_err("unavailable project target must fail before any global work");
+        assert!(error.to_string().contains("PROJECT_ROOT_UNAVAILABLE"));
+        let stored_global = db
+            .get_installed_skill_for_target(&global.id, &ScopeTarget::Global)
+            .expect("global query")
+            .expect("global skill remains");
+        assert!(stored_global.apps.is_enabled_for(&AgentType::ClaudeCode));
+        assert!(!stored_global.apps.is_enabled_for(&AgentType::Codex));
+        assert!(!config::get_codex_skills_dir().join("shared").exists());
+    }
+
+    #[test]
+    #[serial]
+    fn project_backup_blocks_removal_but_lists_and_deletes_without_project_root() {
+        let home = tempdir().expect("home");
+        let _home_guard = TestHomeGuard::set(home.path());
+        let project_root = home.path().join("workspace");
+        fs::create_dir(&project_root).expect("project root");
+        let db = Arc::new(Database::memory().expect("memory db"));
+        let project = ProjectService::add_project(&db, &project_root, None).expect("project");
+        let target = ScopeTarget::Project {
+            project_id: project.project_id.clone(),
+        };
+        let mut skill = installed_skill_fixture("owner/repo:backup", "backup");
+        skill.target = target.clone();
+        write_skill(
+            &SkillService::get_ssot_dir_for_target(&db, &target)
+                .expect("project ssot")
+                .join("backup"),
+            "Project backup",
+        );
+        db.save_skill(&skill).expect("save project skill");
+
+        let uninstall = SkillService::uninstall_for_target(&db, &target, &skill.id)
+            .expect("uninstall and backup");
+        let backup_id = Path::new(uninstall.backup_path.as_deref().expect("backup path"))
+            .file_name()
+            .expect("backup id")
+            .to_string_lossy()
+            .to_string();
+        fs::remove_dir_all(&project_root).expect("project root becomes unavailable");
+
+        let backups = SkillService::list_backups_for_target(&target).expect("list without root");
+        assert_eq!(backups.len(), 1);
+        assert_eq!(backups[0].skill.target, target);
+        assert!(ProjectService::remove_project(&db, &project.project_id)
+            .expect_err("backup must block remove")
+            .to_string()
+            .contains("PROJECT_HAS_MANAGED_ASSETS"));
+
+        SkillService::delete_backup_for_target(&backup_id, &target)
+            .expect("delete backup without root");
+        ProjectService::remove_project(&db, &project.project_id)
+            .expect("empty unavailable project is removable after backup deletion");
+    }
+
+    #[test]
+    #[serial]
+    fn project_backup_restore_rejects_unavailable_root_and_keeps_backup() {
+        let home = tempdir().expect("home");
+        let _home_guard = TestHomeGuard::set(home.path());
+        let project_root = home.path().join("workspace");
+        fs::create_dir(&project_root).expect("project root");
+        let db = Arc::new(Database::memory().expect("memory db"));
+        let project = ProjectService::add_project(&db, &project_root, None).expect("project");
+        let target = ScopeTarget::Project {
+            project_id: project.project_id,
+        };
+        let mut skill = installed_skill_fixture("owner/repo:restore", "restore");
+        skill.target = target.clone();
+        write_skill(
+            &SkillService::get_ssot_dir_for_target(&db, &target)
+                .expect("project ssot")
+                .join("restore"),
+            "Project restore",
+        );
+        db.save_skill(&skill).expect("save project skill");
+        let uninstall =
+            SkillService::uninstall_for_target(&db, &target, &skill.id).expect("create backup");
+        let backup_id = Path::new(uninstall.backup_path.as_deref().expect("backup path"))
+            .file_name()
+            .expect("backup id")
+            .to_string_lossy()
+            .to_string();
+        fs::remove_dir_all(&project_root).expect("project root unavailable");
+
+        let error = SkillService::restore_from_backup_for_target(&db, &backup_id, &target)
+            .expect_err("unavailable project root must reject restore");
+        assert!(error.to_string().contains("PROJECT_ROOT_UNAVAILABLE"));
+        assert_eq!(
+            SkillService::list_backups_for_target(&target)
+                .expect("list retained backup")
+                .len(),
+            1
+        );
+        assert!(db
+            .get_installed_skill_for_target(&skill.id, &ScopeTarget::Global)
+            .expect("global query")
+            .is_none());
+    }
+
+    #[test]
+    #[serial]
+    fn installed_list_respects_context_order_and_project_applicability() {
+        let home = tempdir().expect("home");
+        let _home_guard = TestHomeGuard::set(home.path());
+        let root_b = home.path().join("b-root");
+        let root_a = home.path().join("a-root");
+        fs::create_dir(&root_b).expect("b root");
+        fs::create_dir(&root_a).expect("a root");
+        let db = Arc::new(Database::memory().expect("memory db"));
+        let project_b =
+            ProjectService::add_project(&db, &root_b, Some("Beta".into())).expect("project b");
+        let project_a =
+            ProjectService::add_project(&db, &root_a, Some("Alpha".into())).expect("project a");
+
+        for directory in ["global-z", "global-a"] {
+            let mut skill = installed_skill_fixture(&format!("owner/repo:{directory}"), directory);
+            skill.apps = SkillApps::only(&AgentType::ClaudeCode);
+            db.save_skill(&skill).expect("save global");
+        }
+        for (directory, project_id) in [
+            ("project-b", project_b.project_id.clone()),
+            ("project-a", project_a.project_id.clone()),
+        ] {
+            let mut skill = installed_skill_fixture(&format!("owner/repo:{directory}"), directory);
+            skill.target = ScopeTarget::Project { project_id };
+            db.save_skill(&skill).expect("save project skill");
+        }
+
+        let all =
+            SkillService::get_installed_for_context(&db, &ConfigContext::All).expect("all context");
+        assert_eq!(
+            all.iter()
+                .map(|skill| skill.directory.as_str())
+                .collect::<Vec<_>>(),
+            vec!["global-a", "global-z", "project-a", "project-b"]
+        );
+
+        let project = SkillService::get_installed_for_context(
+            &db,
+            &ConfigContext::Project {
+                project_id: project_a.project_id,
+            },
+        )
+        .expect("project context");
+        assert_eq!(
+            project
+                .iter()
+                .map(|skill| skill.directory.as_str())
+                .collect::<Vec<_>>(),
+            vec!["project-a", "global-a", "global-z"]
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn all_context_skips_assets_for_unavailable_project_roots() {
+        let home = tempdir().expect("home");
+        let _home_guard = TestHomeGuard::set(home.path());
+        let available_root = home.path().join("available-root");
+        let unavailable_root = home.path().join("unavailable-root");
+        fs::create_dir(&available_root).expect("available root");
+        fs::create_dir(&unavailable_root).expect("unavailable root");
+        let db = Arc::new(Database::memory().expect("memory db"));
+        let available =
+            ProjectService::add_project(&db, &available_root, None).expect("available project");
+        let unavailable =
+            ProjectService::add_project(&db, &unavailable_root, None).expect("unavailable project");
+
+        let global = installed_skill_fixture("owner/repo:global", "global");
+        db.save_skill(&global).expect("save global");
+        let mut available_skill = installed_skill_fixture("owner/repo:available", "available");
+        available_skill.target = ScopeTarget::Project {
+            project_id: available.project_id,
+        };
+        db.save_skill(&available_skill)
+            .expect("save available project skill");
+        let mut unavailable_skill =
+            installed_skill_fixture("owner/repo:unavailable", "unavailable");
+        unavailable_skill.target = ScopeTarget::Project {
+            project_id: unavailable.project_id,
+        };
+        db.save_skill(&unavailable_skill)
+            .expect("save unavailable project skill");
+
+        fs::remove_dir_all(&unavailable_root).expect("project root becomes unavailable");
+
+        let all =
+            SkillService::get_installed_for_context(&db, &ConfigContext::All).expect("all context");
+        assert_eq!(
+            all.iter()
+                .map(|skill| skill.directory.as_str())
+                .collect::<Vec<_>>(),
+            vec!["global", "available"],
+            "All must not return a cached record for an unavailable project root"
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn discovery_installed_state_is_scoped_to_the_requested_target() {
+        let home = tempdir().expect("home");
+        let _home_guard = TestHomeGuard::set(home.path());
+        let project_root = home.path().join("workspace");
+        fs::create_dir(&project_root).expect("project root");
+        let db = Arc::new(Database::memory().expect("memory db"));
+        let project = ProjectService::add_project(&db, &project_root, None).expect("project");
+        let project_target = ScopeTarget::Project {
+            project_id: project.project_id,
+        };
+        let global = installed_skill_fixture("owner/repo:shared", "shared");
+        db.save_skill(&global).expect("save global skill");
+
+        let mut candidates = vec![discoverable_skill_fixture("owner/repo:shared", "shared")];
+        SkillService::set_discoverable_installed_state_for_target(
+            &db,
+            &project_target,
+            &mut candidates,
+        )
+        .expect("project discovery status");
+        assert!(
+            !candidates[0].installed,
+            "a global record must not mark the same project target as installed"
+        );
+
+        let mut project_skill = global.clone();
+        project_skill.target = project_target.clone();
+        db.save_skill(&project_skill).expect("save project skill");
+        SkillService::set_discoverable_installed_state_for_target(
+            &db,
+            &project_target,
+            &mut candidates,
+        )
+        .expect("project discovery status");
+        assert!(candidates[0].installed);
+    }
+
+    #[test]
+    #[serial]
+    fn project_zip_install_writes_only_project_ssot_and_projection() {
+        let home = tempdir().expect("home");
+        let _home_guard = TestHomeGuard::set(home.path());
+        let project_root = home.path().join("workspace");
+        fs::create_dir(&project_root).expect("project root");
+        let db = Arc::new(Database::memory().expect("memory db"));
+        let project = ProjectService::add_project(&db, &project_root, None).expect("project");
+        let target = ScopeTarget::Project {
+            project_id: project.project_id,
+        };
+        let zip_path = home.path().join("skill.zip");
+        let mut bytes = Vec::new();
+        {
+            let mut zip = zip::ZipWriter::new(std::io::Cursor::new(&mut bytes));
+            let options = zip::write::SimpleFileOptions::default();
+            zip.start_file("project-skill/SKILL.md", options)
+                .expect("zip skill");
+            zip.write_all(b"---\nname: Project Skill\n---\n")
+                .expect("zip content");
+            zip.finish().expect("finish zip");
+        }
+        fs::write(&zip_path, bytes).expect("write zip");
+
+        let installed =
+            SkillService::install_from_zip_for_target(&db, &target, &zip_path, &AgentType::Codex)
+                .expect("project zip install");
+
+        assert_eq!(installed.len(), 1);
+        assert_eq!(installed[0].target, target);
+        assert!(project_root
+            .join(".agents")
+            .join("skills")
+            .join("project-skill")
+            .exists());
+        assert!(
+            !SkillService::get_ssot_dir()
+                .expect("global ssot")
+                .join("project-skill")
+                .exists(),
+            "project install must not write global SSOT"
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn project_zip_install_reuses_same_local_source_and_enables_requested_app() {
+        let home = tempdir().expect("home");
+        let _home_guard = TestHomeGuard::set(home.path());
+        let project_root = home.path().join("workspace");
+        fs::create_dir(&project_root).expect("project root");
+        let db = Arc::new(Database::memory().expect("memory db"));
+        let project = ProjectService::add_project(&db, &project_root, None).expect("project");
+        let target = ScopeTarget::Project {
+            project_id: project.project_id,
+        };
+        let zip_path = home.path().join("skill.zip");
+        let mut bytes = Vec::new();
+        {
+            let mut zip = zip::ZipWriter::new(std::io::Cursor::new(&mut bytes));
+            let options = zip::write::SimpleFileOptions::default();
+            zip.start_file("shared-skill/SKILL.md", options)
+                .expect("zip skill");
+            zip.write_all(b"---\nname: Shared Skill\n---\n")
+                .expect("zip content");
+            zip.finish().expect("finish zip");
+        }
+        fs::write(&zip_path, bytes).expect("write zip");
+
+        let initially_installed = SkillService::install_from_zip_for_target(
+            &db,
+            &target,
+            &zip_path,
+            &AgentType::ClaudeCode,
+        )
+        .expect("initial project zip install");
+        let stored = db
+            .get_installed_skill_for_target("local:shared-skill", &target)
+            .expect("target query")
+            .expect("stored skill");
+        assert_eq!(stored.id, "local:shared-skill");
+        assert_eq!(stored.repo_owner, None);
+        assert_eq!(stored.repo_name, None);
+        assert_eq!(initially_installed.len(), 1);
+        let reused =
+            SkillService::install_from_zip_for_target(&db, &target, &zip_path, &AgentType::Codex)
+                .expect("same local source is reused");
+
+        assert_eq!(reused.len(), 1);
+        assert!(reused[0].apps.is_enabled_for(&AgentType::ClaudeCode));
+        assert!(reused[0].apps.is_enabled_for(&AgentType::Codex));
+        assert!(project_root
+            .join(".agents")
+            .join("skills")
+            .join("shared-skill")
+            .join("SKILL.md")
+            .is_file());
+        assert!(db
+            .get_installed_skill_for_target("local:shared-skill", &target)
+            .expect("target query")
+            .is_some());
+        assert!(db
+            .get_installed_skill_for_target("local:shared-skill", &ScopeTarget::Global)
+            .expect("global query")
+            .is_none());
     }
 
     #[test]
@@ -4200,6 +5301,7 @@ mod tests {
             installed_at: 1,
             content_hash: None,
             updated_at: 0,
+            target: ScopeTarget::Global,
         };
         db.save_skill(&existing).unwrap();
 
@@ -4212,11 +5314,17 @@ mod tests {
             repo_owner: "owner2".to_string(),
             repo_name: "repo2".to_string(),
             repo_branch: "main".to_string(),
+            installed: false,
         };
 
-        let err =
-            SkillService::reuse_existing_install(&db, &discoverable, "my-skill", &AgentType::Codex)
-                .expect_err("must conflict");
+        let err = SkillService::reuse_existing_install_for_target(
+            &db,
+            &ScopeTarget::Global,
+            &discoverable,
+            "my-skill",
+            &AgentType::Codex,
+        )
+        .expect_err("must conflict");
         assert!(err.to_string().contains("SKILL_DIRECTORY_CONFLICT"));
     }
 
@@ -4245,6 +5353,7 @@ mod tests {
             installed_at: 1,
             content_hash: None,
             updated_at: 0,
+            target: ScopeTarget::Global,
         };
         db.save_skill(&existing).unwrap();
 
@@ -4257,12 +5366,18 @@ mod tests {
             repo_owner: "owner".to_string(),
             repo_name: "repo".to_string(),
             repo_branch: "main".to_string(),
+            installed: false,
         };
 
-        let updated =
-            SkillService::reuse_existing_install(&db, &discoverable, "my-skill", &AgentType::Codex)
-                .expect("reuse")
-                .expect("returns existing");
+        let updated = SkillService::reuse_existing_install_for_target(
+            &db,
+            &ScopeTarget::Global,
+            &discoverable,
+            "my-skill",
+            &AgentType::Codex,
+        )
+        .expect("reuse")
+        .expect("returns existing");
         assert!(updated.apps.claude_code);
         assert!(updated.apps.codex);
     }
@@ -4292,6 +5407,7 @@ mod tests {
             installed_at: 1,
             content_hash: None,
             updated_at: 0,
+            target: ScopeTarget::Global,
         };
         db.save_skill(&existing).unwrap();
 
@@ -4309,12 +5425,22 @@ mod tests {
             repo_owner: "owner".to_string(),
             repo_name: "repo".to_string(),
             repo_branch: "main".to_string(),
+            installed: false,
         };
 
-        SkillService::reuse_existing_install(&db, &discoverable, "my-skill", &AgentType::Codex)
-            .expect_err("sync failure must surface as an error");
+        SkillService::reuse_existing_install_for_target(
+            &db,
+            &ScopeTarget::Global,
+            &discoverable,
+            "my-skill",
+            &AgentType::Codex,
+        )
+        .expect_err("sync failure must surface as an error");
 
-        let stored = db.get_installed_skill(&existing.id).unwrap().unwrap();
+        let stored = db
+            .get_global_installed_skill(&existing.id)
+            .unwrap()
+            .unwrap();
         assert!(stored.apps.claude_code);
         assert!(
             !stored.apps.codex,
@@ -4347,6 +5473,7 @@ mod tests {
             installed_at: 1,
             content_hash: None,
             updated_at: 0,
+            target: ScopeTarget::Global,
         };
         db.save_skill(&existing).unwrap();
 
@@ -4366,16 +5493,26 @@ mod tests {
             repo_owner: "owner".to_string(),
             repo_name: "repo".to_string(),
             repo_branch: "main".to_string(),
+            installed: false,
         };
 
-        SkillService::reuse_existing_install(&db, &discoverable, "my-skill", &AgentType::Codex)
-            .expect_err("保存失败必须返回错误");
+        SkillService::reuse_existing_install_for_target(
+            &db,
+            &ScopeTarget::Global,
+            &discoverable,
+            "my-skill",
+            &AgentType::Codex,
+        )
+        .expect_err("保存失败必须返回错误");
 
         assert!(
             !config::get_codex_skills_dir().join("my-skill").exists(),
             "保存失败时本次新建的投影必须被移除"
         );
-        let stored = db.get_installed_skill(&existing.id).unwrap().unwrap();
+        let stored = db
+            .get_global_installed_skill(&existing.id)
+            .unwrap()
+            .unwrap();
         assert!(stored.apps.claude_code);
         assert!(!stored.apps.codex, "保存失败时 codex 的启用标志不得落库");
     }
@@ -4405,6 +5542,7 @@ mod tests {
             installed_at: 1,
             content_hash: None,
             updated_at: 0,
+            target: ScopeTarget::Global,
         };
         db.save_skill(&skill).unwrap();
         SkillService::sync_to_app_dir("scoped-skill", &AgentType::ClaudeCode).unwrap();
@@ -4428,7 +5566,7 @@ mod tests {
             .unwrap()
             .join("scoped-skill")
             .exists());
-        assert!(db.get_installed_skill(&skill.id).unwrap().is_none());
+        assert!(db.get_global_installed_skill(&skill.id).unwrap().is_none());
     }
 
     #[test]
@@ -4518,6 +5656,7 @@ mod tests {
             installed_at: 1,
             content_hash: None,
             updated_at: 0,
+            target: ScopeTarget::Global,
         };
         db.save_skill(&skill).unwrap();
         SkillService::sync_to_app_dir("uninstall-skill", &AgentType::ClaudeCode).unwrap();
@@ -4532,7 +5671,7 @@ mod tests {
         assert!(!config::get_claude_skills_dir()
             .join("uninstall-skill")
             .exists());
-        assert!(db.get_installed_skill(&skill.id).unwrap().is_none());
+        assert!(db.get_global_installed_skill(&skill.id).unwrap().is_none());
 
         let backups = SkillService::list_backups().expect("list backups");
         assert_eq!(backups.len(), 1);
@@ -4563,6 +5702,7 @@ mod tests {
             installed_at: 1,
             content_hash: None,
             updated_at: 0,
+            target: ScopeTarget::Global,
         };
         db.save_skill(&skill).unwrap();
         SkillService::sync_to_app_dir("restore-skill", &AgentType::ClaudeCode).unwrap();
@@ -4618,6 +5758,7 @@ mod tests {
             installed_at: 1,
             content_hash: None,
             updated_at: 0,
+            target: ScopeTarget::Global,
         };
         skill.apps.set_enabled_for(&AgentType::Codex, true);
         db.save_skill(&skill).unwrap();
@@ -4640,7 +5781,7 @@ mod tests {
         assert!(restored.apps.claude_code);
         assert!(restored.apps.codex);
         assert!(!restored.apps.gemini_cli);
-        let stored = db.get_installed_skill(&skill.id).unwrap().unwrap();
+        let stored = db.get_global_installed_skill(&skill.id).unwrap().unwrap();
         assert!(stored.apps.claude_code);
         assert!(stored.apps.codex);
 
@@ -4689,6 +5830,7 @@ mod tests {
             installed_at: 1,
             content_hash: None,
             updated_at: 0,
+            target: ScopeTarget::Global,
         };
         db.save_skill(&skill).unwrap();
         SkillService::sync_to_app_dir("migrate-skill", &AgentType::ClaudeCode).unwrap();
@@ -4921,7 +6063,7 @@ mod tests {
         skill.apps = SkillApps::default();
         db.save_skill(&skill).unwrap();
 
-        // 故障注入：DB 只读，update_skill_apps 必然失败
+        // 故障注入：DB 只读，update_global_skill_apps 必然失败
         {
             let conn = db.conn.lock().expect("lock conn");
             conn.execute("PRAGMA query_only = ON;", [])
@@ -4938,7 +6080,7 @@ mod tests {
                 .exists(),
             "落库失败时本次新建的投影必须被移除"
         );
-        let stored = db.get_installed_skill(&skill.id).unwrap().unwrap();
+        let stored = db.get_global_installed_skill(&skill.id).unwrap().unwrap();
         assert!(!stored.apps.claude_code, "落库失败时启用标志不得改变");
     }
 
@@ -4959,7 +6101,7 @@ mod tests {
         db.save_skill(&skill).unwrap();
         SkillService::sync_to_app_dir("toggle-skill", &AgentType::ClaudeCode).unwrap();
 
-        // 故障注入：DB 只读，update_skill_apps 必然失败
+        // 故障注入：DB 只读，update_global_skill_apps 必然失败
         {
             let conn = db.conn.lock().expect("lock conn");
             conn.execute("PRAGMA query_only = ON;", [])
@@ -4977,7 +6119,7 @@ mod tests {
                 .exists(),
             "落库失败时被删除的投影必须恢复"
         );
-        let stored = db.get_installed_skill(&skill.id).unwrap().unwrap();
+        let stored = db.get_global_installed_skill(&skill.id).unwrap().unwrap();
         assert!(stored.apps.claude_code, "落库失败时启用标志不得改变");
     }
 
@@ -5028,6 +6170,7 @@ mod tests {
                 installed_at: 1,
                 content_hash: None,
                 updated_at: 0,
+                target: ScopeTarget::Global,
             };
             db.save_skill(&skill).unwrap();
         }
@@ -5119,7 +6262,7 @@ mod tests {
 
         // 整个批次不产生任何 SSOT/DB 变更
         assert!(!SkillService::get_ssot_dir().unwrap().join("dup").exists());
-        assert!(db.get_all_installed_skills().unwrap().is_empty());
+        assert!(db.get_global_installed_skills().unwrap().is_empty());
     }
 
     #[test]
@@ -5167,6 +6310,7 @@ mod tests {
             installed_at: 1,
             content_hash: None,
             updated_at: 0,
+            target: ScopeTarget::Global,
         };
         db.save_skill(&previous).unwrap();
 
@@ -5209,7 +6353,10 @@ mod tests {
             "old content"
         );
         // DB 保留旧记录（无部分写入的新元数据）
-        let stored = db.get_installed_skill(&previous.id).unwrap().unwrap();
+        let stored = db
+            .get_global_installed_skill(&previous.id)
+            .unwrap()
+            .unwrap();
         assert_eq!(stored.name, "Old");
         assert_eq!(stored.content_hash, None);
     }
@@ -5235,6 +6382,7 @@ mod tests {
             installed_at: 1,
             content_hash: None,
             updated_at: 0,
+            target: ScopeTarget::Global,
         };
         db.save_skill(&skill).unwrap();
 
@@ -5270,7 +6418,10 @@ mod tests {
             .join("native")
             .exists());
         assert!(config::get_claude_skills_dir().join("native").exists());
-        assert!(db.get_installed_skill("local:native").unwrap().is_some());
+        assert!(db
+            .get_global_installed_skill("local:native")
+            .unwrap()
+            .is_some());
     }
 
     #[test]
@@ -5311,7 +6462,10 @@ mod tests {
         assert!(result.is_err(), "同步失败应返回错误");
 
         // 数据库记录应被回滚
-        assert!(db.get_installed_skill("local:native").unwrap().is_none());
+        assert!(db
+            .get_global_installed_skill("local:native")
+            .unwrap()
+            .is_none());
 
         // 恢复写权限以便临时目录清理
         #[cfg(unix)]
@@ -5354,6 +6508,7 @@ mod tests {
             installed_at: 1,
             content_hash: None,
             updated_at: 0,
+            target: ScopeTarget::Global,
         };
         db.save_skill(&skill).unwrap();
         SkillService::sync_to_app_dir("uninstall-skill", &AgentType::ClaudeCode).unwrap();
@@ -5376,7 +6531,7 @@ mod tests {
             .unwrap()
             .join("uninstall-skill")
             .exists());
-        assert!(db.get_installed_skill(&skill.id).unwrap().is_some());
+        assert!(db.get_global_installed_skill(&skill.id).unwrap().is_some());
     }
 
     #[test]
@@ -5426,7 +6581,7 @@ mod tests {
             .unwrap()
             .join("shared")
             .exists());
-        assert!(db.get_all_installed_skills().unwrap().is_empty());
+        assert!(db.get_global_installed_skills().unwrap().is_empty());
     }
 
     #[test]
@@ -5484,7 +6639,10 @@ mod tests {
             "同步失败时本次新建的 SSOT 目录必须被删除"
         );
         // 数据库记录必须回滚
-        assert!(db.get_installed_skill("local:native").unwrap().is_none());
+        assert!(db
+            .get_global_installed_skill("local:native")
+            .unwrap()
+            .is_none());
 
         // 恢复写权限以便临时目录清理
         #[cfg(unix)]
@@ -5553,7 +6711,7 @@ mod tests {
             "同步失败时前序 Agent 的投影必须被移除"
         );
         // DB 与 SSOT 已清理
-        assert!(db.get_installed_skill(&skill.id).unwrap().is_none());
+        assert!(db.get_global_installed_skill(&skill.id).unwrap().is_none());
         assert!(!SkillService::get_ssot_dir()
             .unwrap()
             .join("restore-rb")
@@ -5586,6 +6744,7 @@ mod tests {
             installed_at: 1,
             content_hash: None,
             updated_at: 0,
+            target: ScopeTarget::Global,
         }
     }
 
@@ -5636,6 +6795,7 @@ mod tests {
 
         let updated = SkillService::apply_downloaded_update(
             &db,
+            &ScopeTarget::Global,
             &previous,
             "owner",
             "repo",
@@ -5658,7 +6818,10 @@ mod tests {
         }
 
         // 新 hash 落库，且与当前 SSOT 内容一致
-        let stored = db.get_installed_skill(&previous.id).unwrap().unwrap();
+        let stored = db
+            .get_global_installed_skill(&previous.id)
+            .unwrap()
+            .unwrap();
         assert_eq!(stored.content_hash, updated.content_hash);
         assert!(stored.content_hash.is_some());
     }
@@ -5686,10 +6849,12 @@ mod tests {
             repo_owner: "owner".to_string(),
             repo_name: "repo".to_string(),
             repo_branch: "main".to_string(),
+            installed: false,
         };
 
         let installed = SkillService::finish_install_under_lock(
             &db,
+            &ScopeTarget::Global,
             &skill,
             "new-skill",
             &AgentType::ClaudeCode,
@@ -5707,7 +6872,10 @@ mod tests {
         assert!(unified.join("SKILL.md").exists());
         assert!(!hub_ssot.join("new-skill").exists());
 
-        assert!(db.get_installed_skill(&installed.id).unwrap().is_some());
+        assert!(db
+            .get_global_installed_skill(&installed.id)
+            .unwrap()
+            .is_some());
         assert!(config::get_claude_skills_dir().join("new-skill").exists());
     }
 
@@ -5731,15 +6899,16 @@ mod tests {
                 .expect("enable query_only");
         }
 
-        let result = SkillService::persist_and_sync_new_skill(
+        let result = SkillService::persist_and_sync_new_skill_for_target(
             &db,
+            &ScopeTarget::Global,
             &skill,
             &AgentType::ClaudeCode,
             Some(&dest),
         );
         assert!(result.is_err(), "保存失败必须返回错误");
         assert!(!dest.exists(), "保存失败时本次新建的 SSOT 目录必须一并删除");
-        assert!(db.get_installed_skill(&skill.id).unwrap().is_none());
+        assert!(db.get_global_installed_skill(&skill.id).unwrap().is_none());
     }
 
     #[test]
@@ -5773,15 +6942,16 @@ mod tests {
         let mut skill = installed_skill_fixture("owner/repo:sync-fail-skill", "sync-fail-skill");
         skill.apps = SkillApps::only(&AgentType::ClaudeCode);
 
-        let result = SkillService::persist_and_sync_new_skill(
+        let result = SkillService::persist_and_sync_new_skill_for_target(
             &db,
+            &ScopeTarget::Global,
             &skill,
             &AgentType::ClaudeCode,
             Some(&dest),
         );
         assert!(result.is_err(), "同步失败必须返回错误");
         assert!(!dest.exists(), "同步失败时本次新建的 SSOT 目录必须一并删除");
-        assert!(db.get_installed_skill(&skill.id).unwrap().is_none());
+        assert!(db.get_global_installed_skill(&skill.id).unwrap().is_none());
 
         // 恢复写权限以便临时目录清理
         #[cfg(unix)]
@@ -5825,14 +6995,19 @@ mod tests {
         skill.apps = SkillApps::only(&AgentType::ClaudeCode);
 
         // fresh_ssot_dir 为 None：目录是接管/既有的，回滚时绝不能删除
-        let result =
-            SkillService::persist_and_sync_new_skill(&db, &skill, &AgentType::ClaudeCode, None);
+        let result = SkillService::persist_and_sync_new_skill_for_target(
+            &db,
+            &ScopeTarget::Global,
+            &skill,
+            &AgentType::ClaudeCode,
+            None,
+        );
         assert!(result.is_err(), "同步失败必须返回错误");
         assert!(
             dest.join("SKILL.md").exists(),
             "接管/既有的 SSOT 目录绝不能被回滚删除"
         );
-        assert!(db.get_installed_skill(&skill.id).unwrap().is_none());
+        assert!(db.get_global_installed_skill(&skill.id).unwrap().is_none());
 
         #[cfg(unix)]
         {
@@ -5894,15 +7069,24 @@ mod tests {
             repo_owner: "owner".to_string(),
             repo_name: "repo".to_string(),
             repo_branch: "main".to_string(),
+            installed: false,
         };
 
-        let err =
-            SkillService::reuse_existing_install(&db, &discoverable, "reviewer", &AgentType::Codex)
-                .expect_err("同名不同来源必须报冲突");
+        let err = SkillService::reuse_existing_install_for_target(
+            &db,
+            &ScopeTarget::Global,
+            &discoverable,
+            "reviewer",
+            &AgentType::Codex,
+        )
+        .expect_err("同名不同来源必须报冲突");
         assert!(err.to_string().contains("SKILL_DIRECTORY_CONFLICT"));
 
         // 已装内容未被覆盖，启用状态未变
-        let stored = db.get_installed_skill(&existing.id).unwrap().unwrap();
+        let stored = db
+            .get_global_installed_skill(&existing.id)
+            .unwrap()
+            .unwrap();
         assert!(stored.apps.claude_code);
         assert!(!stored.apps.codex);
         let content = fs::read_to_string(
@@ -5993,7 +7177,7 @@ mod tests {
         assert!(ssot_content.contains("name: Alpha"));
         let agent_content = fs::read_to_string(codex_shared.join("SKILL.md")).unwrap();
         assert!(agent_content.contains("name: Beta"));
-        assert!(db.get_all_installed_skills().unwrap().is_empty());
+        assert!(db.get_global_installed_skills().unwrap().is_empty());
     }
 
     #[test]
@@ -6020,7 +7204,10 @@ mod tests {
         )
         .expect("内容一致应正常完成导入");
         assert_eq!(imported.len(), 1);
-        assert!(db.get_installed_skill("local:shared").unwrap().is_some());
+        assert!(db
+            .get_global_installed_skill("local:shared")
+            .unwrap()
+            .is_some());
         assert!(claude_shared.join("SKILL.md").exists());
     }
 
@@ -6034,6 +7221,7 @@ mod tests {
             repo_owner: "owner".to_string(),
             repo_name: "repo".to_string(),
             repo_branch: "main".to_string(),
+            installed: false,
         }
     }
 
@@ -6226,7 +7414,10 @@ mod tests {
         assert!(result.is_err(), "快照失败必须返回错误");
 
         // 数据库记录必须回滚
-        assert!(db.get_installed_skill("local:native").unwrap().is_none());
+        assert!(db
+            .get_global_installed_skill("local:native")
+            .unwrap()
+            .is_none());
         // 本次新建的 SSOT 目录必须清理
         assert!(!SkillService::get_ssot_dir()
             .unwrap()

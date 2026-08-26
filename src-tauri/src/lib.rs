@@ -25,6 +25,12 @@ pub use config::{
 };
 pub use database::Database;
 pub use error::AppError;
+pub use services::instruction::{
+    InstructionDocument, InstructionDocumentKind, InstructionDocumentService,
+};
+pub use services::project::{
+    ConfigContext, ProjectService, ProjectSummary, ResolvedScopeTarget, ScopeTarget,
+};
 pub use services::prompt::{Prompt, PromptService};
 
 /// Shared application state exposed to Tauri commands.
@@ -97,6 +103,10 @@ pub fn run() {
         get_setting_command,
         set_setting_command,
         set_agent_override_dir,
+        add_project,
+        list_projects,
+        relink_project_root,
+        remove_project,
         migrate_storage,
         get_installed_skills,
         discover_available_skills,
@@ -127,12 +137,8 @@ pub fn run() {
         get_subagent_backups,
         restore_subagent_backup,
         delete_subagent_backup,
-        get_prompts,
-        upsert_prompt,
-        delete_prompt,
-        enable_prompt,
-        import_prompt_from_file,
-        get_current_prompt_file_content,
+        get_instruction_documents,
+        upsert_instruction_document,
     ]);
 
     #[cfg(feature = "test-harness")]
@@ -143,6 +149,10 @@ pub fn run() {
         get_setting_command,
         set_setting_command,
         set_agent_override_dir,
+        add_project,
+        list_projects,
+        relink_project_root,
+        remove_project,
         migrate_storage,
         test_fx01_cold_start_millis,
         get_installed_skills,
@@ -174,12 +184,8 @@ pub fn run() {
         get_subagent_backups,
         restore_subagent_backup,
         delete_subagent_backup,
-        get_prompts,
-        upsert_prompt,
-        delete_prompt,
-        enable_prompt,
-        import_prompt_from_file,
-        get_current_prompt_file_content,
+        get_instruction_documents,
+        upsert_instruction_document,
     ]);
 
     builder
