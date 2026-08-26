@@ -27,6 +27,12 @@ const ERROR_MESSAGES: Record<string, string | ((ctx: Record<string, string>) => 
   'settings/error': (ctx) => ctx.message ?? '设置操作失败。',
   SKILL_INTERNAL: 'Skill 操作失败。',
   PROMPT_INTERNAL: 'Prompt 操作失败。',
+  INSTRUCTION_PROJECTIONS_DIVERGED:
+    'Codex 与 OpenCode 的 AGENTS.md 内容不一致，请先在磁盘统一后重试。',
+  PROJECT_ROOT_UNAVAILABLE: (ctx) =>
+    ctx.rootPath
+      ? `项目目录不可用：${ctx.rootPath}。`
+      : '项目目录不可用，请重新关联项目目录后重试。',
   SUBAGENT_INTERNAL: 'Subagent 操作失败。',
   SETTINGS_INTERNAL: '设置操作失败。',
   MIGRATION_ABORTED: (ctx) => `迁移失败：${ctx.failures ?? ''}`,
@@ -52,6 +58,8 @@ const SUGGESTION_MESSAGES: Record<string, string> = {
   http404: '服务器返回 404，请确认仓库存在。',
   http429: '请求过于频繁，请稍后重试。',
   checkLogs: '请检查日志或重试。',
+  relinkProject: '请重新关联项目目录后重试。',
+  selectExistingDirectory: '请选择一个存在的项目目录。',
 };
 
 /**

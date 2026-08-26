@@ -58,5 +58,30 @@ describe('SettingsView sync method change', () => {
     expect(mockSetSettings).not.toHaveBeenCalled();
     expect(mockSetAgentOverrideDir).not.toHaveBeenCalled();
     expect(mockMigrateStorage).not.toHaveBeenCalled();
+    expect(screen.getByRole('status').textContent).toContain('同步方式已保存。');
+  });
+
+  it('按既有 Agent 顺序保存已修改的覆盖目录，并为每个映射行提供稳定 key', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const SettingsView = await loadView();
+    render(<SettingsView />);
+
+    fireEvent.change(screen.getByLabelText('Claude Code'), {
+      target: { value: '/tmp/claude' },
+    });
+    fireEvent.change(screen.getByLabelText('Codex'), {
+      target: { value: '/tmp/codex' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '保存覆盖路径' }));
+
+    await waitFor(() => expect(mockSetAgentOverrideDir).toHaveBeenCalledTimes(2));
+    expect(mockSetAgentOverrideDir.mock.calls).toEqual([
+      [{ app: 'claude-code', dir: '/tmp/claude' }],
+      [{ app: 'codex', dir: '/tmp/codex' }],
+    ]);
+    expect(
+      consoleError.mock.calls.some((call) => String(call[0]).includes('unique "key" prop')),
+    ).toBe(false);
+    consoleError.mockRestore();
   });
 });

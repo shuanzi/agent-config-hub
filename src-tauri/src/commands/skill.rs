@@ -4,6 +4,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use crate::error::{format_skill_error, is_structured_error_payload, AppError};
+use crate::services::project::{ConfigContext, ScopeTarget};
 use crate::services::skill::{
     AgentType, DiscoverableSkill, ImportSkillSelection, InstalledSkill, SkillBackupEntry,
     SkillRepo, SkillService, SkillUninstallResult, SkillUpdateInfo, UnmanagedSkill,
@@ -33,23 +34,30 @@ fn parse_app_type(app: &str) -> Result<AgentType, String> {
 
 #[tauri::command]
 pub fn get_installed_skills(
+    context: ConfigContext,
     app_state: tauri::State<'_, AppState>,
 ) -> Result<Vec<InstalledSkill>, String> {
-    SkillService::get_all_installed(&app_state.db).map_err(map_err)
+    SkillService::get_installed_for_context(&app_state.db, &context).map_err(map_err)
 }
 
 #[tauri::command]
 pub async fn discover_available_skills(
+    target: ScopeTarget,
     service: tauri::State<'_, SkillServiceState>,
     app_state: tauri::State<'_, AppState>,
 ) -> Result<Vec<DiscoverableSkill>, String> {
     let repos = app_state.db.get_skill_repos().map_err(map_err)?;
-    service.0.discover_available(repos).await.map_err(map_err)
+    service
+        .0
+        .discover_available_for_target(&app_state.db, &target, repos)
+        .await
+        .map_err(map_err)
 }
 
 #[tauri::command]
 pub async fn install_skill(
     skill: DiscoverableSkill,
+    target: ScopeTarget,
     current_app: String,
     service: tauri::State<'_, SkillServiceState>,
     app_state: tauri::State<'_, AppState>,
@@ -58,7 +66,7 @@ pub async fn install_skill(
 
     service
         .0
-        .install(&app_state.db, &skill, &app_type)
+        .install_for_target(&app_state.db, &target, &skill, &app_type)
         .await
         .map_err(map_err)
 }
@@ -66,30 +74,34 @@ pub async fn install_skill(
 #[tauri::command]
 pub fn uninstall_skill(
     id: String,
+    target: ScopeTarget,
     app_state: tauri::State<'_, AppState>,
 ) -> Result<SkillUninstallResult, String> {
-    SkillService::uninstall(&app_state.db, &id).map_err(map_err)
+    SkillService::uninstall_for_target(&app_state.db, &target, &id).map_err(map_err)
 }
 
 #[tauri::command]
 pub fn toggle_skill_app(
     id: String,
+    target: ScopeTarget,
     app: String,
     enabled: bool,
     app_state: tauri::State<'_, AppState>,
 ) -> Result<(), String> {
     let app_type = parse_app_type(&app)?;
-    SkillService::toggle_app(&app_state.db, &id, &app_type, enabled).map_err(map_err)
+    SkillService::toggle_app_for_target(&app_state.db, &target, &id, &app_type, enabled)
+        .map_err(map_err)
 }
 
 #[tauri::command]
 pub async fn check_skill_updates(
+    target: ScopeTarget,
     service: tauri::State<'_, SkillServiceState>,
     app_state: tauri::State<'_, AppState>,
 ) -> Result<Vec<SkillUpdateInfo>, String> {
     service
         .0
-        .check_updates(&app_state.db)
+        .check_updates_for_target(&app_state.db, &target)
         .await
         .map_err(map_err)
 }
@@ -97,12 +109,13 @@ pub async fn check_skill_updates(
 #[tauri::command]
 pub async fn update_skill(
     id: String,
+    target: ScopeTarget,
     service: tauri::State<'_, SkillServiceState>,
     app_state: tauri::State<'_, AppState>,
 ) -> Result<InstalledSkill, String> {
     service
         .0
-        .update_skill(&app_state.db, &id)
+        .update_skill_for_target(&app_state.db, &target, &id)
         .await
         .map_err(map_err)
 }
@@ -135,49 +148,53 @@ pub fn remove_skill_repo(
 
 #[tauri::command]
 pub fn scan_unmanaged_skills(
+    target: ScopeTarget,
     app_state: tauri::State<'_, AppState>,
 ) -> Result<Vec<UnmanagedSkill>, String> {
-    SkillService::scan_unmanaged(&app_state.db).map_err(map_err)
+    SkillService::scan_unmanaged_for_target(&app_state.db, &target).map_err(map_err)
 }
 
 #[tauri::command]
 pub fn import_skills_from_apps(
     selections: Vec<ImportSkillSelection>,
+    target: ScopeTarget,
     app_state: tauri::State<'_, AppState>,
 ) -> Result<Vec<InstalledSkill>, String> {
-    SkillService::import_from_apps(&app_state.db, selections).map_err(map_err)
+    SkillService::import_from_apps_for_target(&app_state.db, &target, selections).map_err(map_err)
 }
 
 #[tauri::command]
 pub fn install_skills_from_zip(
     file_path: String,
     current_app: String,
+    target: ScopeTarget,
     app_state: tauri::State<'_, AppState>,
 ) -> Result<Vec<InstalledSkill>, String> {
     let app_type = parse_app_type(&current_app)?;
     let path = Path::new(&file_path);
 
-    SkillService::install_from_zip(&app_state.db, path, &app_type).map_err(map_err)
+    SkillService::install_from_zip_for_target(&app_state.db, &target, path, &app_type)
+        .map_err(map_err)
 }
 
 #[tauri::command]
-pub fn get_skill_backups() -> Result<Vec<SkillBackupEntry>, String> {
-    SkillService::list_backups().map_err(map_err)
+pub fn get_skill_backups(target: ScopeTarget) -> Result<Vec<SkillBackupEntry>, String> {
+    SkillService::list_backups_for_target(&target).map_err(map_err)
 }
 
 #[tauri::command]
 pub fn restore_skill_backup(
     backup_id: String,
-    current_app: String,
+    target: ScopeTarget,
     app_state: tauri::State<'_, AppState>,
 ) -> Result<InstalledSkill, String> {
-    let app_type = parse_app_type(&current_app)?;
-    SkillService::restore_from_backup(&app_state.db, &backup_id, &app_type).map_err(map_err)
+    SkillService::restore_from_backup_for_target(&app_state.db, &backup_id, &target)
+        .map_err(map_err)
 }
 
 #[tauri::command]
-pub fn delete_skill_backup(backup_id: String) -> Result<(), String> {
-    SkillService::delete_backup(&backup_id).map_err(map_err)
+pub fn delete_skill_backup(backup_id: String, target: ScopeTarget) -> Result<(), String> {
+    SkillService::delete_backup_for_target(&backup_id, &target).map_err(map_err)
 }
 
 pub struct SkillServiceState(pub Arc<SkillService>);

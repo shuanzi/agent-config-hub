@@ -1,358 +1,391 @@
-import { useEffect, useMemo, useState } from 'react';
-import { Search } from 'lucide-react';
-import type { AgentType, Prompt } from '../../types';
-import {
-  usePrompts,
-  useCurrentPromptFileContent,
-  useSavePrompt,
-  useDeletePrompt,
-  useEnablePrompt,
-  useImportPromptFromFile,
-} from '../../hooks/usePrompts';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { ArrowLeft, Check, FileText, Save } from 'lucide-react';
+import type { ConfigContext, InstructionDocument, ProjectSummary, ScopeTarget } from '../../types';
+import { useInstructionDocuments, useSaveInstructionDocument } from '../../hooks/usePrompts';
 import { toUserError } from '../../lib/errors';
+import { AgentBrandMark, agentLabels } from '../workbench/AgentBrandMark';
 import './instructions.css';
 
 interface InstructionsPanelProps {
-  activeApp: AgentType;
+  context: ConfigContext;
+  projects?: readonly ProjectSummary[];
 }
 
-const agentLabels: Record<AgentType, string> = {
-  'claude-code': 'Claude Code',
-  codex: 'Codex',
-  'gemini-cli': 'Gemini CLI',
-  opencode: 'OpenCode',
-};
+type NarrowSurface = 'list' | 'detail';
 
-function generateId(): string {
-  return `prompt-${Date.now()}`;
+interface InstructionDocumentGroup {
+  key: string;
+  target: ScopeTarget;
+  documents: InstructionDocument[];
 }
 
-function emptyPrompt(): Prompt {
-  return {
-    id: generateId(),
-    name: '',
-    content: '',
-    description: '',
-    enabled: false,
-  };
+function readNarrowInstructions(): boolean {
+  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return false;
+  return window.matchMedia('(max-width: 1199px)').matches === true;
 }
 
-export function InstructionsPanel({ activeApp }: InstructionsPanelProps) {
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [isCreating, setIsCreating] = useState(false);
-  const [draft, setDraft] = useState<Prompt>(emptyPrompt());
-  const [errorMessage, setErrorMessage] = useState('');
-  const [showLiveContent, setShowLiveContent] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [statusFilter, setStatusFilter] = useState<'all' | 'enabled' | 'disabled'>('all');
+function useNarrowInstructions(): boolean {
+  const [isNarrow, setIsNarrow] = useState(readNarrowInstructions);
 
-  const { data: prompts, isLoading } = usePrompts(activeApp);
-  const { data: liveContent, isLoading: isLoadingLive } = useCurrentPromptFileContent(activeApp);
-  const saveMutation = useSavePrompt();
-  const deleteMutation = useDeletePrompt();
-  const enableMutation = useEnablePrompt();
-  const importMutation = useImportPromptFromFile();
-
-  // activeApp 切换时组件保持挂载：重置编辑器状态，避免把上一个
-  // Agent 的选中项或草稿保存进新 Agent。
   useEffect(() => {
-    setSelectedId(null);
-    setIsCreating(false);
-    setDraft(emptyPrompt());
+    if (typeof window.matchMedia !== 'function') return;
+
+    const query = window.matchMedia('(max-width: 1199px)');
+    const update = () => setIsNarrow(query.matches);
+    update();
+
+    if (typeof query.addEventListener === 'function') {
+      query.addEventListener('change', update);
+      return () => query.removeEventListener('change', update);
+    }
+
+    query.addListener(update);
+    return () => query.removeListener(update);
+  }, []);
+
+  return isNarrow;
+}
+
+function targetKey(target: ScopeTarget): string {
+  return target.scope === 'global' ? 'global' : `project:${target.projectId}`;
+}
+
+function documentKey(document: InstructionDocument): string {
+  return `${targetKey(document.target)}:${document.kind}`;
+}
+
+function targetLabel(target: ScopeTarget, projects: readonly ProjectSummary[]): string {
+  if (target.scope === 'global') return '全局配置';
+  return (
+    projects.find((project) => project.projectId === target.projectId)?.displayName ?? '项目配置'
+  );
+}
+
+function contextLabel(context: ConfigContext, projects: readonly ProjectSummary[]): string {
+  if (context.kind === 'all') return '全部配置';
+  return context.kind === 'global'
+    ? '全局配置'
+    : (projects.find((project) => project.projectId === context.projectId)?.displayName ??
+        '项目配置');
+}
+
+function contextKey(context: ConfigContext): string {
+  return context.kind === 'project' ? `project:${context.projectId}` : context.kind;
+}
+
+function documentSummary(document: InstructionDocument): string {
+  return document.kind === 'claude' ? '仅对 Claude Code 生效' : '对 Codex、OpenCode 生效';
+}
+
+function groupDocuments(documents: InstructionDocument[]): InstructionDocumentGroup[] {
+  const groups = new Map<string, InstructionDocumentGroup>();
+
+  for (const document of documents) {
+    const key = targetKey(document.target);
+    const group = groups.get(key);
+    if (group) {
+      group.documents.push(document);
+      continue;
+    }
+    groups.set(key, { key, target: document.target, documents: [document] });
+  }
+
+  return [...groups.values()];
+}
+
+function DocumentAppliesTo({ document }: { document: InstructionDocument }) {
+  return (
+    <div
+      className="instruction-document-applies-to"
+      aria-label={`适用 Agent：${document.appliesTo.map((app) => agentLabels[app]).join('、')}`}
+    >
+      <span>适用于</span>
+      <div>
+        {document.appliesTo.map((app) => (
+          <span key={app} className="instruction-document-agent">
+            <AgentBrandMark app={app} size={16} />
+            {agentLabels[app]}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+export function InstructionsPanel({ context, projects = [] }: InstructionsPanelProps) {
+  const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  const [draftContent, setDraftContent] = useState('');
+  const [errorMessage, setErrorMessage] = useState('');
+  const [successMessage, setSuccessMessage] = useState('');
+  const [narrowSurface, setNarrowSurface] = useState<NarrowSurface>('list');
+  const isNarrow = useNarrowInstructions();
+  const listHeadingRef = useRef<HTMLHeadingElement>(null);
+  const detailHeadingRef = useRef<HTMLHeadingElement>(null);
+  const currentContextKey = contextKey(context);
+  const [selectionContextKey, setSelectionContextKey] = useState(currentContextKey);
+  const contextChanged = selectionContextKey !== currentContextKey;
+
+  const documentsQuery = useInstructionDocuments(context);
+  // 作用域切换的过渡帧不显示上一 target 的缓存行，也不让其重新成为选中详情。
+  const documents = contextChanged ? [] : (documentsQuery.data ?? []);
+  const saveMutation = useSaveInstructionDocument();
+  const documentGroups = useMemo(() => groupDocuments(documents), [documents]);
+  const selectedDocument = useMemo(
+    () => documents.find((document) => documentKey(document) === selectedKey) ?? null,
+    [documents, selectedKey],
+  );
+
+  useEffect(() => {
+    if (!contextChanged) return;
+
+    setSelectionContextKey(currentContextKey);
+    setSelectedKey(null);
+    setDraftContent('');
     setErrorMessage('');
-  }, [activeApp]);
+    setSuccessMessage('');
+    setNarrowSurface('list');
 
-  const promptList = useMemo(() => {
-    if (!prompts) return [];
-    return Object.entries(prompts).sort(([, a], [, b]) => {
-      const ta = a.createdAt ?? 0;
-      const tb = b.createdAt ?? 0;
-      if (ta !== tb) return ta - tb;
-      return a.id.localeCompare(b.id);
-    });
-  }, [prompts]);
-
-  const filteredPromptList = useMemo(() => {
-    let result = promptList;
-    if (statusFilter === 'enabled') {
-      result = result.filter(([, prompt]) => prompt.enabled);
-    } else if (statusFilter === 'disabled') {
-      result = result.filter(([, prompt]) => !prompt.enabled);
+    if (!isNarrow) return;
+    if (typeof window.requestAnimationFrame === 'function') {
+      window.requestAnimationFrame(() => listHeadingRef.current?.focus());
+      return;
     }
-    const query = searchQuery.trim().toLowerCase();
-    if (query) {
-      result = result.filter(([id, prompt]) =>
-        [prompt.name, prompt.description ?? '', id].some((value) =>
-          value.toLowerCase().includes(query),
-        ),
-      );
+    listHeadingRef.current?.focus();
+  }, [contextChanged, currentContextKey, isNarrow]);
+
+  // 选中态只保存稳定的「target + document kind」身份；详情始终从当前 query 结果派生。
+  useEffect(() => {
+    if (documents.length === 0) {
+      if (selectedKey !== null) setSelectedKey(null);
+      return;
     }
-    return result;
-  }, [promptList, searchQuery, statusFilter]);
 
-  const selectedPrompt = useMemo(() => {
-    if (isCreating) return draft;
-    if (!prompts || !selectedId) return null;
-    return prompts[selectedId] ?? null;
-  }, [draft, isCreating, prompts, selectedId]);
+    if (selectedDocument !== null) return;
+    setSelectedKey(documentKey(documents[0]));
+  }, [documents, selectedDocument, selectedKey]);
 
-  const isEnabled = selectedPrompt?.enabled ?? false;
-  const pending =
-    saveMutation.isPending ||
-    deleteMutation.isPending ||
-    enableMutation.isPending ||
-    importMutation.isPending;
+  useEffect(() => {
+    if (selectedDocument !== null) setDraftContent(selectedDocument.content);
+  }, [selectedDocument?.content, selectedKey]);
 
-  const handleSelect = (id: string) => {
+  useEffect(() => {
+    if (!isNarrow || narrowSurface !== 'detail' || selectedDocument === null) return;
+    detailHeadingRef.current?.focus();
+  }, [isNarrow, narrowSurface, selectedDocument]);
+
+  const clearMessages = () => {
     setErrorMessage('');
-    setIsCreating(false);
-    setSelectedId(id);
-    if (prompts && prompts[id]) {
-      setDraft(prompts[id]);
-    }
+    setSuccessMessage('');
   };
 
-  const handleCreate = () => {
-    setErrorMessage('');
-    setIsCreating(true);
-    setSelectedId(null);
-    setDraft(emptyPrompt());
-  };
-
-  const handleChange = (field: keyof Prompt, value: string | boolean) => {
-    setDraft((current) => ({ ...current, [field]: value }));
+  const handleSelect = (document: InstructionDocument) => {
+    clearMessages();
+    setSelectedKey(documentKey(document));
+    setDraftContent(document.content);
+    setNarrowSurface('detail');
   };
 
   const handleSave = async () => {
-    setErrorMessage('');
-    if (!draft.name.trim()) {
-      setErrorMessage('请输入预设名称。');
+    if (selectedDocument === null) return;
+    clearMessages();
+
+    try {
+      await saveMutation.mutateAsync({
+        target: selectedDocument.target,
+        kind: selectedDocument.kind,
+        content: draftContent,
+      });
+      setSuccessMessage(`${selectedDocument.fileName} 已保存。`);
+    } catch (error) {
+      const userError = toUserError(error);
+      setErrorMessage([userError.message, userError.suggestion].filter(Boolean).join('\n'));
+    }
+  };
+
+  const handleReturnToList = () => {
+    setNarrowSurface('list');
+    if (typeof window.requestAnimationFrame === 'function') {
+      window.requestAnimationFrame(() => listHeadingRef.current?.focus());
       return;
     }
-    try {
-      const id = isCreating ? draft.id : selectedId!;
-      await saveMutation.mutateAsync({ app: activeApp, id, prompt: draft });
-      setIsCreating(false);
-      setSelectedId(id);
-    } catch (error) {
-      const userError = toUserError(error);
-      setErrorMessage([userError.message, userError.suggestion].filter(Boolean).join('\n'));
-    }
+    listHeadingRef.current?.focus();
   };
 
-  const handleDelete = async () => {
-    setErrorMessage('');
-    if (!selectedId) return;
-    if (!window.confirm('确定要删除这条指令预设吗？')) return;
-    try {
-      await deleteMutation.mutateAsync({ app: activeApp, id: selectedId });
-      setSelectedId(null);
-    } catch (error) {
-      const userError = toUserError(error);
-      setErrorMessage([userError.message, userError.suggestion].filter(Boolean).join('\n'));
-    }
-  };
-
-  const handleEnable = async () => {
-    setErrorMessage('');
-    if (!selectedId) return;
-    try {
-      await enableMutation.mutateAsync({ app: activeApp, id: selectedId });
-      // 缓存已更新为 enabled，但本地 draft 仍是旧的 false；同步草稿，
-      // 避免用户不重新选中直接保存时提交过期的 enabled: false 把预设改回禁用。
-      setDraft((current) => ({ ...current, enabled: true }));
-    } catch (error) {
-      const userError = toUserError(error);
-      setErrorMessage([userError.message, userError.suggestion].filter(Boolean).join('\n'));
-    }
-  };
-
-  const handleImport = async () => {
-    setErrorMessage('');
-    try {
-      await importMutation.mutateAsync({ app: activeApp });
-    } catch (error) {
-      const userError = toUserError(error);
-      setErrorMessage([userError.message, userError.suggestion].filter(Boolean).join('\n'));
-    }
-  };
-
-  const handleCancel = () => {
-    setErrorMessage('');
-    setIsCreating(false);
-    if (promptList.length > 0 && !selectedId) {
-      setSelectedId(promptList[0][0]);
-    }
-  };
+  const detailVisible = selectedDocument !== null;
 
   return (
-    <div className="instructions-panel">
-      <div className="instructions-toolbar">
-        <span className="instructions-agent">{agentLabels[activeApp]}</span>
-        <div className="instructions-actions">
-          <button type="button" onClick={handleCreate} disabled={pending}>
-            新建预设
-          </button>
-          <button type="button" onClick={handleImport} disabled={pending || isLoading}>
-            从 live 文件导入
-          </button>
-          <button
-            type="button"
-            onClick={() => setShowLiveContent((v) => !v)}
-            disabled={isLoadingLive}
-          >
-            {showLiveContent ? '隐藏 live 内容' : '查看 live 内容'}
-          </button>
+    <div
+      className="instructions-panel"
+      data-instructions-surface={isNarrow ? narrowSurface : undefined}
+      data-instruction-context={context.kind}
+    >
+      {errorMessage && (
+        <div className="instructions-error" role="alert">
+          {errorMessage}
         </div>
-      </div>
-
-      {errorMessage && <div className="instructions-error">{errorMessage}</div>}
+      )}
+      {successMessage && (
+        <div className="instructions-success" role="status">
+          {successMessage}
+        </div>
+      )}
 
       <div className="instructions-body">
-        <div className="instructions-list-pane">
-          <div className="instructions-filter-bar">
-            <div style={{ position: 'relative' }}>
-              <Search
-                size={14}
-                style={{
-                  position: 'absolute',
-                  left: 8,
-                  top: '50%',
-                  transform: 'translateY(-50%)',
-                }}
-              />
-              <input
-                id="instructions-search"
-                type="text"
-                placeholder="搜索预设名称"
-                value={searchQuery}
-                onChange={(event) => setSearchQuery(event.target.value)}
-                style={{ paddingLeft: 28 }}
-              />
+        <section className="instructions-list-pane" aria-label="长期指令文件列表">
+          <header className="instructions-list-header">
+            <div>
+              <p className="instructions-list-eyebrow">{contextLabel(context, projects)}</p>
+              <h2 ref={listHeadingRef} tabIndex={-1}>
+                长期指令
+              </h2>
+              <p>维护 CLAUDE.md 与 AGENTS.md</p>
             </div>
-            <select
-              id="instructions-status-filter"
-              aria-label="状态过滤"
-              value={statusFilter}
-              onChange={(event) =>
-                setStatusFilter(event.target.value as 'all' | 'enabled' | 'disabled')
-              }
-            >
-              <option value="all">全部状态</option>
-              <option value="enabled">已启用</option>
-              <option value="disabled">未启用</option>
-            </select>
-          </div>
-          {isLoading ? (
-            <div className="state-loading">加载中…</div>
-          ) : promptList.length === 0 ? (
-            <div className="state-empty">
-              <p>尚无指令预设。</p>
-              <p className="state-empty-hint">点击“新建预设”或“从 live 文件导入”。</p>
+          </header>
+
+          {documentsQuery.isLoading ? (
+            <div className="instructions-state" role="status">
+              正在载入长期指令…
             </div>
-          ) : filteredPromptList.length === 0 ? (
-            <div className="state-empty">
-              <p>没有匹配的预设。</p>
+          ) : documentsQuery.error ? (
+            <div className="instructions-state instructions-state-error" role="alert">
+              {toUserError(documentsQuery.error).message}
+            </div>
+          ) : documents.length === 0 ? (
+            <div className="instructions-state instructions-state-empty">
+              <FileText size={20} aria-hidden="true" />
+              <p>当前配置范围没有可管理的长期指令文件。</p>
             </div>
           ) : (
-            <ul className="asset-list">
-              {filteredPromptList.map(([id, prompt]) => (
-                <li
-                  key={id}
-                  className={`asset-row ${selectedId === id ? 'asset-row-selected' : ''}`}
-                  onClick={() => handleSelect(id)}
+            <div className="instructions-document-groups">
+              {documentGroups.map((group) => (
+                <section
+                  key={group.key}
+                  className="instructions-document-group"
+                  data-instruction-target={group.key}
+                  aria-label={targetLabel(group.target, projects)}
                 >
-                  <div className="asset-row-line1">
-                    <span className="asset-name">{prompt.name}</span>
-                    {prompt.enabled && <span className="enabled-badge">已启用</span>}
-                  </div>
-                  {prompt.description ? (
-                    <div className="asset-row-line2">
-                      <span className="context-hint">{prompt.description}</span>
-                    </div>
-                  ) : null}
-                </li>
+                  <header>
+                    <h3>{targetLabel(group.target, projects)}</h3>
+                  </header>
+                  <ul className="asset-list instructions-asset-list">
+                    {group.documents.map((document) => {
+                      const key = documentKey(document);
+                      const isSelected = key === selectedKey;
+                      return (
+                        <li key={key} className="instructions-list-item">
+                          <button
+                            type="button"
+                            className={
+                              isSelected ? 'instruction-row is-selected' : 'instruction-row'
+                            }
+                            onClick={() => handleSelect(document)}
+                            aria-current={isSelected ? 'page' : undefined}
+                            data-instruction-kind={document.kind}
+                            data-instruction-target={targetKey(document.target)}
+                          >
+                            <span className="instruction-row-title">
+                              <span className="asset-name">{document.fileName}</span>
+                              <span className="instruction-file-state">
+                                {document.exists ? '已创建' : '未创建'}
+                              </span>
+                            </span>
+                            <span className="instruction-row-summary">
+                              {documentSummary(document)}
+                            </span>
+                          </button>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </section>
               ))}
-            </ul>
-          )}
-        </div>
-
-        <div className="instructions-detail-pane">
-          {showLiveContent ? (
-            <div className="live-content-view">
-              <h3>当前 live 文件内容</h3>
-              {liveContent === null || liveContent === '' ? (
-                <p className="live-content-empty">无 live 内容</p>
-              ) : (
-                <pre className="source-view">{liveContent}</pre>
-              )}
             </div>
-          ) : selectedPrompt ? (
-            <div className="prompt-editor">
-              <div className="prompt-field">
-                <label htmlFor="prompt-name">名称</label>
-                <input
-                  id="prompt-name"
-                  type="text"
-                  value={draft.name}
-                  onChange={(event) => handleChange('name', event.target.value)}
-                  disabled={pending}
-                />
-              </div>
-              <div className="prompt-field">
-                <label htmlFor="prompt-description">描述</label>
-                <input
-                  id="prompt-description"
-                  type="text"
-                  value={draft.description ?? ''}
-                  onChange={(event) => handleChange('description', event.target.value)}
-                  disabled={pending}
-                />
-              </div>
-              <div className="prompt-field prompt-field-grow">
-                <label htmlFor="prompt-content">内容</label>
+          )}
+        </section>
+
+        <section className="instructions-detail-pane" aria-label="长期指令文件详情">
+          {isNarrow && detailVisible && (
+            <button className="instructions-detail-back" type="button" onClick={handleReturnToList}>
+              <ArrowLeft size={16} aria-hidden="true" />
+              返回列表
+            </button>
+          )}
+          {selectedDocument ? (
+            <div
+              className="instruction-document-editor"
+              data-instruction-editor-kind={selectedDocument.kind}
+              data-instruction-target={targetKey(selectedDocument.target)}
+            >
+              <header className="instructions-detail-header">
+                <div>
+                  <p className="instructions-detail-breadcrumb">
+                    {targetLabel(selectedDocument.target, projects)} · 长期指令
+                  </p>
+                  <h2 ref={detailHeadingRef} tabIndex={-1}>
+                    {selectedDocument.fileName}
+                  </h2>
+                </div>
+                <span className="instruction-document-state">
+                  {selectedDocument.exists ? (
+                    <>
+                      <Check size={14} aria-hidden="true" />
+                      已创建
+                    </>
+                  ) : (
+                    '尚未创建'
+                  )}
+                </span>
+              </header>
+
+              <DocumentAppliesTo document={selectedDocument} />
+
+              <div className="instructions-editor-surface">
+                <header>
+                  <div>
+                    <h3>Markdown 内容</h3>
+                    <p>保存后将直接写入 {selectedDocument.fileName}。</p>
+                  </div>
+                  <span>{selectedDocument.fileName}</span>
+                </header>
+                <label
+                  className="instructions-visually-hidden"
+                  htmlFor="instruction-document-content"
+                >
+                  内容
+                </label>
                 <textarea
-                  id="prompt-content"
-                  value={draft.content}
-                  onChange={(event) => handleChange('content', event.target.value)}
-                  disabled={pending}
+                  id="instruction-document-content"
+                  value={draftContent}
+                  onChange={(event) => setDraftContent(event.target.value)}
+                  disabled={saveMutation.isPending}
                   rows={16}
+                  spellCheck={false}
                 />
-              </div>
-              <div className="prompt-editor-actions">
-                {isEnabled ? (
-                  <span className="enabled-status">当前已启用</span>
-                ) : (
-                  <button type="button" onClick={handleEnable} disabled={pending || isCreating}>
-                    启用
-                  </button>
-                )}
-                <button type="button" onClick={handleSave} disabled={pending}>
-                  保存
-                </button>
-                {!isCreating && (
+                <footer className="instruction-document-actions">
+                  <span>
+                    {selectedDocument.exists
+                      ? '编辑并保存当前文件。'
+                      : '填写内容并保存以创建此文件。'}
+                  </span>
                   <button
                     type="button"
-                    className="danger"
-                    onClick={handleDelete}
-                    disabled={pending}
+                    className="primary"
+                    onClick={handleSave}
+                    disabled={saveMutation.isPending}
                   >
-                    删除
+                    <Save size={15} aria-hidden="true" />
+                    保存 {selectedDocument.fileName}
                   </button>
-                )}
-                {isCreating && (
-                  <button type="button" onClick={handleCancel} disabled={pending}>
-                    取消
-                  </button>
-                )}
+                </footer>
               </div>
             </div>
           ) : (
-            <div className="state-empty">
-              <p>选择左侧预设进行编辑，或新建一条预设。</p>
+            <div className="instructions-state instructions-detail-empty">
+              <FileText size={22} aria-hidden="true" />
+              <p>选择一个长期指令文件进行编辑。</p>
             </div>
           )}
-        </div>
+        </section>
       </div>
     </div>
   );

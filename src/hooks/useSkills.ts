@@ -1,37 +1,43 @@
-import { useMutation, useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query';
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import * as skillsApi from '../lib/api/skills';
-import type {
-  AgentType,
-  DiscoverableSkill,
-  InstalledSkill,
-  SkillBackupEntry,
-  SkillRepo,
-  SkillUpdateInfo,
-} from '../types';
-import { mergeImportedSkills } from './useSkills.helpers';
+import type { AgentType, ConfigContext, DiscoverableSkill, ScopeTarget, SkillRepo } from '../types';
 
 const keys = {
-  installed: ['skills', 'installed'] as const,
-  discoverable: ['skills', 'discoverable'] as const,
+  installed: (context: ConfigContext, activeApp: AgentType) =>
+    ['skills', 'installed', context, activeApp] as const,
+  discoverable: (target: ScopeTarget | null, activeApp: AgentType) =>
+    ['skills', 'discoverable', target, activeApp] as const,
   repos: ['skills', 'repos'] as const,
-  backups: ['skills', 'backups'] as const,
-  unmanaged: ['skills', 'unmanaged'] as const,
-  updates: ['skills', 'updates'] as const,
+  backups: (target: ScopeTarget | null, activeApp: AgentType) =>
+    ['skills', 'backups', target, activeApp] as const,
+  unmanaged: (target: ScopeTarget | null, activeApp: AgentType) =>
+    ['skills', 'unmanaged', target, activeApp] as const,
+  updates: (target: ScopeTarget | null, activeApp: AgentType) =>
+    ['skills', 'updates', target, activeApp] as const,
 };
 
-export function useInstalledSkills() {
+function invalidateSkillQueries(queryClient: ReturnType<typeof useQueryClient>) {
+  return queryClient.invalidateQueries({ queryKey: ['skills'] });
+}
+
+export function useInstalledSkills(
+  context: ConfigContext = { kind: 'global' },
+  activeApp: AgentType = 'claude-code',
+) {
   return useQuery({
-    queryKey: keys.installed,
-    queryFn: skillsApi.getInstalledSkills,
+    queryKey: keys.installed(context, activeApp),
+    queryFn: () => skillsApi.getInstalledSkills(context),
     staleTime: Infinity,
     placeholderData: keepPreviousData,
   });
 }
 
-export function useDiscoverableSkills() {
+export function useDiscoverableSkills(target: ScopeTarget | null, activeApp: AgentType) {
   return useQuery({
-    queryKey: keys.discoverable,
-    queryFn: skillsApi.discoverAvailableSkills,
+    queryKey: keys.discoverable(target, activeApp),
+    queryFn: (): Promise<DiscoverableSkill[]> =>
+      target === null ? Promise.resolve([]) : skillsApi.discoverAvailableSkills(target),
+    enabled: target !== null,
     staleTime: Infinity,
     placeholderData: keepPreviousData,
   });
@@ -44,28 +50,32 @@ export function useSkillRepos() {
   });
 }
 
-export function useSkillBackups() {
+export function useSkillBackups(target: ScopeTarget | null, activeApp: AgentType) {
   return useQuery({
-    queryKey: keys.backups,
-    queryFn: skillsApi.getSkillBackups,
+    queryKey: keys.backups(target, activeApp),
+    queryFn: () => (target === null ? Promise.resolve([]) : skillsApi.getSkillBackups(target)),
     enabled: false,
   });
 }
 
-export function useScanUnmanagedSkills(options?: { enabled?: boolean }) {
+export function useScanUnmanagedSkills(
+  target: ScopeTarget | null,
+  activeApp: AgentType,
+  options?: { enabled?: boolean },
+) {
   return useQuery({
-    queryKey: keys.unmanaged,
-    queryFn: skillsApi.scanUnmanagedSkills,
-    enabled: options?.enabled ?? false,
+    queryKey: keys.unmanaged(target, activeApp),
+    queryFn: () => (target === null ? Promise.resolve([]) : skillsApi.scanUnmanagedSkills(target)),
+    enabled: target !== null && (options?.enabled ?? false),
     staleTime: 30 * 1000,
     placeholderData: keepPreviousData,
   });
 }
 
-export function useCheckSkillUpdates() {
+export function useCheckSkillUpdates(target: ScopeTarget | null, activeApp: AgentType) {
   return useQuery({
-    queryKey: keys.updates,
-    queryFn: skillsApi.checkSkillUpdates,
+    queryKey: keys.updates(target, activeApp),
+    queryFn: () => (target === null ? Promise.resolve([]) : skillsApi.checkSkillUpdates(target)),
     enabled: false,
     staleTime: 5 * 60 * 1000,
   });
@@ -74,103 +84,82 @@ export function useCheckSkillUpdates() {
 export function useInstallSkill() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ skill, currentApp }: { skill: DiscoverableSkill; currentApp: AgentType }) =>
-      skillsApi.installSkill(skill, currentApp),
-    onSuccess: (installedSkill) => {
-      queryClient.setQueryData<InstalledSkill[]>(keys.installed, (oldData) =>
-        mergeImportedSkills(oldData, [installedSkill]),
-      );
-    },
-    onSettled: () =>
-      Promise.all([
-        queryClient.invalidateQueries({ queryKey: keys.installed }),
-        queryClient.invalidateQueries({ queryKey: keys.unmanaged }),
-      ]),
+    mutationFn: ({
+      skill,
+      target,
+      currentApp,
+    }: {
+      skill: DiscoverableSkill;
+      target: ScopeTarget;
+      currentApp: AgentType;
+    }) => skillsApi.installSkill(skill, target, currentApp),
+    onSettled: () => invalidateSkillQueries(queryClient),
   });
 }
 
 export function useUninstallSkill() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: skillsApi.uninstallSkill,
-    onSuccess: (_result, id) => {
-      queryClient.setQueryData<InstalledSkill[]>(keys.installed, (oldData) =>
-        oldData?.filter((s) => s.id !== id),
-      );
-      queryClient.setQueryData<SkillUpdateInfo[]>(keys.updates, (oldData) =>
-        oldData?.filter((u) => u.id !== id),
-      );
-    },
-    onSettled: () =>
-      Promise.all([
-        queryClient.invalidateQueries({ queryKey: keys.installed }),
-        queryClient.invalidateQueries({ queryKey: keys.discoverable }),
-        queryClient.invalidateQueries({ queryKey: keys.backups }),
-        queryClient.invalidateQueries({ queryKey: keys.unmanaged }),
-      ]),
+    mutationFn: ({ id, target }: { id: string; target: ScopeTarget }) =>
+      skillsApi.uninstallSkill(id, target),
+    onSettled: () => invalidateSkillQueries(queryClient),
   });
 }
 
 export function useToggleSkillApp() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, app, enabled }: { id: string; app: AgentType; enabled: boolean }) =>
-      skillsApi.toggleSkillApp(id, app, enabled),
-    onSettled: () => queryClient.invalidateQueries({ queryKey: keys.installed }),
+    mutationFn: ({
+      id,
+      target,
+      app,
+      enabled,
+    }: {
+      id: string;
+      target: ScopeTarget;
+      app: AgentType;
+      enabled: boolean;
+    }) => skillsApi.toggleSkillApp(id, target, app, enabled),
+    onSettled: () => invalidateSkillQueries(queryClient),
   });
 }
 
 export function useUpdateSkill() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: skillsApi.updateSkill,
-    onSuccess: (updatedSkill) => {
-      queryClient.setQueryData<InstalledSkill[]>(keys.installed, (oldData) => {
-        if (oldData === undefined) return [updatedSkill];
-        return oldData.map((s) => (s.id === updatedSkill.id ? updatedSkill : s));
-      });
-      queryClient.setQueryData<SkillUpdateInfo[]>(keys.updates, (oldData) =>
-        oldData?.filter((u) => u.id !== updatedSkill.id),
-      );
-    },
-    onSettled: () => queryClient.invalidateQueries({ queryKey: keys.backups }),
+    mutationFn: ({ id, target }: { id: string; target: ScopeTarget }) =>
+      skillsApi.updateSkill(id, target),
+    onSettled: () => invalidateSkillQueries(queryClient),
   });
 }
 
 export function useInstallSkillsFromZip() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ filePath, currentApp }: { filePath: string; currentApp: AgentType }) =>
-      skillsApi.installSkillsFromZip(filePath, currentApp),
-    onSuccess: (installedSkills) => {
-      queryClient.setQueryData<InstalledSkill[]>(keys.installed, (oldData) =>
-        mergeImportedSkills(oldData, installedSkills),
-      );
-    },
-    onSettled: () =>
-      Promise.all([
-        queryClient.invalidateQueries({ queryKey: keys.installed }),
-        queryClient.invalidateQueries({ queryKey: keys.unmanaged }),
-      ]),
+    mutationFn: ({
+      filePath,
+      currentApp,
+      target,
+    }: {
+      filePath: string;
+      currentApp: AgentType;
+      target: ScopeTarget;
+    }) => skillsApi.installSkillsFromZip(filePath, currentApp, target),
+    onSettled: () => invalidateSkillQueries(queryClient),
   });
 }
 
 export function useImportSkillsFromApps() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: skillsApi.importSkillsFromApps,
-    onSuccess: (importedSkills) => {
-      queryClient.setQueryData<InstalledSkill[]>(keys.installed, (oldData) =>
-        mergeImportedSkills(oldData, importedSkills),
-      );
-    },
-    onSettled: () =>
-      Promise.all([
-        queryClient.invalidateQueries({ queryKey: keys.installed }),
-        queryClient.invalidateQueries({ queryKey: keys.unmanaged }),
-        queryClient.invalidateQueries({ queryKey: keys.repos }),
-        queryClient.invalidateQueries({ queryKey: keys.discoverable }),
-      ]),
+    mutationFn: ({
+      selections,
+      target,
+    }: {
+      selections: Parameters<typeof skillsApi.importSkillsFromApps>[0];
+      target: ScopeTarget;
+    }) => skillsApi.importSkillsFromApps(selections, target),
+    onSettled: () => invalidateSkillQueries(queryClient),
   });
 }
 
@@ -178,10 +167,7 @@ export function useAddSkillRepo() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: skillsApi.addSkillRepo,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: keys.repos });
-      queryClient.invalidateQueries({ queryKey: keys.discoverable });
-    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['skills', 'discoverable'] }),
   });
 }
 
@@ -190,36 +176,25 @@ export function useRemoveSkillRepo() {
   return useMutation({
     mutationFn: ({ owner, name }: { owner: string; name: string }) =>
       skillsApi.removeSkillRepo(owner, name),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: keys.repos });
-      queryClient.invalidateQueries({ queryKey: keys.discoverable });
-    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['skills', 'discoverable'] }),
   });
 }
 
 export function useRestoreSkillBackup() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ backupId, currentApp }: { backupId: string; currentApp: AgentType }) =>
-      skillsApi.restoreSkillBackup(backupId, currentApp),
-    onSettled: () =>
-      Promise.all([
-        queryClient.invalidateQueries({ queryKey: keys.installed }),
-        queryClient.invalidateQueries({ queryKey: keys.backups }),
-      ]),
+    mutationFn: ({ backupId, target }: { backupId: string; target: ScopeTarget }) =>
+      skillsApi.restoreSkillBackup(backupId, target),
+    onSettled: () => invalidateSkillQueries(queryClient),
   });
 }
 
 export function useDeleteSkillBackup() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: skillsApi.deleteSkillBackup,
-    onSuccess: (_result, backupId) => {
-      queryClient.setQueryData<SkillBackupEntry[]>(keys.backups, (oldData) =>
-        oldData?.filter((b) => b.backupId !== backupId),
-      );
-    },
-    onSettled: () => queryClient.invalidateQueries({ queryKey: keys.backups }),
+    mutationFn: ({ backupId, target }: { backupId: string; target: ScopeTarget }) =>
+      skillsApi.deleteSkillBackup(backupId, target),
+    onSettled: () => invalidateSkillQueries(queryClient),
   });
 }
 

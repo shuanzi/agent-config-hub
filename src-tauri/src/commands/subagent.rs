@@ -3,6 +3,7 @@
 use std::sync::Arc;
 
 use crate::error::{format_subagent_error, is_structured_error_payload, AppError};
+use crate::services::project::{ConfigContext, ScopeTarget};
 use crate::services::skill::{AgentType, SkillService};
 use crate::services::subagent::{
     DiscoverableSubagent, InstalledSubagent, SubagentBackupEntry, SubagentRepo, SubagentService,
@@ -33,23 +34,30 @@ fn parse_app_type(app: &str) -> Result<AgentType, String> {
 
 #[tauri::command]
 pub fn get_installed_subagents(
+    context: ConfigContext,
     app_state: tauri::State<'_, AppState>,
 ) -> Result<Vec<InstalledSubagent>, String> {
-    SubagentService::get_all_installed(&app_state.db).map_err(map_err)
+    SubagentService::get_installed_for_context(&app_state.db, &context).map_err(map_err)
 }
 
 #[tauri::command]
 pub async fn discover_available_subagents(
+    target: ScopeTarget,
     service: tauri::State<'_, SubagentServiceState>,
     app_state: tauri::State<'_, AppState>,
 ) -> Result<Vec<DiscoverableSubagent>, String> {
     let repos = app_state.db.get_subagent_repos().map_err(map_err)?;
-    service.0.discover_available(repos).await.map_err(map_err)
+    service
+        .0
+        .discover_available_for_target(&app_state.db, &target, repos)
+        .await
+        .map_err(map_err)
 }
 
 #[tauri::command]
 pub async fn install_subagent(
     subagent: DiscoverableSubagent,
+    target: ScopeTarget,
     current_app: String,
     service: tauri::State<'_, SubagentServiceState>,
     app_state: tauri::State<'_, AppState>,
@@ -58,7 +66,7 @@ pub async fn install_subagent(
 
     service
         .0
-        .install(&app_state.db, &subagent, &app_type)
+        .install_for_target(&app_state.db, &target, &subagent, &app_type)
         .await
         .map_err(map_err)
 }
@@ -66,30 +74,34 @@ pub async fn install_subagent(
 #[tauri::command]
 pub fn uninstall_subagent(
     id: String,
+    target: ScopeTarget,
     app_state: tauri::State<'_, AppState>,
 ) -> Result<SubagentUninstallResult, String> {
-    SubagentService::uninstall(&app_state.db, &id).map_err(map_err)
+    SubagentService::uninstall_for_target(&app_state.db, &target, &id).map_err(map_err)
 }
 
 #[tauri::command]
 pub fn toggle_subagent_app(
     id: String,
+    target: ScopeTarget,
     app: String,
     enabled: bool,
     app_state: tauri::State<'_, AppState>,
 ) -> Result<(), String> {
     let app_type = parse_app_type(&app)?;
-    SubagentService::toggle_app(&app_state.db, &id, &app_type, enabled).map_err(map_err)
+    SubagentService::toggle_app_for_target(&app_state.db, &target, &id, &app_type, enabled)
+        .map_err(map_err)
 }
 
 #[tauri::command]
 pub async fn check_subagent_updates(
+    target: ScopeTarget,
     service: tauri::State<'_, SubagentServiceState>,
     app_state: tauri::State<'_, AppState>,
 ) -> Result<Vec<SubagentUpdateInfo>, String> {
     service
         .0
-        .check_updates(&app_state.db)
+        .check_updates_for_target(&app_state.db, &target)
         .await
         .map_err(map_err)
 }
@@ -97,12 +109,13 @@ pub async fn check_subagent_updates(
 #[tauri::command]
 pub async fn update_subagent(
     id: String,
+    target: ScopeTarget,
     service: tauri::State<'_, SubagentServiceState>,
     app_state: tauri::State<'_, AppState>,
 ) -> Result<InstalledSubagent, String> {
     service
         .0
-        .update_subagent(&app_state.db, &id)
+        .update_subagent_for_target(&app_state.db, &target, &id)
         .await
         .map_err(map_err)
 }
@@ -136,23 +149,23 @@ pub fn remove_subagent_repo(
 }
 
 #[tauri::command]
-pub fn get_subagent_backups() -> Result<Vec<SubagentBackupEntry>, String> {
-    SubagentService::list_backups().map_err(map_err)
+pub fn get_subagent_backups(target: ScopeTarget) -> Result<Vec<SubagentBackupEntry>, String> {
+    SubagentService::list_backups_for_target(&target).map_err(map_err)
 }
 
 #[tauri::command]
 pub fn restore_subagent_backup(
     backup_id: String,
-    current_app: String,
+    target: ScopeTarget,
     app_state: tauri::State<'_, AppState>,
 ) -> Result<InstalledSubagent, String> {
-    let app_type = parse_app_type(&current_app)?;
-    SubagentService::restore_from_backup(&app_state.db, &backup_id, &app_type).map_err(map_err)
+    SubagentService::restore_from_backup_for_target(&app_state.db, &backup_id, &target)
+        .map_err(map_err)
 }
 
 #[tauri::command]
-pub fn delete_subagent_backup(backup_id: String) -> Result<(), String> {
-    SubagentService::delete_backup(&backup_id).map_err(map_err)
+pub fn delete_subagent_backup(backup_id: String, target: ScopeTarget) -> Result<(), String> {
+    SubagentService::delete_backup_for_target(&backup_id, &target).map_err(map_err)
 }
 
 pub struct SubagentServiceState(pub Arc<SubagentService>);

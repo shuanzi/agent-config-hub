@@ -19,6 +19,10 @@ describe('Skill management journey', () => {
     await $('.skills-view').waitForDisplayed();
     expect(await $('.sub-tab.active').getText()).toContain('已安装');
 
+    // 默认「全部」不是 mutation target；先进入全局配置再执行安装旅程。
+    await $("//nav[@aria-label='配置上下文']//button[normalize-space()='全局配置']").click();
+    await waitForStable();
+
     // 切换到发现页签
     const discoveryTab = await $("//button[contains(@class,'sub-tab')][normalize-space()='发现']");
     await discoveryTab.click();
@@ -28,9 +32,11 @@ describe('Skill management journey', () => {
     const searchInput = await $('#skill-discovery-search');
     await searchInput.setValue('commit');
 
-    const installButton = await $(
-      "[data-skill-key='anthropics/skills:commit-conventions'] button.install",
-    );
+    const discoveryRow = await $("[data-skill-key='anthropics/skills:commit-conventions']");
+    await discoveryRow.$('.skill-row-select').click();
+    const discoveryDetail = await $("[data-skill-detail='anthropics/skills:commit-conventions']");
+    await discoveryDetail.waitForDisplayed();
+    const installButton = await discoveryDetail.$(".//button[normalize-space()='安装']");
     await installButton.waitForDisplayed();
     await installButton.click();
 
@@ -45,16 +51,24 @@ describe('Skill management journey', () => {
     const installedCard = await $("[data-skill-id='anthropics/skills:commit-conventions']");
     await installedCard.waitForDisplayed();
     expect(await installedCard.$('.skill-card-title').getText()).toContain('Commit Conventions');
+    await installedCard.$('.skill-row-select').click();
+
+    const installedDetail = await $("[data-skill-detail='anthropics/skills:commit-conventions']");
+    await installedDetail.waitForDisplayed();
 
     // 切换 Codex 启用开关
-    const codexToggle = await installedCard.$("//label[contains(text(),'Codex')]//input");
+    const codexToggle = await installedDetail.$(".//label[contains(.,'Codex')]//input");
     const wasChecked = await codexToggle.isSelected();
     await codexToggle.click();
     await browser.waitUntil(async () => (await codexToggle.isSelected()) === !wasChecked);
 
     // 卸载
-    const uninstallButton = await installedCard.$('button.uninstall');
+    const uninstallButton = await installedDetail.$(".//button[normalize-space()='卸载']");
     await uninstallButton.click();
+    const uninstallDialog = await $("[role='dialog']");
+    await uninstallDialog.waitForDisplayed();
+    expect(await uninstallDialog.$('h2').getText()).toBe('确认卸载');
+    await uninstallDialog.$(".//button[normalize-space()='卸载']").click();
     await browser.waitUntil(
       async () =>
         (await $("[data-skill-id='anthropics/skills:commit-conventions']").isExisting()) === false,
@@ -62,5 +76,47 @@ describe('Skill management journey', () => {
 
     // 验证回到空状态提示
     expect(await $('.skill-empty h3').getText()).toContain('尚未安装');
+  });
+
+  it('uses the visual fixture for installed detail update, toggle and uninstall paths', async () => {
+    await browser.setWindowSize(1280, 900);
+    await browser.url(`${ENTRY}?fixture=visual`);
+    await waitForStable();
+
+    // 更新和写操作必须具有明确 target；视觉 fixture 的 Testing Strategy 属于全局目标。
+    await $("//nav[@aria-label='配置上下文']//button[normalize-space()='全局配置']").click();
+    await waitForStable();
+
+    const installedRows = await $$('.skill-list [data-skill-id]');
+    expect(await installedRows.length).toBe(2);
+
+    const checkUpdates = await $("//button[normalize-space()='检查更新']");
+    await checkUpdates.click();
+    await waitForStable();
+
+    const installedRow = await $("[data-skill-id='anthropics/skills:testing-strategy']");
+    await installedRow.$('.skill-row-select').click();
+    const detail = await $("[data-skill-detail='anthropics/skills:testing-strategy']");
+    await detail.waitForDisplayed();
+
+    const updateButton = await detail.$(".//button[normalize-space()='更新']");
+    await updateButton.waitForDisplayed();
+    await updateButton.click();
+    await browser.waitUntil(async () => (await $('.skill-status').getText()).includes('已更新'));
+
+    const codexToggle = await detail.$(".//label[contains(.,'Codex')]//input");
+    const wasChecked = await codexToggle.isSelected();
+    await codexToggle.click();
+    await browser.waitUntil(async () => (await codexToggle.isSelected()) === !wasChecked);
+
+    const uninstallButton = await detail.$(".//button[normalize-space()='卸载']");
+    await uninstallButton.click();
+    const uninstallDialog = await $("[role='dialog']");
+    await uninstallDialog.waitForDisplayed();
+    await uninstallDialog.$(".//button[normalize-space()='卸载']").click();
+    await browser.waitUntil(
+      async () =>
+        (await $("[data-skill-id='anthropics/skills:testing-strategy']").isExisting()) === false,
+    );
   });
 });

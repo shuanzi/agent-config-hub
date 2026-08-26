@@ -2,35 +2,46 @@ import { useMutation, useQuery, useQueryClient, keepPreviousData } from '@tansta
 import * as subagentsApi from '../lib/api/subagents';
 import type {
   AgentType,
+  ConfigContext,
   DiscoverableSubagent,
-  InstalledSubagent,
-  SubagentBackupEntry,
+  ScopeTarget,
   SubagentRepo,
-  SubagentUpdateInfo,
 } from '../types';
-import { mergeImportedSubagents } from './useSubagents.helpers';
 
 const keys = {
-  installed: ['subagents', 'installed'] as const,
-  discoverable: ['subagents', 'discoverable'] as const,
+  installed: (context: ConfigContext, activeApp: AgentType) =>
+    ['subagents', 'installed', context, activeApp] as const,
+  discoverable: (target: ScopeTarget | null, activeApp: AgentType) =>
+    ['subagents', 'discoverable', target, activeApp] as const,
   repos: ['subagents', 'repos'] as const,
-  backups: ['subagents', 'backups'] as const,
-  updates: ['subagents', 'updates'] as const,
+  backups: (target: ScopeTarget | null, activeApp: AgentType) =>
+    ['subagents', 'backups', target, activeApp] as const,
+  updates: (target: ScopeTarget | null, activeApp: AgentType) =>
+    ['subagents', 'updates', target, activeApp] as const,
 };
 
-export function useInstalledSubagents() {
+function invalidateSubagentQueries(queryClient: ReturnType<typeof useQueryClient>) {
+  return queryClient.invalidateQueries({ queryKey: ['subagents'] });
+}
+
+export function useInstalledSubagents(
+  context: ConfigContext = { kind: 'global' },
+  activeApp: AgentType = 'claude-code',
+) {
   return useQuery({
-    queryKey: keys.installed,
-    queryFn: subagentsApi.getInstalledSubagents,
+    queryKey: keys.installed(context, activeApp),
+    queryFn: () => subagentsApi.getInstalledSubagents(context),
     staleTime: Infinity,
     placeholderData: keepPreviousData,
   });
 }
 
-export function useDiscoverableSubagents() {
+export function useDiscoverableSubagents(target: ScopeTarget | null, activeApp: AgentType) {
   return useQuery({
-    queryKey: keys.discoverable,
-    queryFn: subagentsApi.discoverAvailableSubagents,
+    queryKey: keys.discoverable(target, activeApp),
+    queryFn: (): Promise<DiscoverableSubagent[]> =>
+      target === null ? Promise.resolve([]) : subagentsApi.discoverAvailableSubagents(target),
+    enabled: target !== null,
     staleTime: Infinity,
     placeholderData: keepPreviousData,
   });
@@ -43,18 +54,20 @@ export function useSubagentRepos() {
   });
 }
 
-export function useSubagentBackups() {
+export function useSubagentBackups(target: ScopeTarget | null, activeApp: AgentType) {
   return useQuery({
-    queryKey: keys.backups,
-    queryFn: subagentsApi.getSubagentBackups,
+    queryKey: keys.backups(target, activeApp),
+    queryFn: () =>
+      target === null ? Promise.resolve([]) : subagentsApi.getSubagentBackups(target),
     enabled: false,
   });
 }
 
-export function useCheckSubagentUpdates() {
+export function useCheckSubagentUpdates(target: ScopeTarget | null, activeApp: AgentType) {
   return useQuery({
-    queryKey: keys.updates,
-    queryFn: subagentsApi.checkSubagentUpdates,
+    queryKey: keys.updates(target, activeApp),
+    queryFn: () =>
+      target === null ? Promise.resolve([]) : subagentsApi.checkSubagentUpdates(target),
     enabled: false,
     staleTime: 5 * 60 * 1000,
   });
@@ -65,68 +78,50 @@ export function useInstallSubagent() {
   return useMutation({
     mutationFn: ({
       subagent,
+      target,
       currentApp,
     }: {
       subagent: DiscoverableSubagent;
+      target: ScopeTarget;
       currentApp: AgentType;
-    }) => subagentsApi.installSubagent(subagent, currentApp),
-    onSuccess: (installedSubagent) => {
-      queryClient.setQueryData<InstalledSubagent[]>(keys.installed, (oldData) =>
-        mergeImportedSubagents(oldData, [installedSubagent]),
-      );
-    },
-    onSettled: () =>
-      Promise.all([
-        queryClient.invalidateQueries({ queryKey: keys.installed }),
-        queryClient.invalidateQueries({ queryKey: keys.discoverable }),
-      ]),
+    }) => subagentsApi.installSubagent(subagent, target, currentApp),
+    onSettled: () => invalidateSubagentQueries(queryClient),
   });
 }
 
 export function useUninstallSubagent() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: subagentsApi.uninstallSubagent,
-    onSuccess: (_result, id) => {
-      queryClient.setQueryData<InstalledSubagent[]>(keys.installed, (oldData) =>
-        oldData?.filter((s) => s.id !== id),
-      );
-      queryClient.setQueryData<SubagentUpdateInfo[]>(keys.updates, (oldData) =>
-        oldData?.filter((u) => u.id !== id),
-      );
-    },
-    onSettled: () =>
-      Promise.all([
-        queryClient.invalidateQueries({ queryKey: keys.installed }),
-        queryClient.invalidateQueries({ queryKey: keys.discoverable }),
-        queryClient.invalidateQueries({ queryKey: keys.backups }),
-      ]),
+    mutationFn: ({ id, target }: { id: string; target: ScopeTarget }) =>
+      subagentsApi.uninstallSubagent(id, target),
+    onSettled: () => invalidateSubagentQueries(queryClient),
   });
 }
 
 export function useToggleSubagentApp() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, app, enabled }: { id: string; app: AgentType; enabled: boolean }) =>
-      subagentsApi.toggleSubagentApp(id, app, enabled),
-    onSettled: () => queryClient.invalidateQueries({ queryKey: keys.installed }),
+    mutationFn: ({
+      id,
+      target,
+      app,
+      enabled,
+    }: {
+      id: string;
+      target: ScopeTarget;
+      app: AgentType;
+      enabled: boolean;
+    }) => subagentsApi.toggleSubagentApp(id, target, app, enabled),
+    onSettled: () => invalidateSubagentQueries(queryClient),
   });
 }
 
 export function useUpdateSubagent() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: subagentsApi.updateSubagent,
-    onSuccess: (updatedSubagent) => {
-      queryClient.setQueryData<InstalledSubagent[]>(keys.installed, (oldData) => {
-        if (oldData === undefined) return [updatedSubagent];
-        return oldData.map((s) => (s.id === updatedSubagent.id ? updatedSubagent : s));
-      });
-      queryClient.setQueryData<SubagentUpdateInfo[]>(keys.updates, (oldData) =>
-        oldData?.filter((u) => u.id !== updatedSubagent.id),
-      );
-    },
-    onSettled: () => queryClient.invalidateQueries({ queryKey: keys.backups }),
+    mutationFn: ({ id, target }: { id: string; target: ScopeTarget }) =>
+      subagentsApi.updateSubagent(id, target),
+    onSettled: () => invalidateSubagentQueries(queryClient),
   });
 }
 
@@ -136,7 +131,7 @@ export function useAddSubagentRepo() {
     mutationFn: subagentsApi.addSubagentRepo,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: keys.repos });
-      queryClient.invalidateQueries({ queryKey: keys.discoverable });
+      queryClient.invalidateQueries({ queryKey: ['subagents', 'discoverable'] });
     },
   });
 }
@@ -148,7 +143,7 @@ export function useRemoveSubagentRepo() {
       subagentsApi.removeSubagentRepo(owner, name),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: keys.repos });
-      queryClient.invalidateQueries({ queryKey: keys.discoverable });
+      queryClient.invalidateQueries({ queryKey: ['subagents', 'discoverable'] });
     },
   });
 }
@@ -156,26 +151,18 @@ export function useRemoveSubagentRepo() {
 export function useRestoreSubagentBackup() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ backupId, currentApp }: { backupId: string; currentApp: AgentType }) =>
-      subagentsApi.restoreSubagentBackup(backupId, currentApp),
-    onSettled: () =>
-      Promise.all([
-        queryClient.invalidateQueries({ queryKey: keys.installed }),
-        queryClient.invalidateQueries({ queryKey: keys.backups }),
-      ]),
+    mutationFn: ({ backupId, target }: { backupId: string; target: ScopeTarget }) =>
+      subagentsApi.restoreSubagentBackup(backupId, target),
+    onSettled: () => invalidateSubagentQueries(queryClient),
   });
 }
 
 export function useDeleteSubagentBackup() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: subagentsApi.deleteSubagentBackup,
-    onSuccess: (_result, backupId) => {
-      queryClient.setQueryData<SubagentBackupEntry[]>(keys.backups, (oldData) =>
-        oldData?.filter((b) => b.backupId !== backupId),
-      );
-    },
-    onSettled: () => queryClient.invalidateQueries({ queryKey: keys.backups }),
+    mutationFn: ({ backupId, target }: { backupId: string; target: ScopeTarget }) =>
+      subagentsApi.deleteSubagentBackup(backupId, target),
+    onSettled: () => invalidateSubagentQueries(queryClient),
   });
 }
 

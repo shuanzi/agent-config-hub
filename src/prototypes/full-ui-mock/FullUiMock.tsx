@@ -45,10 +45,10 @@ import {
   X,
   type LucideIcon,
 } from 'lucide-react';
-import claudeCodeLogo from './assets/agent-logos/claude-code.svg';
-import codexLogo from './assets/agent-logos/codex.svg';
-import googleGeminiLogo from './assets/agent-logos/google-gemini.svg';
-import openCodeLogo from './assets/agent-logos/opencode.svg';
+import claudeCodeLogo from '../../assets/agent-logos/claude-code.svg';
+import codexLogo from '../../assets/agent-logos/codex.svg';
+import googleGeminiLogo from '../../assets/agent-logos/google-gemini.svg';
+import openCodeLogo from '../../assets/agent-logos/opencode.svg';
 import {
   b2AssetBlockReason,
   b2AssetDecisionStatus,

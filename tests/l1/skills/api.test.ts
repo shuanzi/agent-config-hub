@@ -1,5 +1,11 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
-import type { DiscoverableSkill, InstalledSkill, SkillRepo } from '../../../src/types';
+import type {
+  ConfigContext,
+  DiscoverableSkill,
+  InstalledSkill,
+  ScopeTarget,
+  SkillRepo,
+} from '../../../src/types';
 
 const mockInvoke = vi.fn();
 
@@ -31,24 +37,27 @@ describe('skills API wrappers', () => {
   });
 
   it('getInstalledSkills invokes the correct command', async () => {
+    const context: ConfigContext = { kind: 'project', projectId: 'project-alpha' };
     const expected: InstalledSkill[] = [];
     mockInvoke.mockResolvedValue(expected);
     const api = await loadSkillsApi();
-    const result = await api.getInstalledSkills();
-    expect(mockInvoke).toHaveBeenCalledWith('get_installed_skills', undefined);
+    const result = await api.getInstalledSkills(context);
+    expect(mockInvoke).toHaveBeenCalledWith('get_installed_skills', { context });
     expect(result).toBe(expected);
   });
 
   it('discoverAvailableSkills invokes the correct command', async () => {
+    const target: ScopeTarget = { scope: 'project', projectId: 'project-alpha' };
     const expected: DiscoverableSkill[] = [];
     mockInvoke.mockResolvedValue(expected);
     const api = await loadSkillsApi();
-    const result = await api.discoverAvailableSkills();
-    expect(mockInvoke).toHaveBeenCalledWith('discover_available_skills', undefined);
+    const result = await api.discoverAvailableSkills(target);
+    expect(mockInvoke).toHaveBeenCalledWith('discover_available_skills', { target });
     expect(result).toBe(expected);
   });
 
-  it('installSkill forwards skill and currentApp', async () => {
+  it('installSkill forwards skill, complete target and currentApp', async () => {
+    const target: ScopeTarget = { scope: 'project', projectId: 'project-alpha' };
     const skill: DiscoverableSkill = {
       key: 'a/b:foo',
       name: 'Foo',
@@ -57,6 +66,7 @@ describe('skills API wrappers', () => {
       repoOwner: 'a',
       repoName: 'b',
       repoBranch: 'main',
+      installed: false,
     };
     mockInvoke.mockResolvedValue({
       ...skill,
@@ -66,19 +76,31 @@ describe('skills API wrappers', () => {
       updatedAt: 0,
     });
     const api = await loadSkillsApi();
-    await api.installSkill(skill, 'codex');
-    expect(mockInvoke).toHaveBeenCalledWith('install_skill', { skill, currentApp: 'codex' });
+    await api.installSkill(skill, target, 'codex');
+    expect(mockInvoke).toHaveBeenCalledWith('install_skill', {
+      skill,
+      target,
+      currentApp: 'codex',
+    });
   });
 
-  it('toggleSkillApp forwards id, app and enabled', async () => {
+  it('existing Skill mutations forward the row ownership target', async () => {
+    const target: ScopeTarget = { scope: 'project', projectId: 'project-alpha' };
     mockInvoke.mockResolvedValue(undefined);
     const api = await loadSkillsApi();
-    await api.toggleSkillApp('id-1', 'gemini-cli', true);
+    await api.toggleSkillApp('id-1', target, 'gemini-cli', true);
     expect(mockInvoke).toHaveBeenCalledWith('toggle_skill_app', {
       id: 'id-1',
+      target,
       app: 'gemini-cli',
       enabled: true,
     });
+
+    await api.updateSkill('id-1', target);
+    expect(mockInvoke).toHaveBeenCalledWith('update_skill', { id: 'id-1', target });
+
+    await api.uninstallSkill('id-1', target);
+    expect(mockInvoke).toHaveBeenCalledWith('uninstall_skill', { id: 'id-1', target });
   });
 
   it('addSkillRepo forwards repo payload', async () => {

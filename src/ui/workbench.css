@@ -3,21 +3,53 @@
 :root {
   color-scheme: light;
   font-family:
-    -apple-system, BlinkMacSystemFont, 'Helvetica Neue', 'PingFang SC', 'Segoe UI', sans-serif;
-  --border: #d0d0d4;
-  --bg-subtle: #f6f6f8;
-  --accent: #0b5fff;
-  --warn: #8a5a00;
-  --error: #b00020;
+    -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Helvetica Neue', 'PingFang SC', 'Segoe UI',
+    sans-serif;
+  --wb-bg: #f5f5f7;
+  --wb-panel: #fff;
+  --wb-panel-muted: #fbfbfd;
+  --wb-ink: #1d1d1f;
+  --wb-muted: #6e6e73;
+  --wb-faint: #86868b;
+  --wb-line: #e8e8ed;
+  --wb-line-strong: #d2d2d7;
+  --wb-blue: #0071e3;
+  --wb-blue-dark: #0066cc;
+  --wb-blue-soft: color-mix(in srgb, var(--wb-blue) 9%, #fff);
+  --wb-green: #16a34a;
+  --wb-amber: #9a5b00;
+  --wb-red: #dc2626;
+  --border: var(--wb-line-strong);
+  --bg-subtle: var(--wb-bg);
+  --accent: var(--wb-blue);
+  --warn: var(--wb-amber);
+  --error: var(--wb-red);
 }
 
 * {
   box-sizing: border-box;
 }
 
+html,
+body,
+#root {
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+}
+
 body {
   margin: 0;
-  color: #1c1c1f;
+  overflow: hidden;
+  color: var(--wb-ink);
+  background: var(--wb-bg);
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
 }
 
 :focus-visible {
@@ -45,7 +77,13 @@ body {
 .workbench {
   display: flex;
   flex-direction: column;
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
   height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
+  background: var(--wb-bg);
 }
 
 /* 一级导航 */
@@ -380,15 +418,20 @@ body {
   font-size: 12px;
 }
 
-/* App shell (Phase 4) */
+/* Selected B2 visual shell. The business panels stay independent from this layout. */
 .app-header {
-  display: grid;
-  grid-template-columns: 1fr auto auto;
+  position: relative;
+  z-index: 1;
+  display: flex;
   align-items: center;
   gap: 16px;
-  border-bottom: 1px solid var(--border);
-  padding: 0 16px;
-  min-height: 52px;
+  width: 100%;
+  min-height: 66px;
+  height: 66px;
+  padding: 0 30px;
+  overflow: hidden;
+  border: 0;
+  background: var(--wb-panel);
 }
 
 .app-header-brand {
@@ -399,104 +442,646 @@ body {
 }
 
 .app-title {
+  flex: 0 1 auto;
   margin: 0;
+  overflow: hidden;
+  color: var(--wb-ink);
   font-size: 16px;
-  font-weight: 600;
+  font-weight: 500;
+  letter-spacing: -0.015em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .app-header-page-title {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--wb-muted);
   font-size: 13px;
-  color: #555;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.app-shell-main {
-  display: flex;
-  flex-direction: column;
+.app-header-page-title:focus {
+  outline: none;
+}
+
+.current-agent-control {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  margin-left: auto;
+  color: var(--wb-muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.current-agent-control select {
+  min-width: 110px;
+  height: 30px;
+  padding: 0 26px 0 8px;
+  border: 1px solid var(--wb-line-strong);
+  border-radius: 6px;
+  color: var(--wb-ink);
+  background: var(--wb-panel);
+  font-size: 12px;
+}
+
+.app-header-back {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 2px;
+  min-height: 34px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: 6px;
+  color: var(--wb-muted);
+  background: transparent;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.app-header-back:hover {
+  color: var(--wb-ink);
+  background: var(--wb-bg);
+}
+
+.workbench-layout {
+  display: grid;
+  grid-template-columns: 180px 220px minmax(0, 1fr);
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  margin: 0 18px 18px;
+  overflow: hidden;
+  border: 1px solid var(--wb-line-strong);
+  border-radius: 10px;
+  background: var(--wb-panel);
+  box-shadow: 0 1px 2px rgb(29 29 31 / 3%);
+}
+
+.workbench-layout.is-settings {
+  grid-template-columns: 180px minmax(0, 1fr);
+}
+
+.workbench-layout.is-settings .app-main-surface {
+  grid-column: 2;
+}
+
+@media (min-width: 1200px) and (max-width: 1360px) {
+  .workbench-layout {
+    grid-template-columns: 160px 190px minmax(0, 1fr);
+  }
+
+  .workbench-layout.is-settings {
+    grid-template-columns: 160px minmax(0, 1fr);
+  }
+}
+
+.asset-type-rail,
+.config-context-rail,
+.app-main-surface {
+  min-width: 0;
   min-height: 0;
 }
 
-.agent-selector {
+.asset-type-rail {
+  display: flex;
+  flex-direction: column;
+  grid-column: 1;
+  padding: 18px 12px;
+  border-right: 1px solid var(--wb-line);
+  background: var(--wb-panel);
+}
+
+.asset-type-rail-nav,
+.config-context-list {
+  display: grid;
+  gap: 3px;
+}
+
+.asset-type-rail-footer {
+  margin-top: auto;
+  padding-top: 16px;
+  border-top: 1px solid var(--wb-line);
+}
+
+.rail-button,
+.config-context-option {
   display: flex;
   align-items: center;
+  gap: 11px;
+  width: 100%;
+  min-height: 40px;
+  padding: 0 12px;
+  overflow: hidden;
+  border: 0;
+  border-radius: 8px;
+  color: var(--wb-muted);
+  background: transparent;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background 150ms cubic-bezier(0.28, 0, 0.22, 1),
+    box-shadow 150ms cubic-bezier(0.28, 0, 0.22, 1);
+}
+
+.rail-button > span:last-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rail-button:hover,
+.config-context-option:hover {
+  color: var(--wb-ink);
+  background: var(--wb-bg);
+}
+
+.rail-button.is-selected,
+.config-context-option.is-selected {
+  position: relative;
+  color: var(--wb-blue);
+  background: var(--wb-blue-soft);
+  box-shadow: 0 0 0 1.5px var(--wb-blue);
+}
+
+.rail-button.is-selected::before {
+  position: absolute;
+  top: 50%;
+  left: -2px;
+  width: 4px;
+  height: 65%;
+  border-radius: 2px;
+  background: var(--wb-blue);
+  content: '';
+  transform: translateY(-50%);
+}
+
+.rail-icon,
+.agent-brand-mark {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+}
+
+.agent-brand-mark img {
+  display: block;
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+.config-context-rail {
+  display: flex;
+  flex-direction: column;
+  grid-column: 2;
+  padding: 14px 12px 12px;
+  border-right: 1px solid var(--wb-line);
+  background: var(--wb-panel-muted);
+  overflow: auto;
+}
+
+.config-context-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   gap: 8px;
+  margin: 0 4px 10px 12px;
+}
+
+.config-context-heading,
+.config-project-heading {
+  margin: 0;
+  color: var(--wb-faint);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+}
+
+.config-context-option {
+  display: block;
+  width: 100%;
+  min-height: 38px;
+  padding: 0 12px;
+  overflow: hidden;
+  border: 0;
+  border-radius: 7px;
+  color: var(--wb-muted);
+  background: transparent;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.config-context-option.is-selected {
+  box-shadow: none;
+}
+
+.config-project-heading {
+  margin: 16px 12px 7px;
+}
+
+.config-context-loading,
+.config-context-empty {
+  margin: 2px 12px;
+  color: var(--wb-faint);
+  font-size: 12px;
+}
+
+.config-project-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 2px;
+}
+
+.config-project-row .config-context-option {
+  min-height: 50px;
+  padding-block: 7px;
+}
+
+.config-project-name,
+.config-project-path {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.config-project-name {
+  color: inherit;
+}
+
+.config-project-path {
+  margin-top: 2px;
+  color: var(--wb-faint);
+  font-size: 11px;
+}
+
+.config-project-actions {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+}
+
+.context-icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  color: var(--wb-faint);
+  background: transparent;
+  cursor: pointer;
+}
+
+.context-icon-button:hover {
+  color: var(--wb-ink);
+  background: var(--wb-bg);
+}
+
+.context-feedback {
+  margin: 0 4px 8px;
+  padding: 7px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.context-feedback-success {
+  color: #166534;
+  background: #f0fdf4;
+}
+
+.context-feedback-error {
+  color: #991b1b;
+  background: #fef2f2;
+}
+
+.context-project-form {
+  display: grid;
+  gap: 14px;
+}
+
+.context-project-form label {
+  display: grid;
+  gap: 6px;
+  color: var(--wb-muted);
   font-size: 13px;
 }
 
-.agent-selector label {
-  color: #555;
+.context-project-form input {
+  width: 100%;
+  min-width: 0;
+  min-height: 34px;
+  padding: 6px 8px;
+  border: 1px solid var(--wb-line-strong);
+  border-radius: 6px;
+  color: var(--wb-ink);
+  background: var(--wb-panel);
 }
 
-.agent-selector select {
-  padding: 5px 8px;
-  border: 1px solid var(--border);
-  border-radius: 4px;
+.context-project-form p {
+  margin: 0;
+  color: var(--wb-red);
   font-size: 13px;
+}
+
+.context-dialog-primary,
+.context-dialog-secondary,
+.context-dialog-danger {
+  min-height: 32px;
+  padding: 0 12px;
+  border: 1px solid var(--wb-line-strong);
+  border-radius: 6px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.context-dialog-primary {
+  border-color: var(--wb-blue);
+  color: #fff;
+  background: var(--wb-blue);
+}
+
+.context-dialog-danger {
+  border-color: var(--wb-red);
+  color: #fff;
+  background: var(--wb-red);
+}
+
+.context-dialog-secondary {
+  color: var(--wb-ink);
+  background: var(--wb-panel);
+}
+
+.context-dialog-primary:disabled,
+.context-dialog-danger:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
+.app-main-surface {
+  display: flex;
+  flex-direction: column;
+  grid-column: 3;
+  overflow: hidden;
+  background: var(--wb-panel);
 }
 
 .sub-tabs {
   display: flex;
+  flex: 0 0 auto;
+  align-items: center;
   gap: 4px;
-  border-bottom: 1px solid var(--border);
-  padding: 8px 16px 0;
-  background: var(--bg-subtle);
+  min-height: 56px;
+  padding: 8px 18px;
+  border-bottom: 1px solid var(--wb-line);
+  background: var(--wb-panel);
 }
 
 .sub-tab {
+  min-height: 32px;
+  padding: 0 12px;
   border: 1px solid transparent;
-  border-bottom: none;
-  background: none;
-  padding: 8px 16px;
+  border-radius: 6px;
+  color: var(--wb-muted);
+  background: transparent;
   font-size: 13px;
   cursor: pointer;
-  border-radius: 6px 6px 0 0;
 }
 
 .sub-tab:hover {
-  background: #fff;
+  color: var(--wb-ink);
+  background: var(--wb-bg);
 }
 
 .sub-tab.active {
-  background: #fff;
-  border-color: var(--border);
+  border-color: color-mix(in srgb, var(--wb-blue) 35%, var(--wb-line));
+  color: var(--wb-blue);
+  background: var(--wb-blue-soft);
+  font-weight: 500;
+}
+
+.skills-view,
+.subagents-view {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.skills-view-content,
+.subagents-view-content {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  padding: 18px;
+  overflow: auto;
+}
+
+/* Shared dialog primitive. Existing dialogs can opt in without changing their data flow. */
+.focused-dialog-backdrop {
+  position: fixed;
+  z-index: 100;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgb(29 29 31 / 38%);
+}
+
+.focused-dialog {
+  display: flex;
+  flex-direction: column;
+  width: min(560px, 100%);
+  max-height: min(80vh, 720px);
+  overflow: hidden;
+  border: 1px solid var(--wb-line-strong);
+  border-radius: 10px;
+  background: var(--wb-panel);
+  box-shadow: 0 20px 48px rgb(29 29 31 / 18%);
+}
+
+.focused-dialog-header,
+.focused-dialog-footer {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--wb-line);
+}
+
+.focused-dialog-header h2 {
+  margin: 0;
+  color: var(--wb-ink);
+  font-size: 15px;
   font-weight: 600;
 }
 
-.skills-view {
-  display: flex;
-  flex-direction: column;
-  flex: 1;
-  min-height: 0;
+.focused-dialog-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  color: var(--wb-muted);
+  background: transparent;
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
 }
 
-.skills-view-content {
-  flex: 1;
-  overflow: auto;
+.focused-dialog-close:hover {
+  color: var(--wb-ink);
+  background: var(--wb-bg);
+}
+
+.focused-dialog-body {
+  min-height: 0;
   padding: 16px;
-  min-height: 0;
-}
-
-.subagents-view {
-  display: flex;
-  flex-direction: column;
-  flex: 1;
-  min-height: 0;
-}
-
-.subagents-view-content {
-  flex: 1;
   overflow: auto;
-  padding: 16px;
-  min-height: 0;
 }
 
-.placeholder-panel {
-  padding: 48px 16px;
-  text-align: center;
-  color: #555;
+.focused-dialog-footer {
+  justify-content: flex-end;
+  border-top: 1px solid var(--wb-line);
+  border-bottom: 0;
 }
 
-.placeholder-panel h2 {
-  margin: 0 0 8px;
-  font-size: 18px;
-  color: #1c1c1f;
+@media (max-width: 1199px) {
+  .app-header {
+    min-height: 58px;
+    height: 58px;
+    gap: 10px;
+    padding: 0 16px;
+  }
+
+  .workbench-layout {
+    display: block;
+    margin: 0 10px 12px;
+  }
+
+  .asset-type-rail,
+  .config-context-rail,
+  .app-main-surface {
+    width: 100%;
+    height: 100%;
+    min-height: 0;
+    border-right: 0;
+  }
+
+  .asset-type-rail {
+    padding: 12px;
+  }
+
+  .config-context-rail {
+    padding: 14px 12px 12px;
+  }
+
+  .app-main-surface {
+    overflow: auto;
+  }
+
+  .skills-view-content,
+  .subagents-view-content {
+    padding: 14px;
+  }
+
+  .instructions-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .instructions-list-pane {
+    border-right: 0;
+    border-bottom: 1px solid var(--wb-line);
+  }
+
+  .skill-toolbar input[type='text'],
+  .subagent-toolbar input[type='text'] {
+    min-width: min(240px, 100%);
+    max-width: 100%;
+  }
+
+  .settings-override-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .settings-options {
+    max-width: 100%;
+    overflow-x: auto;
+  }
+}
+
+@media (max-width: 480px) {
+  .app-header {
+    padding: 0 12px;
+  }
+
+  .app-header-brand {
+    gap: 7px;
+  }
+
+  .app-title {
+    max-width: 116px;
+    font-size: 14px;
+  }
+
+  .app-header-page-title {
+    font-size: 12px;
+  }
+
+  .current-agent-control {
+    gap: 4px;
+    font-size: 0;
+  }
+
+  .current-agent-control select {
+    min-width: 82px;
+    max-width: 92px;
+    padding-inline: 5px 20px;
+  }
+
+  .workbench-layout {
+    margin: 0 8px 8px;
+  }
+
+  .sub-tabs {
+    min-height: 50px;
+    padding-inline: 10px;
+  }
+
+  .sub-tab {
+    flex: 1 1 0;
+    padding-inline: 8px;
+  }
+
+  .skills-view-content,
+  .subagents-view-content {
+    padding: 10px;
+  }
+
+  .focused-dialog-backdrop {
+    padding: 12px;
+  }
 }

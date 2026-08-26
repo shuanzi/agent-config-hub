@@ -5,6 +5,7 @@
 
 use crate::database::{lock_conn, Database};
 use crate::error::AppError;
+use crate::services::project::ScopeTarget;
 use crate::services::subagent::{InstalledSubagent, SubagentApps, SubagentRepo};
 use indexmap::IndexMap;
 use rusqlite::params;
@@ -14,18 +15,31 @@ impl Database {
     pub fn get_all_installed_subagents(
         &self,
     ) -> Result<IndexMap<String, InstalledSubagent>, AppError> {
+        self.get_all_installed_subagents_for_target(&ScopeTarget::Global)
+    }
+
+    /// 按完整 scope target 获取已安装的 Subagents。
+    pub fn get_all_installed_subagents_for_target(
+        &self,
+        target: &ScopeTarget,
+    ) -> Result<IndexMap<String, InstalledSubagent>, AppError> {
+        target.validate()?;
+        let (scope, project_id) = subagent_target_parts(target);
         let conn = lock_conn!(self.conn);
         let mut stmt = conn
             .prepare(
                 "SELECT id, name, description, directory, repo_owner, repo_name, repo_branch,
                         readme_url, enabled_claude_code, enabled_codex, enabled_gemini_cli, enabled_opencode,
-                        installed_at, content_hash, updated_at
-                 FROM subagents ORDER BY name ASC",
+                        installed_at, content_hash, updated_at, scope, project_id
+                 FROM subagents
+                 WHERE scope = ?1 AND project_id IS ?2
+                 ORDER BY name ASC, id ASC",
             )
             .map_err(|e| AppError::Database(e.to_string()))?;
 
+        let target = target.clone();
         let subagent_iter = stmt
-            .query_map([], |row| {
+            .query_map(params![scope, project_id], move |row| {
                 Ok(InstalledSubagent {
                     id: row.get(0)?,
                     name: row.get(1)?,
@@ -44,6 +58,7 @@ impl Database {
                     installed_at: row.get(12)?,
                     content_hash: row.get(13)?,
                     updated_at: row.get::<_, i64>(14).unwrap_or(0),
+                    target: target.clone(),
                 })
             })
             .map_err(|e| AppError::Database(e.to_string()))?;
@@ -58,17 +73,29 @@ impl Database {
 
     /// 获取单个已安装的 Subagent
     pub fn get_installed_subagent(&self, id: &str) -> Result<Option<InstalledSubagent>, AppError> {
+        self.get_installed_subagent_for_target(id, &ScopeTarget::Global)
+    }
+
+    /// 按完整 scope target 获取单个已安装的 Subagent。
+    pub fn get_installed_subagent_for_target(
+        &self,
+        id: &str,
+        target: &ScopeTarget,
+    ) -> Result<Option<InstalledSubagent>, AppError> {
+        target.validate()?;
+        let (scope, project_id) = subagent_target_parts(target);
         let conn = lock_conn!(self.conn);
         let mut stmt = conn
             .prepare(
                 "SELECT id, name, description, directory, repo_owner, repo_name, repo_branch,
                         readme_url, enabled_claude_code, enabled_codex, enabled_gemini_cli, enabled_opencode,
-                        installed_at, content_hash, updated_at
-                 FROM subagents WHERE id = ?1",
+                        installed_at, content_hash, updated_at, scope, project_id
+                 FROM subagents WHERE id = ?1 AND scope = ?2 AND project_id IS ?3",
             )
             .map_err(|e| AppError::Database(e.to_string()))?;
 
-        let result = stmt.query_row([id], |row| {
+        let target = target.clone();
+        let result = stmt.query_row(params![id, scope, project_id], |row| {
             Ok(InstalledSubagent {
                 id: row.get(0)?,
                 name: row.get(1)?,
@@ -87,6 +114,7 @@ impl Database {
                 installed_at: row.get(12)?,
                 content_hash: row.get(13)?,
                 updated_at: row.get::<_, i64>(14).unwrap_or(0),
+                target: target.clone(),
             })
         });
 
@@ -99,13 +127,15 @@ impl Database {
 
     /// 保存 Subagent（添加或更新）
     pub fn save_subagent(&self, subagent: &InstalledSubagent) -> Result<(), AppError> {
+        subagent.target.validate()?;
+        let (scope, project_id) = subagent_target_parts(&subagent.target);
         let conn = lock_conn!(self.conn);
         conn.execute(
             "INSERT OR REPLACE INTO subagents
              (id, name, description, directory, repo_owner, repo_name, repo_branch,
               readme_url, enabled_claude_code, enabled_codex, enabled_gemini_cli, enabled_opencode,
-              installed_at, content_hash, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+              installed_at, content_hash, updated_at, scope, project_id)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
             params![
                 subagent.id,
                 subagent.name,
@@ -122,6 +152,8 @@ impl Database {
                 subagent.installed_at,
                 subagent.content_hash,
                 subagent.updated_at,
+                scope,
+                project_id,
             ],
         )
         .map_err(|e| AppError::Database(e.to_string()))?;
@@ -130,6 +162,8 @@ impl Database {
 
     /// 仅更新已安装 Subagent 的元数据，不修改各 Agent 的启用状态。
     pub fn update_subagent_metadata(&self, subagent: &InstalledSubagent) -> Result<bool, AppError> {
+        subagent.target.validate()?;
+        let (scope, project_id) = subagent_target_parts(&subagent.target);
         let conn = lock_conn!(self.conn);
         let affected = conn
             .execute(
@@ -144,7 +178,7 @@ impl Database {
                      installed_at = ?8,
                      content_hash = ?9,
                      updated_at = ?10
-                 WHERE id = ?11 AND installed_at = ?12",
+                 WHERE id = ?11 AND installed_at = ?12 AND scope = ?13 AND project_id IS ?14",
                 params![
                     subagent.name,
                     subagent.description,
@@ -158,6 +192,8 @@ impl Database {
                     subagent.updated_at,
                     subagent.id,
                     subagent.installed_at,
+                    scope,
+                    project_id,
                 ],
             )
             .map_err(|e| AppError::Database(e.to_string()))?;
@@ -166,28 +202,66 @@ impl Database {
 
     /// 删除 Subagent
     pub fn delete_subagent(&self, id: &str) -> Result<bool, AppError> {
+        self.delete_subagent_for_target(id, &ScopeTarget::Global)
+    }
+
+    /// 按完整 scope target 删除 Subagent。
+    pub fn delete_subagent_for_target(
+        &self,
+        id: &str,
+        target: &ScopeTarget,
+    ) -> Result<bool, AppError> {
+        target.validate()?;
+        let (scope, project_id) = subagent_target_parts(target);
         let conn = lock_conn!(self.conn);
         let affected = conn
-            .execute("DELETE FROM subagents WHERE id = ?1", params![id])
+            .execute(
+                "DELETE FROM subagents WHERE id = ?1 AND scope = ?2 AND project_id IS ?3",
+                params![id, scope, project_id],
+            )
             .map_err(|e| AppError::Database(e.to_string()))?;
         Ok(affected > 0)
     }
 
     /// 清空所有 Subagents（用于迁移）
     pub fn clear_subagents(&self) -> Result<(), AppError> {
+        self.clear_subagents_for_target(&ScopeTarget::Global)
+    }
+
+    /// 清空明确 target 内的 Subagents。
+    pub fn clear_subagents_for_target(&self, target: &ScopeTarget) -> Result<(), AppError> {
+        target.validate()?;
+        let (scope, project_id) = subagent_target_parts(target);
         let conn = lock_conn!(self.conn);
-        conn.execute("DELETE FROM subagents", [])
-            .map_err(|e| AppError::Database(e.to_string()))?;
+        conn.execute(
+            "DELETE FROM subagents WHERE scope = ?1 AND project_id IS ?2",
+            params![scope, project_id],
+        )
+        .map_err(|e| AppError::Database(e.to_string()))?;
         Ok(())
     }
 
     /// 更新 Subagent 的 Agent 启用状态
     pub fn update_subagent_apps(&self, id: &str, apps: &SubagentApps) -> Result<bool, AppError> {
+        self.update_subagent_apps_for_target(id, &ScopeTarget::Global, apps)
+    }
+
+    /// 按完整 scope target 更新 Subagent 的 Agent 启用状态。
+    pub fn update_subagent_apps_for_target(
+        &self,
+        id: &str,
+        target: &ScopeTarget,
+        apps: &SubagentApps,
+    ) -> Result<bool, AppError> {
+        target.validate()?;
+        let (scope, project_id) = subagent_target_parts(target);
         let conn = lock_conn!(self.conn);
         let affected = conn
             .execute(
-                "UPDATE subagents SET enabled_claude_code = ?1, enabled_codex = ?2, enabled_gemini_cli = ?3, enabled_opencode = ?4 WHERE id = ?5",
-                params![apps.claude_code, apps.codex, apps.gemini_cli, apps.opencode, id],
+                "UPDATE subagents
+                 SET enabled_claude_code = ?1, enabled_codex = ?2, enabled_gemini_cli = ?3, enabled_opencode = ?4
+                 WHERE id = ?5 AND scope = ?6 AND project_id IS ?7",
+                params![apps.claude_code, apps.codex, apps.gemini_cli, apps.opencode, id, scope, project_id],
             )
             .map_err(|e| AppError::Database(e.to_string()))?;
         Ok(affected > 0)
@@ -200,11 +274,25 @@ impl Database {
         content_hash: &str,
         updated_at: i64,
     ) -> Result<bool, AppError> {
+        self.update_subagent_hash_for_target(id, &ScopeTarget::Global, content_hash, updated_at)
+    }
+
+    /// 按完整 scope target 更新 Subagent 的内容哈希和更新时间。
+    pub fn update_subagent_hash_for_target(
+        &self,
+        id: &str,
+        target: &ScopeTarget,
+        content_hash: &str,
+        updated_at: i64,
+    ) -> Result<bool, AppError> {
+        target.validate()?;
+        let (scope, project_id) = subagent_target_parts(target);
         let conn = lock_conn!(self.conn);
         let affected = conn
             .execute(
-                "UPDATE subagents SET content_hash = ?1, updated_at = ?2 WHERE id = ?3",
-                params![content_hash, updated_at, id],
+                "UPDATE subagents SET content_hash = ?1, updated_at = ?2
+                 WHERE id = ?3 AND scope = ?4 AND project_id IS ?5",
+                params![content_hash, updated_at, id, scope, project_id],
             )
             .map_err(|e| AppError::Database(e.to_string()))?;
         Ok(affected > 0)
@@ -260,9 +348,17 @@ impl Database {
     }
 }
 
+fn subagent_target_parts(target: &ScopeTarget) -> (&str, Option<&str>) {
+    match target {
+        ScopeTarget::Global => ("global", None),
+        ScopeTarget::Project { project_id } => ("project", Some(project_id)),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::services::project::ScopeTarget;
     use crate::services::skill::AgentType;
 
     fn subagent(id: &str, name: &str, apps: SubagentApps) -> InstalledSubagent {
@@ -279,6 +375,7 @@ mod tests {
             installed_at: 1,
             content_hash: Some(format!("{name}-hash")),
             updated_at: 2,
+            target: ScopeTarget::Global,
         }
     }
 
@@ -355,5 +452,50 @@ mod tests {
         assert!(!stored.apps.claude_code);
         assert_eq!(stored.content_hash, Some("new-hash".to_string()));
         assert_eq!(stored.updated_at, 42);
+    }
+
+    #[test]
+    fn same_source_is_isolated_between_global_and_project_targets() {
+        let db = Database::memory().expect("memory db");
+        {
+            let conn = db.conn.lock().expect("lock db");
+            conn.execute(
+                "INSERT INTO projects (project_id, display_name, root_path) VALUES (?1, ?2, ?3)",
+                params!["project-a", "Project A", "/tmp/project-a"],
+            )
+            .expect("seed project");
+        }
+        let global = subagent(
+            "owner/repo:reviewer.md",
+            "global-reviewer",
+            SubagentApps::only(&AgentType::ClaudeCode),
+        );
+        let mut project = global.clone();
+        project.name = "project-reviewer".to_string();
+        project.target = ScopeTarget::Project {
+            project_id: "project-a".to_string(),
+        };
+
+        db.save_subagent(&global).expect("save global subagent");
+        db.save_subagent(&project)
+            .expect("save project subagent with same source identity");
+
+        let global_rows = db
+            .get_all_installed_subagents_for_target(&ScopeTarget::Global)
+            .expect("list global target");
+        let project_rows = db
+            .get_all_installed_subagents_for_target(&ScopeTarget::Project {
+                project_id: "project-a".to_string(),
+            })
+            .expect("list project target");
+
+        assert_eq!(
+            global_rows["owner/repo:reviewer.md"].name,
+            "global-reviewer"
+        );
+        assert_eq!(
+            project_rows["owner/repo:reviewer.md"].name,
+            "project-reviewer"
+        );
     }
 }

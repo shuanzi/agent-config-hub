@@ -19,6 +19,7 @@ use std::sync::{Arc, OnceLock, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use crate::config;
 use crate::database::Database;
 use crate::error::{format_subagent_error, AppError};
+use crate::services::project::{ConfigContext, ProjectService, ScopeTarget};
 use crate::services::skill::{AgentType, SkillApps, SkillRepo, SkillService};
 use crate::settings::{get_settings, StorageLocation, SyncMethod};
 
@@ -71,6 +72,9 @@ pub struct InstalledSubagent {
     pub content_hash: Option<String>,
     #[serde(default)]
     pub updated_at: i64,
+    /// 资产的完整归属 target。旧备份 metadata 缺失该字段时按 global 读取。
+    #[serde(default)]
+    pub target: ScopeTarget,
 }
 
 /// 可发现的 Subagent（来自仓库中的单个 Markdown 文件）。
@@ -88,6 +92,9 @@ pub struct DiscoverableSubagent {
     pub repo_owner: String,
     pub repo_name: String,
     pub repo_branch: String,
+    /// 相对于当前明确 target 的安装状态；发现源本身不携带全局状态。
+    #[serde(default)]
+    pub installed: bool,
 }
 
 /// 仓库配置。
@@ -158,10 +165,12 @@ impl Default for SubagentService {
 pub(crate) struct SubagentMigrationOutcome {
     pub result: MigrationResult,
     pub moved: Vec<String>,
+    pub project_moved: Vec<String>,
 }
 
 pub(crate) struct SubagentMigrationFailure {
     pub moved: Vec<String>,
+    pub project_moved: Vec<String>,
     pub failures: Vec<String>,
 }
 
@@ -192,6 +201,68 @@ impl SubagentService {
         Ok(dir)
     }
 
+    /// 按完整 target 解析 Subagent SSOT。项目 target 使用与当前 storage
+    /// location 同级的独立 sibling，绝不回退到 global SSOT。
+    pub(crate) fn get_ssot_dir_for_target(
+        db: &Arc<Database>,
+        target: &ScopeTarget,
+    ) -> Result<PathBuf, AppError> {
+        match target {
+            ScopeTarget::Global => Self::get_ssot_dir(),
+            ScopeTarget::Project { project_id } => {
+                ProjectService::resolve_scope_target(db, target)?;
+                let dir = Self::project_ssot_dir_for_location(
+                    get_settings().storage_location,
+                    project_id,
+                );
+                fs::create_dir_all(&dir).map_err(|e| AppError::io(&dir, e))?;
+                Ok(dir)
+            }
+        }
+    }
+
+    fn project_ssot_dir_for_location(location: StorageLocation, project_id: &str) -> PathBuf {
+        let base = match location {
+            StorageLocation::Hub => config::get_hub_dir(),
+            StorageLocation::Unified => config::get_home_dir().join(".agents"),
+        };
+        base.join("projects").join(project_id).join("subagents")
+    }
+
+    pub(crate) fn rollback_project_subagent_moves(
+        old_location: StorageLocation,
+        new_location: StorageLocation,
+        project_ids: &[String],
+    ) {
+        for project_id in project_ids {
+            let old_ssot = Self::project_ssot_dir_for_location(old_location, project_id);
+            let new_ssot = Self::project_ssot_dir_for_location(new_location, project_id);
+            if !new_ssot.exists() || old_ssot.exists() {
+                continue;
+            }
+            if let Some(parent) = old_ssot.parent() {
+                let _ = fs::create_dir_all(parent);
+            }
+            if fs::rename(&new_ssot, &old_ssot).is_err() {
+                match SkillService::copy_dir_recursive(&new_ssot, &old_ssot) {
+                    Ok(()) => {
+                        if let Err(error) = fs::remove_dir_all(&new_ssot) {
+                            log::error!(
+                                "回滚项目 Subagent sibling 后清理新位置失败 {}: {error}",
+                                new_ssot.display()
+                            );
+                        }
+                    }
+                    Err(error) => log::error!(
+                        "回滚项目 Subagent sibling 失败 {} -> {}: {error}",
+                        new_ssot.display(),
+                        old_ssot.display()
+                    ),
+                }
+            }
+        }
+    }
+
     fn get_backup_dir() -> Result<PathBuf, AppError> {
         let dir = config::get_hub_subagent_backups_dir();
         fs::create_dir_all(&dir).map_err(|e| AppError::io(&dir, e))?;
@@ -206,6 +277,63 @@ impl SubagentService {
             AgentType::OpenCode => config::get_opencode_agents_dir(),
         };
         Ok(dir)
+    }
+
+    fn app_is_supported_for_target(target: &ScopeTarget, app: &AgentType) -> bool {
+        !matches!(
+            (target, app),
+            (ScopeTarget::Project { .. }, AgentType::Codex)
+        )
+    }
+
+    fn ensure_app_supported_for_target(
+        target: &ScopeTarget,
+        app: &AgentType,
+    ) -> Result<(), AppError> {
+        if Self::app_is_supported_for_target(target, app) {
+            return Ok(());
+        }
+        Err(AppError::Message(format_subagent_error(
+            "SUBAGENT_UNSUPPORTED",
+            &[("app", app.as_str()), ("scope", "project")],
+            Some("selectSupportedAgent"),
+        )))
+    }
+
+    fn ensure_enabled_apps_supported_for_target(
+        target: &ScopeTarget,
+        apps: &SubagentApps,
+    ) -> Result<(), AppError> {
+        for app in apps.enabled_apps() {
+            Self::ensure_app_supported_for_target(target, &app)?;
+        }
+        Ok(())
+    }
+
+    /// 按完整 target 解析 Agent 投影目录。项目目录只取 registry 中的 root，
+    /// 不读取 global override；Codex 项目 Subagent 是封闭 Unsupported。
+    pub(crate) fn get_app_subagents_dir_for_target(
+        db: &Arc<Database>,
+        target: &ScopeTarget,
+        app: &AgentType,
+    ) -> Result<PathBuf, AppError> {
+        match target {
+            ScopeTarget::Global => Self::get_app_subagents_dir(app),
+            ScopeTarget::Project { .. } => {
+                Self::ensure_app_supported_for_target(target, app)?;
+                let resolved = ProjectService::resolve_scope_target(db, target)?;
+                let root = resolved
+                    .project_root
+                    .expect("project target resolution always has a project root");
+                let dir = match app {
+                    AgentType::ClaudeCode => root.join(".claude").join("agents"),
+                    AgentType::Codex => unreachable!("Codex project Subagent is unsupported"),
+                    AgentType::GeminiCli => root.join(".gemini").join("agents"),
+                    AgentType::OpenCode => root.join(".opencode").join("agents"),
+                };
+                Ok(dir)
+            }
+        }
     }
 
     fn ensure_distinct_subagent_roots(
@@ -240,6 +368,17 @@ impl SubagentService {
         Ok(app_dir)
     }
 
+    fn get_distinct_app_subagents_dir_for_target(
+        db: &Arc<Database>,
+        target: &ScopeTarget,
+        ssot_dir: &Path,
+        app: &AgentType,
+    ) -> Result<PathBuf, AppError> {
+        let app_dir = Self::get_app_subagents_dir_for_target(db, target, app)?;
+        Self::ensure_distinct_subagent_roots(ssot_dir, &app_dir, app)?;
+        Ok(app_dir)
+    }
+
     fn validate_subagent_storage_destination(ssot_dir: &Path) -> Result<(), AppError> {
         for app in AgentType::all() {
             let app_dir = Self::get_app_subagents_dir(&app)?;
@@ -250,6 +389,77 @@ impl SubagentService {
 
     fn ssot_file_path(ssot_dir: &Path, directory: &str) -> PathBuf {
         ssot_dir.join(format!("{directory}.md"))
+    }
+
+    /// 项目 target 只投影已由路径矩阵确认兼容的 Subagent 文件。全局 target
+    /// 保持既有行为；项目 Claude/Gemini 继续使用发现阶段已要求的 `name`，
+    /// OpenCode 额外要求其原生的 `mode: subagent|all`。
+    fn validate_project_subagent_file_for_app(
+        target: &ScopeTarget,
+        source: &Path,
+        app: &AgentType,
+    ) -> Result<(), AppError> {
+        if !matches!(target, ScopeTarget::Project { .. }) {
+            return Ok(());
+        }
+        Self::ensure_app_supported_for_target(target, app)?;
+
+        let content = fs::read_to_string(source).map_err(|error| AppError::io(source, error))?;
+        let content = content.trim_start_matches('\u{feff}');
+        let parts: Vec<&str> = content.splitn(3, "---").collect();
+        let front_matter = if parts.len() == 3 && parts[0].trim().is_empty() {
+            parts[1].trim()
+        } else {
+            return Err(Self::project_subagent_incompatible_error(
+                app,
+                "missingFrontmatter",
+            ));
+        };
+        let metadata: serde_yaml::Value = serde_yaml::from_str(front_matter)
+            .map_err(|_| Self::project_subagent_incompatible_error(app, "invalidFrontmatter"))?;
+        let Some(mapping) = metadata.as_mapping() else {
+            return Err(Self::project_subagent_incompatible_error(
+                app,
+                "invalidFrontmatter",
+            ));
+        };
+        let name_key = serde_yaml::Value::String("name".to_string());
+        let has_name = mapping
+            .get(&name_key)
+            .and_then(serde_yaml::Value::as_str)
+            .map(|name| !name.trim().is_empty())
+            .unwrap_or(false);
+        if !has_name {
+            return Err(Self::project_subagent_incompatible_error(
+                app,
+                "missingName",
+            ));
+        }
+
+        if *app == AgentType::OpenCode {
+            let mode_key = serde_yaml::Value::String("mode".to_string());
+            let valid_mode = mapping
+                .get(&mode_key)
+                .and_then(serde_yaml::Value::as_str)
+                .map(|mode| matches!(mode, "subagent" | "all"))
+                .unwrap_or(false);
+            if !valid_mode {
+                return Err(Self::project_subagent_incompatible_error(
+                    app,
+                    "invalidMode",
+                ));
+            }
+        }
+
+        Ok(())
+    }
+
+    fn project_subagent_incompatible_error(app: &AgentType, reason: &str) -> AppError {
+        AppError::Message(format_subagent_error(
+            "SUBAGENT_INCOMPATIBLE",
+            &[("app", app.as_str()), ("reason", reason)],
+            Some("fixFrontmatter"),
+        ))
     }
 
     /// 目标位置已存在但数据库无记录：属于未托管内容，绝不覆盖/冒名记录。
@@ -271,13 +481,75 @@ impl SubagentService {
         Ok(subagents.into_values().collect())
     }
 
-    fn reuse_existing_install(
+    /// 按 UI 读取上下文组装 Subagents。返回顺序就是展示顺序；记录自身携带完整
+    /// target，因此不需要新增跨资产 section 抽象。
+    pub fn get_installed_for_context(
         db: &Arc<Database>,
+        context: &ConfigContext,
+    ) -> Result<Vec<InstalledSubagent>, AppError> {
+        match context {
+            ConfigContext::Global => Ok(db
+                .get_all_installed_subagents_for_target(&ScopeTarget::Global)?
+                .into_values()
+                .collect()),
+            ConfigContext::All => {
+                let mut subagents: Vec<InstalledSubagent> = db
+                    .get_all_installed_subagents_for_target(&ScopeTarget::Global)?
+                    .into_values()
+                    .collect();
+                for project in ProjectService::list_projects(db)? {
+                    let target = ScopeTarget::Project {
+                        project_id: project.project_id,
+                    };
+                    // all 视图跳过不可用项目段；不能借此返回缓存记录或 global fallback。
+                    if ProjectService::resolve_scope_target(db, &target).is_err() {
+                        continue;
+                    }
+                    subagents.extend(
+                        db.get_all_installed_subagents_for_target(&target)?
+                            .into_values(),
+                    );
+                }
+                Ok(subagents)
+            }
+            ConfigContext::Project { .. } => {
+                let target = context.require_mutation_target()?;
+                ProjectService::resolve_scope_target(db, &target)?;
+                let mut subagents: Vec<InstalledSubagent> = db
+                    .get_all_installed_subagents_for_target(&target)?
+                    .into_values()
+                    .collect();
+                subagents.extend(
+                    db.get_all_installed_subagents_for_target(&ScopeTarget::Global)?
+                        .into_values()
+                        .filter(|subagent| {
+                            Self::global_subagent_is_explicitly_applicable(&target, subagent)
+                        }),
+                );
+                Ok(subagents)
+            }
+        }
+    }
+
+    fn global_subagent_is_explicitly_applicable(
+        project_target: &ScopeTarget,
+        subagent: &InstalledSubagent,
+    ) -> bool {
+        subagent
+            .apps
+            .enabled_apps()
+            .into_iter()
+            .any(|app| Self::app_is_supported_for_target(project_target, &app))
+    }
+
+    fn reuse_existing_install_for_target(
+        db: &Arc<Database>,
+        target: &ScopeTarget,
         subagent: &DiscoverableSubagent,
         install_name: &str,
         current_app: &AgentType,
     ) -> Result<Option<InstalledSubagent>, AppError> {
-        let existing_subagents = db.get_all_installed_subagents()?;
+        let existing_subagents = db.get_all_installed_subagents_for_target(target)?;
         for existing in existing_subagents.values() {
             if !existing.directory.eq_ignore_ascii_case(install_name) {
                 continue;
@@ -291,14 +563,17 @@ impl SubagentService {
                     updated.apps.set_enabled_for(current_app, true);
                     // 先同步投影成功再落库：同步失败时 DB 保持原启用标志，
                     // 避免出现"已启用但无可用投影"的中间状态
-                    Self::sync_to_app_dir(&updated.directory, current_app)?;
+                    Self::sync_to_app_dir_for_target(db, target, &updated.directory, current_app)?;
                     if let Err(error) = db.save_subagent(&updated) {
                         // 落库失败：移除本次新建的投影，恢复到操作前状态；
                         // 操作前已启用的投影先于本次操作存在，保留不动
                         if !existing.apps.is_enabled_for(current_app) {
-                            if let Err(rollback_error) =
-                                Self::remove_from_app(&updated.directory, current_app)
-                            {
+                            if let Err(rollback_error) = Self::remove_from_app_for_target(
+                                db,
+                                target,
+                                &updated.directory,
+                                current_app,
+                            ) {
                                 log::error!(
                                     "保存 Subagent {} 失败后移除 {} 投影也失败: {rollback_error}",
                                     updated.name,
@@ -397,6 +672,37 @@ impl SubagentService {
         Ok(subagents)
     }
 
+    /// 远端发现内容不因 target 改变；installed 状态只相对于调用方明确选择的
+    /// ownership target 计算。
+    pub async fn discover_available_for_target(
+        &self,
+        db: &Arc<Database>,
+        target: &ScopeTarget,
+        repos: Vec<SubagentRepo>,
+    ) -> Result<Vec<DiscoverableSubagent>, AppError> {
+        // 在远端下载前先核验 project root；不可用 target 不应触发网络扫描，
+        // 更不能在扫描结果上标记任何缓存安装状态。
+        ProjectService::resolve_scope_target(db, target)?;
+        let mut subagents = self.discover_available(repos).await?;
+        Self::set_discoverable_installed_state_for_target(db, target, &mut subagents)?;
+        Ok(subagents)
+    }
+
+    /// 为已获取的发现候选标记明确 target 的安装状态。网络扫描和 ownership
+    /// 判断保持分离，避免 global 记录错误地污染 project discovery。
+    fn set_discoverable_installed_state_for_target(
+        db: &Arc<Database>,
+        target: &ScopeTarget,
+        subagents: &mut [DiscoverableSubagent],
+    ) -> Result<(), AppError> {
+        ProjectService::resolve_scope_target(db, target)?;
+        let installed = db.get_all_installed_subagents_for_target(target)?;
+        for subagent in subagents {
+            subagent.installed = installed.contains_key(&subagent.key);
+        }
+        Ok(())
+    }
+
     async fn fetch_repo_subagents(
         &self,
         repo: &SubagentRepo,
@@ -492,6 +798,7 @@ impl SubagentService {
             repo_owner: repo.owner.clone(),
             repo_name: repo.name.clone(),
             repo_branch: repo.branch.clone(),
+            installed: false,
         })
     }
 
@@ -547,7 +854,20 @@ impl SubagentService {
         subagent: &DiscoverableSubagent,
         current_app: &AgentType,
     ) -> Result<InstalledSubagent, AppError> {
-        let ssot_dir = Self::get_ssot_dir()?;
+        self.install_for_target(db, &ScopeTarget::Global, subagent, current_app)
+            .await
+    }
+
+    pub async fn install_for_target(
+        &self,
+        db: &Arc<Database>,
+        target: &ScopeTarget,
+        subagent: &DiscoverableSubagent,
+        current_app: &AgentType,
+    ) -> Result<InstalledSubagent, AppError> {
+        Self::ensure_app_supported_for_target(target, current_app)?;
+        ProjectService::resolve_scope_target(db, target)?;
+        let ssot_dir = Self::get_ssot_dir_for_target(db, target)?;
 
         let source_rel = Self::sanitize_subagent_source_path(&subagent.path).ok_or_else(|| {
             AppError::Message(format_subagent_error(
@@ -570,9 +890,13 @@ impl SubagentService {
 
         {
             let _state_guard = subagent_state_write_guard();
-            if let Some(existing) =
-                Self::reuse_existing_install(db, subagent, &install_name, current_app)?
-            {
+            if let Some(existing) = Self::reuse_existing_install_for_target(
+                db,
+                target,
+                subagent,
+                &install_name,
+                current_app,
+            )? {
                 return Ok(existing);
             }
         }
@@ -615,6 +939,7 @@ impl SubagentService {
                     Some("checkRepoUrl"),
                 )));
             }
+            Self::validate_project_subagent_file_for_app(target, &canonical_source, current_app)?;
 
             downloaded_source = Some((temp_guard, canonical_source));
 
@@ -631,6 +956,7 @@ impl SubagentService {
 
         Self::finish_install_under_lock(
             db,
+            target,
             subagent,
             &install_name,
             current_app,
@@ -645,6 +971,7 @@ impl SubagentService {
     /// 避免下载期间发生的存储迁移把新 subagent 写入旧根。
     fn finish_install_under_lock(
         db: &Arc<Database>,
+        target: &ScopeTarget,
         subagent: &DiscoverableSubagent,
         install_name: &str,
         current_app: &AgentType,
@@ -652,14 +979,21 @@ impl SubagentService {
         downloaded_source: Option<&Path>,
     ) -> Result<InstalledSubagent, AppError> {
         let _state_guard = subagent_state_write_guard();
-        if let Some(existing) =
-            Self::reuse_existing_install(db, subagent, install_name, current_app)?
-        {
+        Self::ensure_app_supported_for_target(target, current_app)?;
+        ProjectService::resolve_scope_target(db, target)?;
+        if let Some(existing) = Self::reuse_existing_install_for_target(
+            db,
+            target,
+            subagent,
+            install_name,
+            current_app,
+        )? {
             return Ok(existing);
         }
 
         // 写锁内重新解析目标 SSOT：下载期间存储位置可能已迁移
-        let dest_file = Self::ssot_file_path(&Self::get_ssot_dir()?, install_name);
+        let dest_file =
+            Self::ssot_file_path(&Self::get_ssot_dir_for_target(db, target)?, install_name);
 
         // 磁盘上已有同名文件但 DB 无记录：未托管内容，拒绝冒名接管
         Self::ensure_no_unmanaged_destination(&dest_file, install_name)?;
@@ -702,10 +1036,12 @@ impl SubagentService {
             installed_at: chrono::Utc::now().timestamp(),
             content_hash,
             updated_at: 0,
+            target: target.clone(),
         };
 
         Self::persist_and_sync_new_subagent(
             db,
+            target,
             &installed_subagent,
             current_app,
             Some(&dest_file),
@@ -725,6 +1061,7 @@ impl SubagentService {
     /// 接管/复用的既有文件绝不删除。
     fn persist_and_sync_new_subagent(
         db: &Arc<Database>,
+        target: &ScopeTarget,
         subagent: &InstalledSubagent,
         app: &AgentType,
         fresh_ssot_file: Option<&Path>,
@@ -741,8 +1078,8 @@ impl SubagentService {
             cleanup_fresh_ssot_file();
             return Err(error);
         }
-        if let Err(error) = Self::sync_to_app_dir(&subagent.directory, app) {
-            if let Err(rollback_error) = db.delete_subagent(&subagent.id) {
+        if let Err(error) = Self::sync_to_app_dir_for_target(db, target, &subagent.directory, app) {
+            if let Err(rollback_error) = db.delete_subagent_for_target(&subagent.id, target) {
                 log::error!(
                     "Failed to roll back Subagent {} after sync error: {rollback_error}",
                     subagent.id
@@ -798,14 +1135,37 @@ impl SubagentService {
     }
 
     pub fn sync_to_app_dir(directory: &str, app: &AgentType) -> Result<(), AppError> {
-        let directory = SkillService::require_valid_directory(directory)?;
-
         let ssot_dir = Self::get_ssot_dir()?;
-        let source = Self::ssot_file_path(&ssot_dir, &directory);
-
-        Self::validate_sync_source_file(&source, &directory)?;
-
         let app_dir = Self::get_distinct_app_subagents_dir(&ssot_dir, app)?;
+        Self::sync_to_app_dir_with_roots(directory, app, ssot_dir, app_dir)
+    }
+
+    /// 将明确 target 的 SSOT Subagent 同步到该 target 的 Agent 投影。
+    pub(crate) fn sync_to_app_dir_for_target(
+        db: &Arc<Database>,
+        target: &ScopeTarget,
+        directory: &str,
+        app: &AgentType,
+    ) -> Result<(), AppError> {
+        Self::ensure_app_supported_for_target(target, app)?;
+        let directory = SkillService::require_valid_directory(directory)?;
+        let ssot_dir = Self::get_ssot_dir_for_target(db, target)?;
+        let app_dir = Self::get_distinct_app_subagents_dir_for_target(db, target, &ssot_dir, app)?;
+        let source = Self::ssot_file_path(&ssot_dir, &directory);
+        Self::validate_sync_source_file(&source, &directory)?;
+        Self::validate_project_subagent_file_for_app(target, &source, app)?;
+        Self::sync_to_app_dir_with_roots(&directory, app, ssot_dir, app_dir)
+    }
+
+    fn sync_to_app_dir_with_roots(
+        directory: &str,
+        _app: &AgentType,
+        ssot_dir: PathBuf,
+        app_dir: PathBuf,
+    ) -> Result<(), AppError> {
+        let directory = SkillService::require_valid_directory(directory)?;
+        let source = Self::ssot_file_path(&ssot_dir, &directory);
+        Self::validate_sync_source_file(&source, &directory)?;
         fs::create_dir_all(&app_dir).map_err(|e| AppError::io(&app_dir, e))?;
 
         let dest = app_dir.join(format!("{directory}.md"));
@@ -862,6 +1222,29 @@ impl SubagentService {
 
         let ssot_dir = Self::get_ssot_dir()?;
         let app_dir = Self::get_distinct_app_subagents_dir(&ssot_dir, app)?;
+        Self::remove_from_app_with_roots(&directory, app, app_dir)
+    }
+
+    /// 从明确 target 的 Agent 投影删除 Subagent。项目 root 无法解析时失败，绝不触碰
+    /// global 投影。
+    pub(crate) fn remove_from_app_for_target(
+        db: &Arc<Database>,
+        target: &ScopeTarget,
+        directory: &str,
+        app: &AgentType,
+    ) -> Result<(), AppError> {
+        Self::ensure_app_supported_for_target(target, app)?;
+        let directory = SkillService::require_valid_directory(directory)?;
+        let ssot_dir = Self::get_ssot_dir_for_target(db, target)?;
+        let app_dir = Self::get_distinct_app_subagents_dir_for_target(db, target, &ssot_dir, app)?;
+        Self::remove_from_app_with_roots(&directory, app, app_dir)
+    }
+
+    fn remove_from_app_with_roots(
+        directory: &str,
+        app: &AgentType,
+        app_dir: PathBuf,
+    ) -> Result<(), AppError> {
         let subagent_path = app_dir.join(format!("{directory}.md"));
 
         if subagent_path.exists() || SkillService::is_symlink(&subagent_path) {
@@ -939,6 +1322,48 @@ impl SubagentService {
         Ok(())
     }
 
+    /// 在外部已持有 Subagent 写锁时，重建一个明确 target 的单个 Agent 投影。
+    /// Codex 项目 Subagent 不参与重建；它没有可投影的受支持路径。
+    pub(crate) fn sync_target_to_app_unlocked(
+        db: &Arc<Database>,
+        target: &ScopeTarget,
+        app: &AgentType,
+    ) -> Result<(), AppError> {
+        if !Self::app_is_supported_for_target(target, app) {
+            return Ok(());
+        }
+        ProjectService::resolve_scope_target(db, target)?;
+        let subagents = db.get_all_installed_subagents_for_target(target)?;
+        let mut sync_failures = Vec::new();
+        for subagent in subagents.values() {
+            if !subagent.apps.is_enabled_for(app) {
+                continue;
+            }
+            if let Err(error) =
+                Self::sync_to_app_dir_for_target(db, target, &subagent.directory, app)
+            {
+                log::warn!(
+                    "同步 {} target 的 Subagent {} 到 {} 失败: {error}",
+                    match target {
+                        ScopeTarget::Global => "global",
+                        ScopeTarget::Project { .. } => "project",
+                    },
+                    subagent.directory,
+                    app.as_str()
+                );
+                sync_failures.push(subagent.directory.clone());
+            }
+        }
+        if !sync_failures.is_empty() {
+            return Err(AppError::Message(format_subagent_error(
+                "PROJECTION_SYNC_FAILED",
+                &[("app", app.as_str()), ("items", &sync_failures.join(", "))],
+                Some("checkPermission"),
+            )));
+        }
+        Ok(())
+    }
+
     fn is_symlink_to_ssot(path: &Path, ssot_dir: &Path) -> bool {
         if !SkillService::is_symlink(path) {
             return false;
@@ -973,29 +1398,41 @@ impl SubagentService {
         app: &AgentType,
         enabled: bool,
     ) -> Result<(), AppError> {
+        Self::toggle_app_for_target(db, &ScopeTarget::Global, id, app, enabled)
+    }
+
+    pub fn toggle_app_for_target(
+        db: &Arc<Database>,
+        target: &ScopeTarget,
+        id: &str,
+        app: &AgentType,
+        enabled: bool,
+    ) -> Result<(), AppError> {
         let _state_guard = subagent_state_write_guard();
+        Self::ensure_app_supported_for_target(target, app)?;
+        ProjectService::resolve_scope_target(db, target)?;
 
         let mut subagent = db
-            .get_installed_subagent(id)?
+            .get_installed_subagent_for_target(id, target)?
             .ok_or_else(|| AppError::InvalidInput(format!("Subagent not found: {id}")))?;
 
         let was_enabled = subagent.apps.is_enabled_for(app);
         subagent.apps.set_enabled_for(app, enabled);
 
         if enabled {
-            Self::sync_to_app_dir(&subagent.directory, app)?;
+            Self::sync_to_app_dir_for_target(db, target, &subagent.directory, app)?;
         } else {
-            Self::remove_from_app(&subagent.directory, app)?;
+            Self::remove_from_app_for_target(db, target, &subagent.directory, app)?;
         }
 
-        if let Err(error) = db.update_subagent_apps(id, &subagent.apps) {
+        if let Err(error) = db.update_subagent_apps_for_target(id, target, &subagent.apps) {
             // 落库失败：撤销刚才的投影变更，恢复到操作前状态；
             // 撤销失败仅记日志，不掩盖原始的落库错误
             if was_enabled != enabled {
                 let rollback_result = if enabled {
-                    Self::remove_from_app(&subagent.directory, app)
+                    Self::remove_from_app_for_target(db, target, &subagent.directory, app)
                 } else {
-                    Self::sync_to_app_dir(&subagent.directory, app)
+                    Self::sync_to_app_dir_for_target(db, target, &subagent.directory, app)
                 };
                 if let Err(rollback_error) = rollback_result {
                     log::error!(
@@ -1021,11 +1458,21 @@ impl SubagentService {
     // ========== Uninstall ==========
 
     pub fn uninstall(db: &Arc<Database>, id: &str) -> Result<SubagentUninstallResult, AppError> {
+        Self::uninstall_for_target(db, &ScopeTarget::Global, id)
+    }
+
+    pub fn uninstall_for_target(
+        db: &Arc<Database>,
+        target: &ScopeTarget,
+        id: &str,
+    ) -> Result<SubagentUninstallResult, AppError> {
         let _state_guard = subagent_state_write_guard();
+        ProjectService::resolve_scope_target(db, target)?;
 
         let subagent = db
-            .get_installed_subagent(id)?
+            .get_installed_subagent_for_target(id, target)?
             .ok_or_else(|| AppError::InvalidInput(format!("Subagent not found: {id}")))?;
+        Self::ensure_enabled_apps_supported_for_target(target, &subagent.apps)?;
 
         let directory = match SkillService::require_valid_directory(&subagent.directory) {
             Ok(directory) => directory,
@@ -1034,17 +1481,17 @@ impl SubagentService {
                     "Subagent {id} 的 directory 非法（{:?}），跳过文件清理，仅删除数据库记录: {err}",
                     subagent.directory
                 );
-                db.delete_subagent(id)?;
+                db.delete_subagent_for_target(id, target)?;
                 return Ok(SubagentUninstallResult { backup_path: None });
             }
         };
 
-        let ssot_dir = Self::get_ssot_dir()?;
+        let ssot_dir = Self::get_ssot_dir_for_target(db, target)?;
 
         let mut projection_failures: Vec<AgentType> = Vec::new();
         // 只清理实际启用的 Agent 投影：未启用 Agent 下的同名路径可能是用户自有内容
         for app in subagent.apps.enabled_apps() {
-            if let Err(e) = Self::remove_from_app(&directory, &app) {
+            if let Err(e) = Self::remove_from_app_for_target(db, target, &directory, &app) {
                 log::warn!(
                     "移除 Subagent {} 在 {} 上的投影失败: {e}",
                     subagent.name,
@@ -1068,7 +1515,7 @@ impl SubagentService {
             )));
         }
 
-        let backup_path = Self::create_uninstall_backup(&subagent)?
+        let backup_path = Self::create_uninstall_backup_for_target(db, target, &subagent)?
             .map(|path| path.to_string_lossy().to_string());
 
         let subagent_file = Self::ssot_file_path(&ssot_dir, &directory);
@@ -1076,7 +1523,7 @@ impl SubagentService {
             fs::remove_file(&subagent_file).map_err(|e| AppError::io(&subagent_file, e))?;
         }
 
-        db.delete_subagent(id)?;
+        db.delete_subagent_for_target(id, target)?;
 
         log::info!(
             "Subagent {} 卸载成功{}",
@@ -1149,7 +1596,17 @@ impl SubagentService {
         &self,
         db: &Arc<Database>,
     ) -> Result<Vec<SubagentUpdateInfo>, AppError> {
-        let subagents = db.get_all_installed_subagents()?;
+        self.check_updates_for_target(db, &ScopeTarget::Global)
+            .await
+    }
+
+    pub async fn check_updates_for_target(
+        &self,
+        db: &Arc<Database>,
+        target: &ScopeTarget,
+    ) -> Result<Vec<SubagentUpdateInfo>, AppError> {
+        ProjectService::resolve_scope_target(db, target)?;
+        let subagents = db.get_all_installed_subagents_for_target(target)?;
         let mut updates = Vec::new();
 
         let mut repo_groups: HashMap<(String, String, String), Vec<InstalledSubagent>> =
@@ -1171,7 +1628,7 @@ impl SubagentService {
                 .push(subagent);
         }
 
-        let ssot_dir = Self::get_ssot_dir()?;
+        let ssot_dir = Self::get_ssot_dir_for_target(db, target)?;
         let client = SkillService.download_client();
 
         for ((owner, name, branch), group_subagents) in &repo_groups {
@@ -1231,7 +1688,7 @@ impl SubagentService {
                 ) {
                     Some((h, freshly_computed)) => {
                         if freshly_computed {
-                            let _ = db.update_subagent_hash(&subagent.id, &h, 0);
+                            let _ = db.update_subagent_hash_for_target(&subagent.id, target, &h, 0);
                         }
                         Some(h)
                     }
@@ -1263,7 +1720,7 @@ impl SubagentService {
             )));
         }
 
-        db.get_installed_subagent(&updated_subagent.id)?
+        db.get_installed_subagent_for_target(&updated_subagent.id, &updated_subagent.target)?
             .ok_or_else(|| {
                 AppError::InvalidInput(format!(
                     "Subagent no longer installed: {}",
@@ -1308,7 +1765,12 @@ impl SubagentService {
                 Self::restore_ssot_from_backup(backup_path, dest, &previous.directory);
                 let _ = db.save_subagent(previous);
                 for app in previous.apps.enabled_apps() {
-                    let _ = Self::sync_to_app_dir(&previous.directory, &app);
+                    let _ = Self::sync_to_app_dir_for_target(
+                        db,
+                        &previous.target,
+                        &previous.directory,
+                        &app,
+                    );
                 }
                 Err(err)
             }
@@ -1320,9 +1782,21 @@ impl SubagentService {
         db: &Arc<Database>,
         subagent_id: &str,
     ) -> Result<InstalledSubagent, AppError> {
+        self.update_subagent_for_target(db, &ScopeTarget::Global, subagent_id)
+            .await
+    }
+
+    pub async fn update_subagent_for_target(
+        &self,
+        db: &Arc<Database>,
+        target: &ScopeTarget,
+        subagent_id: &str,
+    ) -> Result<InstalledSubagent, AppError> {
+        ProjectService::resolve_scope_target(db, target)?;
         let subagent = db
-            .get_installed_subagent(subagent_id)?
+            .get_installed_subagent_for_target(subagent_id, target)?
             .ok_or_else(|| AppError::InvalidInput(format!("Subagent not found: {subagent_id}")))?;
+        Self::ensure_enabled_apps_supported_for_target(target, &subagent.apps)?;
 
         SkillService::require_valid_directory(&subagent.directory)?;
 
@@ -1376,6 +1850,7 @@ impl SubagentService {
 
         Self::apply_downloaded_update(
             db,
+            target,
             &subagent,
             &owner,
             &name,
@@ -1387,8 +1862,11 @@ impl SubagentService {
 
     /// 更新落盘段：持写锁执行。目标 SSOT 路径在锁内才解析，
     /// 避免下载期间发生的存储迁移把新版本写入旧根（而备份/投影解析的是新根）。
+    // 保持事务输入显式，避免仅为 clippy 创建一次性参数对象。
+    #[allow(clippy::too_many_arguments)]
     fn apply_downloaded_update(
         db: &Arc<Database>,
+        target: &ScopeTarget,
         expected: &InstalledSubagent,
         owner: &str,
         name: &str,
@@ -1397,10 +1875,13 @@ impl SubagentService {
         remote_path: &str,
     ) -> Result<InstalledSubagent, AppError> {
         let _state_guard = subagent_state_write_guard();
+        ProjectService::resolve_scope_target(db, target)?;
 
-        let current_subagent = db.get_installed_subagent(&expected.id)?.ok_or_else(|| {
-            AppError::InvalidInput(format!("Subagent no longer installed: {}", expected.id))
-        })?;
+        let current_subagent = db
+            .get_installed_subagent_for_target(&expected.id, target)?
+            .ok_or_else(|| {
+                AppError::InvalidInput(format!("Subagent no longer installed: {}", expected.id))
+            })?;
         if current_subagent.directory != expected.directory
             || current_subagent.repo_owner != expected.repo_owner
             || current_subagent.repo_name != expected.repo_name
@@ -1412,13 +1893,20 @@ impl SubagentService {
                 expected.id
             )));
         }
+        Self::ensure_enabled_apps_supported_for_target(target, &current_subagent.apps)?;
         SkillService::require_valid_directory(&current_subagent.directory)?;
         let subagent = current_subagent;
+        for app in subagent.apps.enabled_apps() {
+            Self::validate_project_subagent_file_for_app(target, remote_file, &app)?;
+        }
 
         // 写锁内解析目标 SSOT：下载期间存储位置可能已迁移
-        let dest_file = Self::ssot_file_path(&Self::get_ssot_dir()?, &subagent.directory);
+        let dest_file = Self::ssot_file_path(
+            &Self::get_ssot_dir_for_target(db, target)?,
+            &subagent.directory,
+        );
 
-        let backup_path = Self::create_uninstall_backup(&subagent)?;
+        let backup_path = Self::create_uninstall_backup_for_target(db, target, &subagent)?;
 
         // SSOT 替换失败时必须先从备份恢复，避免 SSOT 文件丢失
         if let Err(err) = Self::replace_ssot_file(remote_file, &dest_file) {
@@ -1458,6 +1946,7 @@ impl SubagentService {
             installed_at: subagent.installed_at,
             content_hash: new_hash,
             updated_at: chrono::Utc::now().timestamp(),
+            target: target.clone(),
         };
 
         let updated_subagent = Self::persist_subagent_update_or_restore(
@@ -1470,7 +1959,9 @@ impl SubagentService {
 
         let mut sync_failures: Vec<AgentType> = Vec::new();
         for app in updated_subagent.apps.enabled_apps() {
-            if let Err(e) = Self::sync_to_app_dir(&updated_subagent.directory, &app) {
+            if let Err(e) =
+                Self::sync_to_app_dir_for_target(db, target, &updated_subagent.directory, &app)
+            {
                 log::warn!("同步更新后的 subagent 到 {} 失败: {e}", app.as_str());
                 sync_failures.push(app);
             }
@@ -1480,7 +1971,7 @@ impl SubagentService {
             Self::restore_ssot_from_backup(backup_path.as_ref(), &dest_file, &subagent.directory);
             let _ = db.save_subagent(&subagent);
             for app in subagent.apps.enabled_apps() {
-                let _ = Self::sync_to_app_dir(&subagent.directory, &app);
+                let _ = Self::sync_to_app_dir_for_target(db, target, &subagent.directory, &app);
             }
 
             return Err(AppError::Message(format_subagent_error(
@@ -1541,10 +2032,42 @@ impl SubagentService {
         db: &Arc<Database>,
         target: StorageLocation,
     ) -> Result<SubagentMigrationOutcome, SubagentMigrationFailure> {
+        // 任何 project sibling 文件移动之前，先确认所有已登记项目仍可解析。
+        // 失败时不创建目标 SSOT、不变更设置、也不移动 global 文件。
+        let projects = match ProjectService::list_projects(db) {
+            Ok(projects) => projects,
+            Err(error) => {
+                log::warn!("读取项目 registry 失败: {error}");
+                return Err(SubagentMigrationFailure {
+                    moved: vec![],
+                    project_moved: vec![],
+                    failures: vec!["readProjects".to_string()],
+                });
+            }
+        };
+        for project in &projects {
+            let project_target = ScopeTarget::Project {
+                project_id: project.project_id.clone(),
+            };
+            if let Err(error) = ProjectService::resolve_scope_target(db, &project_target) {
+                log::warn!(
+                    "项目 {} 不可用于 Subagent 存储迁移: {error}",
+                    project.project_id
+                );
+                return Err(SubagentMigrationFailure {
+                    moved: vec![],
+                    project_moved: vec![],
+                    failures: vec!["resolveProject".to_string()],
+                });
+            }
+        }
+
+        let old_location = get_settings().storage_location;
         let old_dir = Self::get_ssot_dir().map_err(|e| {
             log::warn!("读取 Subagent SSOT 目录失败: {e}");
             SubagentMigrationFailure {
                 moved: vec![],
+                project_moved: vec![],
                 failures: vec!["resolveSourceDir".to_string()],
             }
         })?;
@@ -1556,6 +2079,7 @@ impl SubagentService {
             log::warn!("创建 Subagent 迁移目标目录失败: {e}");
             return Err(SubagentMigrationFailure {
                 moved: vec![],
+                project_moved: vec![],
                 failures: vec!["createTargetDir".to_string()],
             });
         }
@@ -1563,16 +2087,18 @@ impl SubagentService {
             log::warn!("Subagent 迁移目标校验失败: {e}");
             return Err(SubagentMigrationFailure {
                 moved: vec![],
+                project_moved: vec![],
                 failures: vec!["validateDestination".to_string()],
             });
         }
 
-        let subagents = match db.get_all_installed_subagents() {
+        let subagents = match db.get_all_installed_subagents_for_target(&ScopeTarget::Global) {
             Ok(subagents) => subagents,
             Err(e) => {
                 log::warn!("读取已安装 Subagent 列表失败: {e}");
                 return Err(SubagentMigrationFailure {
                     moved: vec![],
+                    project_moved: vec![],
                     failures: vec!["readInstalled".to_string()],
                 });
             }
@@ -1584,6 +2110,7 @@ impl SubagentService {
             errors: vec![],
         };
         let mut moved = Vec::new();
+        let mut project_moved = Vec::new();
         let mut failures = Vec::new();
 
         for subagent in subagents.values() {
@@ -1638,16 +2165,94 @@ impl SubagentService {
             }
         }
 
+        // 项目 SSOT 以 sibling 整体迁移，保留受管记录之外仍位于该 target 的文件。
+        // 固定 backup root 不参与存储位置迁移。
+        for project in &projects {
+            let src = Self::project_ssot_dir_for_location(old_location, &project.project_id);
+            let dst = Self::project_ssot_dir_for_location(target, &project.project_id);
+            if !src.exists() {
+                continue;
+            }
+            if dst.exists() {
+                failures.push(format!("project:{}", project.project_id));
+                continue;
+            }
+            let Some(parent) = dst.parent() else {
+                failures.push(format!("project:{}", project.project_id));
+                continue;
+            };
+            if let Err(error) = fs::create_dir_all(parent) {
+                log::warn!("创建项目 Subagent 迁移目标目录失败: {error}");
+                failures.push(format!("project:{}", project.project_id));
+                continue;
+            }
+
+            match fs::rename(&src, &dst) {
+                Ok(()) => {
+                    result.migrated_count += 1;
+                    project_moved.push(project.project_id.clone());
+                }
+                Err(_) => match SkillService::copy_dir_recursive(&src, &dst) {
+                    Ok(()) => {
+                        if let Err(error) = fs::remove_dir_all(&src) {
+                            log::warn!("迁移项目 Subagent sibling 后删除源目录失败: {error}");
+                            // 尝试用完整目标副本重建源；重建失败时保留目标副本，避免
+                            // 仅剩残缺源目录。
+                            let restored = if fs::remove_dir_all(&src).is_ok() {
+                                SkillService::copy_dir_recursive(&dst, &src).is_ok()
+                            } else {
+                                false
+                            };
+                            if restored {
+                                if let Err(cleanup_error) = fs::remove_dir_all(&dst) {
+                                    log::error!(
+                                        "回滚项目 Subagent sibling 后清理目标失败 {}: {cleanup_error}",
+                                        dst.display()
+                                    );
+                                }
+                            }
+                            failures.push(format!("project:{}", project.project_id));
+                            continue;
+                        }
+                        result.migrated_count += 1;
+                        project_moved.push(project.project_id.clone());
+                    }
+                    Err(error) => {
+                        log::warn!("迁移项目 Subagent sibling 失败: {error}");
+                        failures.push(format!("project:{}", project.project_id));
+                    }
+                },
+            }
+        }
+
         if failures.is_empty() {
-            Ok(SubagentMigrationOutcome { result, moved })
+            Ok(SubagentMigrationOutcome {
+                result,
+                moved,
+                project_moved,
+            })
         } else {
-            Err(SubagentMigrationFailure { moved, failures })
+            Err(SubagentMigrationFailure {
+                moved,
+                project_moved,
+                failures,
+            })
         }
     }
 
     // ========== Backups ==========
 
     pub fn list_backups() -> Result<Vec<SubagentBackupEntry>, AppError> {
+        Self::list_backups_for_target(&ScopeTarget::Global)
+    }
+
+    /// 只读取固定 backup root 中属于明确 target 的 metadata；此操作不解析项目 root，
+    /// 以便根不可用时仍能清理项目备份并解除项目登记。
+    pub fn list_backups_for_target(
+        target: &ScopeTarget,
+    ) -> Result<Vec<SubagentBackupEntry>, AppError> {
+        target.validate()?;
+        let _state_guard = subagent_state_read_guard();
         let backup_dir = Self::get_backup_dir()?;
         let mut entries = Vec::new();
 
@@ -1665,12 +2270,15 @@ impl SubagentService {
             }
 
             match Self::read_backup_metadata(&path) {
-                Ok(metadata) => entries.push(SubagentBackupEntry {
-                    backup_id: entry.file_name().to_string_lossy().to_string(),
-                    backup_path: path.to_string_lossy().to_string(),
-                    created_at: metadata.backup_created_at,
-                    subagent: metadata.subagent,
-                }),
+                Ok(metadata) if metadata.subagent.target == *target => {
+                    entries.push(SubagentBackupEntry {
+                        backup_id: entry.file_name().to_string_lossy().to_string(),
+                        backup_path: path.to_string_lossy().to_string(),
+                        created_at: metadata.backup_created_at,
+                        subagent: metadata.subagent,
+                    })
+                }
+                Ok(_) => {}
                 Err(err) => {
                     log::warn!("解析 Subagent 备份失败 {}: {err:#}", path.display());
                 }
@@ -1682,6 +2290,13 @@ impl SubagentService {
     }
 
     pub fn delete_backup(backup_id: &str) -> Result<(), AppError> {
+        Self::delete_backup_for_target(backup_id, &ScopeTarget::Global)
+    }
+
+    /// 删除归属于明确 target 的备份，不访问项目 root。
+    pub fn delete_backup_for_target(backup_id: &str, target: &ScopeTarget) -> Result<(), AppError> {
+        target.validate()?;
+        let _state_guard = subagent_state_write_guard();
         let backup_path = Self::backup_path_for_id(backup_id)?;
         let metadata =
             fs::symlink_metadata(&backup_path).map_err(|e| AppError::io(&backup_path, e))?;
@@ -1693,10 +2308,42 @@ impl SubagentService {
             )));
         }
 
+        let backup = Self::read_backup_metadata(&backup_path)?;
+        if backup.subagent.target != *target {
+            return Err(AppError::Message(format_subagent_error(
+                "BACKUP_TARGET_MISMATCH",
+                &[],
+                Some("selectOriginalTarget"),
+            )));
+        }
+
         fs::remove_dir_all(&backup_path).map_err(|e| AppError::io(&backup_path, e))?;
 
         log::info!("Subagent 备份已删除: {}", backup_path.display());
         Ok(())
+    }
+
+    /// 项目移除前使用的窄查询：只检查固定 Subagent backup root，不扫描项目 root。
+    /// 调用者负责持有 Subagent state read lock，保持与卸载一致的锁顺序。
+    pub(crate) fn has_backup_for_target(project_id: &str) -> Result<bool, AppError> {
+        let target = ScopeTarget::Project {
+            project_id: project_id.to_string(),
+        };
+        target.validate()?;
+        let backup_dir = Self::get_backup_dir()?;
+        for entry in fs::read_dir(&backup_dir).map_err(|e| AppError::io(&backup_dir, e))? {
+            let Ok(entry) = entry else { continue };
+            let path = entry.path();
+            if !path.is_dir() {
+                continue;
+            }
+            if let Ok(metadata) = Self::read_backup_metadata(&path) {
+                if metadata.subagent.target == target {
+                    return Ok(true);
+                }
+            }
+        }
+        Ok(false)
     }
 
     pub fn restore_from_backup(
@@ -1705,9 +2352,29 @@ impl SubagentService {
         // 恢复以备份中记录的启用状态为准；current_app 仅保留以维持命令层签名
         _current_app: &AgentType,
     ) -> Result<InstalledSubagent, AppError> {
+        Self::restore_from_backup_for_target(db, backup_id, &ScopeTarget::Global)
+    }
+
+    /// 恢复只接受 metadata 记录的原 target；调用方 target 仅用于确认，不得 retarget。
+    pub fn restore_from_backup_for_target(
+        db: &Arc<Database>,
+        backup_id: &str,
+        target: &ScopeTarget,
+    ) -> Result<InstalledSubagent, AppError> {
+        target.validate()?;
         let _state_guard = subagent_state_write_guard();
         let backup_path = Self::backup_path_for_id(backup_id)?;
         let metadata = Self::read_backup_metadata(&backup_path)?;
+        if metadata.subagent.target != *target {
+            return Err(AppError::Message(format_subagent_error(
+                "BACKUP_TARGET_MISMATCH",
+                &[],
+                Some("selectOriginalTarget"),
+            )));
+        }
+        // 项目 root 不可用必须在 DB/SSOT/投影写入前失败，且保留 backup。
+        ProjectService::resolve_scope_target(db, target)?;
+        Self::ensure_enabled_apps_supported_for_target(target, &metadata.subagent.apps)?;
         let backup_subagent_file = backup_path.join(format!("{}.md", metadata.subagent.directory));
         if !backup_subagent_file.exists() {
             return Err(AppError::InvalidInput(format!(
@@ -1715,8 +2382,11 @@ impl SubagentService {
                 backup_path.display()
             )));
         }
+        for app in metadata.subagent.apps.enabled_apps() {
+            Self::validate_project_subagent_file_for_app(target, &backup_subagent_file, &app)?;
+        }
 
-        let existing_subagents = db.get_all_installed_subagents()?;
+        let existing_subagents = db.get_all_installed_subagents_for_target(target)?;
         if existing_subagents.contains_key(&metadata.subagent.id)
             || existing_subagents.values().any(|subagent| {
                 subagent
@@ -1732,7 +2402,7 @@ impl SubagentService {
 
         let directory = SkillService::require_valid_directory(&metadata.subagent.directory)?;
 
-        let ssot_dir = Self::get_ssot_dir()?;
+        let ssot_dir = Self::get_ssot_dir_for_target(db, target)?;
         let restore_path = Self::ssot_file_path(&ssot_dir, &directory);
         if restore_path.exists() || SkillService::is_symlink(&restore_path) {
             return Err(AppError::InvalidInput(format!(
@@ -1745,6 +2415,7 @@ impl SubagentService {
 
         let mut restored_subagent = metadata.subagent;
         restored_subagent.directory = directory;
+        restored_subagent.target = target.clone();
         restored_subagent.installed_at = chrono::Utc::now().timestamp();
         // 保留备份中记录的 apps 启用标志：恢复多 Agent 启用状态，而非仅 UI 当前 Agent
         restored_subagent.updated_at = 0;
@@ -1758,11 +2429,16 @@ impl SubagentService {
         // 为所有启用的 Agent 重建投影；任一失败时连同本次已创建的前序投影一并清理
         let mut synced_apps: Vec<AgentType> = Vec::new();
         for app in restored_subagent.apps.enabled_apps() {
-            if let Err(err) = Self::sync_to_app_dir(&restored_subagent.directory, &app) {
+            if let Err(err) =
+                Self::sync_to_app_dir_for_target(db, target, &restored_subagent.directory, &app)
+            {
                 for synced_app in &synced_apps {
-                    if let Err(rollback_error) =
-                        Self::remove_from_app(&restored_subagent.directory, synced_app)
-                    {
+                    if let Err(rollback_error) = Self::remove_from_app_for_target(
+                        db,
+                        target,
+                        &restored_subagent.directory,
+                        synced_app,
+                    ) {
                         log::error!(
                             "恢复 Subagent {} 失败后移除 {} 投影也失败: {rollback_error}",
                             restored_subagent.name,
@@ -1770,7 +2446,7 @@ impl SubagentService {
                         );
                     }
                 }
-                let _ = db.delete_subagent(&restored_subagent.id);
+                let _ = db.delete_subagent_for_target(&restored_subagent.id, target);
                 let _ = fs::remove_file(&restore_path);
                 return Err(err);
             }
@@ -1807,7 +2483,18 @@ impl SubagentService {
         serde_json::from_str(&content).map_err(|e| AppError::json(&metadata_path, e))
     }
 
-    fn create_uninstall_backup(subagent: &InstalledSubagent) -> Result<Option<PathBuf>, AppError> {
+    fn create_uninstall_backup_for_target(
+        db: &Arc<Database>,
+        target: &ScopeTarget,
+        subagent: &InstalledSubagent,
+    ) -> Result<Option<PathBuf>, AppError> {
+        if subagent.target != *target {
+            return Err(AppError::Message(format_subagent_error(
+                "BACKUP_TARGET_MISMATCH",
+                &[],
+                Some("selectOriginalTarget"),
+            )));
+        }
         let directory = match SkillService::require_valid_directory(&subagent.directory) {
             Ok(d) => d,
             Err(err) => {
@@ -1819,7 +2506,7 @@ impl SubagentService {
             }
         };
 
-        let ssot_dir = Self::get_ssot_dir()?;
+        let ssot_dir = Self::get_ssot_dir_for_target(db, target)?;
         let source_file = Self::ssot_file_path(&ssot_dir, &directory);
         if !source_file.exists() {
             log::warn!(
@@ -1950,6 +2637,7 @@ mod tests {
             installed_at: 1,
             content_hash: None,
             updated_at: 0,
+            target: ScopeTarget::Global,
         }
     }
 
@@ -1964,6 +2652,7 @@ mod tests {
             repo_owner: "owner".to_string(),
             repo_name: "repo".to_string(),
             repo_branch: "main".to_string(),
+            installed: false,
         }
     }
 
@@ -2123,6 +2812,543 @@ mod tests {
     }
 
     #[test]
+    #[serial]
+    fn project_target_uses_hub_sibling_and_supported_agent_projections() {
+        let home = tempdir().expect("home");
+        let _home_guard = TestHomeGuard::set(home.path());
+        let project_root = home.path().join("workspace");
+        fs::create_dir(&project_root).expect("project root");
+        let db = Arc::new(Database::memory().expect("memory db"));
+        let project = ProjectService::add_project(&db, &project_root, Some("Workspace".into()))
+            .expect("register project");
+        let target = ScopeTarget::Project {
+            project_id: project.project_id.clone(),
+        };
+        let canonical_project_root = PathBuf::from(&project.root_path);
+
+        assert_eq!(
+            SubagentService::get_ssot_dir_for_target(&db, &target).expect("project ssot"),
+            config::get_hub_dir()
+                .join("projects")
+                .join(&project.project_id)
+                .join("subagents")
+        );
+
+        for (app, expected) in [
+            (
+                AgentType::ClaudeCode,
+                canonical_project_root.join(".claude").join("agents"),
+            ),
+            (
+                AgentType::GeminiCli,
+                canonical_project_root.join(".gemini").join("agents"),
+            ),
+            (
+                AgentType::OpenCode,
+                canonical_project_root.join(".opencode").join("agents"),
+            ),
+        ] {
+            assert_eq!(
+                SubagentService::get_app_subagents_dir_for_target(&db, &target, &app)
+                    .expect("project projection"),
+                expected,
+                "{} projection must be project-local",
+                app.as_str()
+            );
+        }
+
+        let error =
+            SubagentService::get_app_subagents_dir_for_target(&db, &target, &AgentType::Codex)
+                .expect_err("Codex project Subagent must remain unsupported");
+        assert!(error.to_string().contains("SUBAGENT_UNSUPPORTED"));
+    }
+
+    #[test]
+    #[serial]
+    fn project_toggle_and_uninstall_do_not_touch_global_subagent_with_same_id() {
+        let home = tempdir().expect("home");
+        let _home_guard = TestHomeGuard::set(home.path());
+        let project_root = home.path().join("workspace");
+        fs::create_dir(&project_root).expect("project root");
+        let db = Arc::new(Database::memory().expect("memory db"));
+        let project = ProjectService::add_project(&db, &project_root, None).expect("project");
+        let project_target = ScopeTarget::Project {
+            project_id: project.project_id,
+        };
+
+        let global = installed_subagent("owner/repo:shared", "shared");
+        write_subagent(
+            &SubagentService::get_ssot_dir().expect("global ssot"),
+            "shared.md",
+            "Global",
+        );
+        db.save_subagent(&global).expect("save global");
+
+        let mut project_subagent = installed_subagent("owner/repo:shared", "shared");
+        project_subagent.target = project_target.clone();
+        write_subagent(
+            &SubagentService::get_ssot_dir_for_target(&db, &project_target).expect("project ssot"),
+            "shared.md",
+            "Project",
+        );
+        db.save_subagent(&project_subagent).expect("save project");
+
+        let unsupported = SubagentService::toggle_app_for_target(
+            &db,
+            &project_target,
+            &project_subagent.id,
+            &AgentType::Codex,
+            true,
+        )
+        .expect_err("Codex project Subagent must be closed unsupported");
+        assert!(unsupported.to_string().contains("SUBAGENT_UNSUPPORTED"));
+        assert!(
+            !db.get_installed_subagent_for_target(&project_subagent.id, &project_target)
+                .expect("project query")
+                .expect("project subagent")
+                .apps
+                .codex,
+            "unsupported toggle must not change the project record"
+        );
+        assert!(
+            !config::get_codex_agents_dir().join("shared.md").exists(),
+            "unsupported project toggle must not create a global projection"
+        );
+
+        SubagentService::toggle_app_for_target(
+            &db,
+            &project_target,
+            &project_subagent.id,
+            &AgentType::ClaudeCode,
+            true,
+        )
+        .expect("toggle project subagent");
+        assert!(project_root
+            .join(".claude")
+            .join("agents")
+            .join("shared.md")
+            .exists());
+        assert!(
+            !config::get_claude_agents_dir().join("shared.md").exists(),
+            "project toggle must not create a global projection"
+        );
+
+        SubagentService::uninstall_for_target(&db, &project_target, &project_subagent.id)
+            .expect("uninstall project subagent");
+        assert!(db
+            .get_installed_subagent_for_target(&project_subagent.id, &project_target)
+            .expect("project query")
+            .is_none());
+        assert!(db
+            .get_installed_subagent_for_target(&global.id, &ScopeTarget::Global)
+            .expect("global query")
+            .is_some());
+        assert!(SubagentService::get_ssot_dir()
+            .expect("global ssot")
+            .join("shared.md")
+            .exists());
+    }
+
+    #[test]
+    #[serial]
+    fn project_opencode_subagent_requires_native_mode_before_projection() {
+        let home = tempdir().expect("home");
+        let _home_guard = TestHomeGuard::set(home.path());
+        let project_root = home.path().join("workspace");
+        fs::create_dir(&project_root).expect("project root");
+        let db = Arc::new(Database::memory().expect("memory db"));
+        let project = ProjectService::add_project(&db, &project_root, None).expect("project");
+        let target = ScopeTarget::Project {
+            project_id: project.project_id,
+        };
+        let ssot = SubagentService::get_ssot_dir_for_target(&db, &target).expect("project ssot");
+        let source = write_subagent(&ssot, "open.md", "Open");
+        let mut subagent = installed_subagent("owner/repo:open", "open");
+        subagent.target = target.clone();
+        db.save_subagent(&subagent).expect("save project subagent");
+
+        let error = SubagentService::toggle_app_for_target(
+            &db,
+            &target,
+            &subagent.id,
+            &AgentType::OpenCode,
+            true,
+        )
+        .expect_err("OpenCode project Subagent requires mode frontmatter");
+        assert!(error.to_string().contains("SUBAGENT_INCOMPATIBLE"));
+        assert!(
+            !project_root
+                .join(".opencode")
+                .join("agents")
+                .join("open.md")
+                .exists(),
+            "incompatible file must not be projected"
+        );
+        assert!(
+            !db.get_installed_subagent_for_target(&subagent.id, &target)
+                .expect("project query")
+                .expect("project subagent")
+                .apps
+                .opencode,
+            "incompatible toggle must not change the project record"
+        );
+
+        fs::write(&source, "---\nname: Open\nmode: subagent\n---\n").expect("valid mode");
+        SubagentService::toggle_app_for_target(
+            &db,
+            &target,
+            &subagent.id,
+            &AgentType::OpenCode,
+            true,
+        )
+        .expect("compatible OpenCode subagent projects");
+        assert!(project_root
+            .join(".opencode")
+            .join("agents")
+            .join("open.md")
+            .is_file());
+    }
+
+    #[test]
+    #[serial]
+    fn unavailable_project_target_does_not_toggle_same_id_global_subagent() {
+        let home = tempdir().expect("home");
+        let _home_guard = TestHomeGuard::set(home.path());
+        let project_root = home.path().join("workspace");
+        fs::create_dir(&project_root).expect("project root");
+        let db = Arc::new(Database::memory().expect("memory db"));
+        let project = ProjectService::add_project(&db, &project_root, None).expect("project");
+        let project_target = ScopeTarget::Project {
+            project_id: project.project_id,
+        };
+
+        let mut global = installed_subagent("owner/repo:shared", "shared");
+        global.apps = SubagentApps::only(&AgentType::ClaudeCode);
+        db.save_subagent(&global).expect("save global subagent");
+        let mut project_subagent = installed_subagent("owner/repo:shared", "shared");
+        project_subagent.target = project_target.clone();
+        db.save_subagent(&project_subagent)
+            .expect("save project subagent");
+        fs::remove_dir_all(&project_root).expect("project root unavailable");
+
+        let error = SubagentService::toggle_app_for_target(
+            &db,
+            &project_target,
+            &project_subagent.id,
+            &AgentType::ClaudeCode,
+            true,
+        )
+        .expect_err("unavailable project target must fail before any global work");
+        assert!(error.to_string().contains("PROJECT_ROOT_UNAVAILABLE"));
+        let stored_global = db
+            .get_installed_subagent_for_target(&global.id, &ScopeTarget::Global)
+            .expect("global query")
+            .expect("global subagent remains");
+        assert!(stored_global.apps.is_enabled_for(&AgentType::ClaudeCode));
+        assert!(!config::get_claude_agents_dir().join("shared.md").exists());
+    }
+
+    #[test]
+    #[serial]
+    fn project_backup_blocks_removal_but_lists_and_deletes_without_project_root() {
+        let home = tempdir().expect("home");
+        let _home_guard = TestHomeGuard::set(home.path());
+        let project_root = home.path().join("workspace");
+        fs::create_dir(&project_root).expect("project root");
+        let db = Arc::new(Database::memory().expect("memory db"));
+        let project = ProjectService::add_project(&db, &project_root, None).expect("project");
+        let target = ScopeTarget::Project {
+            project_id: project.project_id.clone(),
+        };
+        let mut subagent = installed_subagent("owner/repo:backup", "backup");
+        subagent.target = target.clone();
+        write_subagent(
+            &SubagentService::get_ssot_dir_for_target(&db, &target).expect("project ssot"),
+            "backup.md",
+            "Project backup",
+        );
+        db.save_subagent(&subagent).expect("save project subagent");
+
+        let uninstall = SubagentService::uninstall_for_target(&db, &target, &subagent.id)
+            .expect("uninstall and backup");
+        let backup_id = Path::new(uninstall.backup_path.as_deref().expect("backup path"))
+            .file_name()
+            .expect("backup id")
+            .to_string_lossy()
+            .to_string();
+        let mismatch =
+            SubagentService::restore_from_backup_for_target(&db, &backup_id, &ScopeTarget::Global)
+                .expect_err("backup must not be retargeted to global");
+        assert!(mismatch.to_string().contains("BACKUP_TARGET_MISMATCH"));
+        fs::remove_dir_all(&project_root).expect("project root becomes unavailable");
+
+        let backups = SubagentService::list_backups_for_target(&target).expect("list without root");
+        assert_eq!(backups.len(), 1);
+        assert_eq!(backups[0].subagent.target, target);
+        assert!(ProjectService::remove_project(&db, &project.project_id)
+            .expect_err("backup must block remove")
+            .to_string()
+            .contains("PROJECT_HAS_MANAGED_ASSETS"));
+
+        SubagentService::delete_backup_for_target(&backup_id, &target)
+            .expect("delete backup without root");
+        ProjectService::remove_project(&db, &project.project_id)
+            .expect("empty unavailable project is removable after backup deletion");
+    }
+
+    #[test]
+    #[serial]
+    fn project_backup_restore_rejects_unavailable_root_and_keeps_backup() {
+        let home = tempdir().expect("home");
+        let _home_guard = TestHomeGuard::set(home.path());
+        let project_root = home.path().join("workspace");
+        fs::create_dir(&project_root).expect("project root");
+        let db = Arc::new(Database::memory().expect("memory db"));
+        let project = ProjectService::add_project(&db, &project_root, None).expect("project");
+        let target = ScopeTarget::Project {
+            project_id: project.project_id,
+        };
+        let mut subagent = installed_subagent("owner/repo:restore", "restore");
+        subagent.target = target.clone();
+        write_subagent(
+            &SubagentService::get_ssot_dir_for_target(&db, &target).expect("project ssot"),
+            "restore.md",
+            "Project restore",
+        );
+        db.save_subagent(&subagent).expect("save project subagent");
+        let uninstall =
+            SubagentService::uninstall_for_target(&db, &target, &subagent.id).expect("backup");
+        let backup_id = Path::new(uninstall.backup_path.as_deref().expect("backup path"))
+            .file_name()
+            .expect("backup id")
+            .to_string_lossy()
+            .to_string();
+        fs::remove_dir_all(&project_root).expect("project root unavailable");
+
+        let error = SubagentService::restore_from_backup_for_target(&db, &backup_id, &target)
+            .expect_err("unavailable project root must reject restore");
+        assert!(error.to_string().contains("PROJECT_ROOT_UNAVAILABLE"));
+        assert_eq!(
+            SubagentService::list_backups_for_target(&target)
+                .expect("retained backup")
+                .len(),
+            1
+        );
+        assert!(db
+            .get_installed_subagent_for_target(&subagent.id, &ScopeTarget::Global)
+            .expect("global query")
+            .is_none());
+    }
+
+    #[test]
+    #[serial]
+    fn installed_list_respects_context_order_project_applicability_and_unavailable_roots() {
+        let home = tempdir().expect("home");
+        let _home_guard = TestHomeGuard::set(home.path());
+        let root_b = home.path().join("b-root");
+        let root_a = home.path().join("a-root");
+        let root_missing = home.path().join("missing-root");
+        fs::create_dir(&root_b).expect("b root");
+        fs::create_dir(&root_a).expect("a root");
+        fs::create_dir(&root_missing).expect("missing root");
+        let db = Arc::new(Database::memory().expect("memory db"));
+        let project_b =
+            ProjectService::add_project(&db, &root_b, Some("Beta".into())).expect("project b");
+        let project_a =
+            ProjectService::add_project(&db, &root_a, Some("Alpha".into())).expect("project a");
+        let missing = ProjectService::add_project(&db, &root_missing, Some("Gone".into()))
+            .expect("missing project");
+
+        for directory in ["global-z", "global-a"] {
+            let mut subagent = installed_subagent(&format!("owner/repo:{directory}"), directory);
+            subagent.apps = SubagentApps::only(&AgentType::ClaudeCode);
+            db.save_subagent(&subagent).expect("save global");
+        }
+        let mut codex_only = installed_subagent("owner/repo:global-codex", "global-codex");
+        codex_only.apps = SubagentApps::only(&AgentType::Codex);
+        db.save_subagent(&codex_only)
+            .expect("save unsupported global");
+        for (directory, project_id) in [
+            ("project-b", project_b.project_id.clone()),
+            ("project-a", project_a.project_id.clone()),
+            ("project-gone", missing.project_id.clone()),
+        ] {
+            let mut subagent = installed_subagent(&format!("owner/repo:{directory}"), directory);
+            subagent.target = ScopeTarget::Project { project_id };
+            db.save_subagent(&subagent).expect("save project subagent");
+        }
+        fs::remove_dir_all(&root_missing).expect("make project unavailable");
+
+        let all = SubagentService::get_installed_for_context(&db, &ConfigContext::All)
+            .expect("all context");
+        assert_eq!(
+            all.iter()
+                .map(|subagent| subagent.directory.as_str())
+                .collect::<Vec<_>>(),
+            vec![
+                "global-a",
+                "global-codex",
+                "global-z",
+                "project-a",
+                "project-b"
+            ]
+        );
+
+        let project = SubagentService::get_installed_for_context(
+            &db,
+            &ConfigContext::Project {
+                project_id: project_a.project_id,
+            },
+        )
+        .expect("project context");
+        assert_eq!(
+            project
+                .iter()
+                .map(|subagent| subagent.directory.as_str())
+                .collect::<Vec<_>>(),
+            vec!["project-a", "global-a", "global-z"]
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn discovery_installed_state_is_scoped_to_the_requested_target() {
+        let home = tempdir().expect("home");
+        let _home_guard = TestHomeGuard::set(home.path());
+        let project_root = home.path().join("workspace");
+        fs::create_dir(&project_root).expect("project root");
+        let db = Arc::new(Database::memory().expect("memory db"));
+        let project = ProjectService::add_project(&db, &project_root, None).expect("project");
+        let project_target = ScopeTarget::Project {
+            project_id: project.project_id,
+        };
+        let global = installed_subagent("owner/repo:shared", "shared");
+        db.save_subagent(&global).expect("save global subagent");
+
+        let mut candidates = vec![discoverable("owner/repo:shared", "shared", "shared.md")];
+        SubagentService::set_discoverable_installed_state_for_target(
+            &db,
+            &project_target,
+            &mut candidates,
+        )
+        .expect("project discovery status");
+        assert!(
+            !candidates[0].installed,
+            "a global record must not mark the same project target as installed"
+        );
+
+        let mut project_subagent = global.clone();
+        project_subagent.target = project_target.clone();
+        db.save_subagent(&project_subagent)
+            .expect("save project subagent");
+        SubagentService::set_discoverable_installed_state_for_target(
+            &db,
+            &project_target,
+            &mut candidates,
+        )
+        .expect("project discovery status");
+        assert!(candidates[0].installed);
+    }
+
+    #[test]
+    #[serial]
+    fn migrate_storage_moves_project_subagent_sibling_and_rebuilds_projection() {
+        let home = tempdir().expect("home");
+        let _home_guard = TestHomeGuard::set(home.path());
+        let db = Arc::new(Database::memory().expect("memory db"));
+        let project_root = home.path().join("workspace");
+        fs::create_dir(&project_root).expect("project root");
+        let project = ProjectService::add_project(&db, &project_root, None).expect("project");
+        let target = ScopeTarget::Project {
+            project_id: project.project_id.clone(),
+        };
+
+        let old_project_ssot =
+            SubagentService::get_ssot_dir_for_target(&db, &target).expect("project ssot");
+        write_subagent(&old_project_ssot, "project-agent.md", "Project agent");
+        let mut subagent = installed_subagent("owner/repo:project-agent", "project-agent");
+        subagent.target = target.clone();
+        subagent.apps = SubagentApps::only(&AgentType::ClaudeCode);
+        db.save_subagent(&subagent).expect("save project subagent");
+
+        SubagentService::sync_to_app_dir_for_target(
+            &db,
+            &target,
+            "project-agent",
+            &AgentType::ClaudeCode,
+        )
+        .expect("project projection");
+        let project_projection = project_root
+            .join(".claude")
+            .join("agents")
+            .join("project-agent.md");
+        assert!(project_projection.is_file());
+        let backup_marker = config::get_hub_subagent_backups_dir().join("fixed-marker");
+        fs::create_dir_all(backup_marker.parent().expect("backup parent")).expect("backup root");
+        fs::write(&backup_marker, "keep").expect("backup marker");
+
+        crate::commands::migrate_storage_combined(&db, StorageLocation::Unified)
+            .expect("project Subagent migration succeeds");
+
+        let new_project_ssot = config::get_home_dir()
+            .join(".agents")
+            .join("projects")
+            .join(&project.project_id)
+            .join("subagents");
+        assert!(new_project_ssot.join("project-agent.md").is_file());
+        assert!(!old_project_ssot.exists());
+        assert!(
+            project_projection.is_file(),
+            "project projection must be rebuilt against the moved sibling"
+        );
+        assert!(
+            backup_marker.is_file(),
+            "fixed backup root must not migrate"
+        );
+    }
+
+    #[test]
+    #[serial]
+    fn migrate_storage_rolls_back_project_subagent_sibling_when_projection_rebuild_fails() {
+        let home = tempdir().expect("home");
+        let _home_guard = TestHomeGuard::set(home.path());
+        let db = Arc::new(Database::memory().expect("memory db"));
+        let project_root = home.path().join("workspace");
+        fs::create_dir(&project_root).expect("project root");
+        let project = ProjectService::add_project(&db, &project_root, None).expect("project");
+        let target = ScopeTarget::Project {
+            project_id: project.project_id.clone(),
+        };
+
+        let old_project_ssot =
+            SubagentService::get_ssot_dir_for_target(&db, &target).expect("project ssot");
+        write_subagent(&old_project_ssot, "project-agent.md", "Project agent");
+        let mut subagent = installed_subagent("owner/repo:project-agent", "project-agent");
+        subagent.target = target.clone();
+        subagent.apps = SubagentApps::only(&AgentType::ClaudeCode);
+        db.save_subagent(&subagent).expect("save project subagent");
+
+        let claude_dir = project_root.join(".claude");
+        fs::create_dir_all(&claude_dir).expect("claude parent");
+        fs::write(claude_dir.join("agents"), "not a directory").expect("block project projection");
+
+        let error = crate::commands::migrate_storage_combined(&db, StorageLocation::Unified)
+            .expect_err("project projection failure must roll back Subagent sibling");
+        assert!(error.to_string().contains("MIGRATION_ABORTED"));
+        assert!(old_project_ssot.join("project-agent.md").is_file());
+        assert!(!config::get_home_dir()
+            .join(".agents")
+            .join("projects")
+            .join(&project.project_id)
+            .join("subagents")
+            .exists());
+        assert_eq!(
+            crate::settings::get_settings().storage_location,
+            StorageLocation::Hub
+        );
+    }
+
+    #[test]
     fn build_subagent_from_file_requires_name_frontmatter() {
         let tmp = tempdir().unwrap();
         let md = tmp.path().join("ok.md");
@@ -2207,6 +3433,7 @@ mod tests {
             installed_at: 1,
             content_hash: None,
             updated_at: 0,
+            target: ScopeTarget::Global,
         };
         db.save_subagent(&existing).unwrap();
 
@@ -2220,10 +3447,12 @@ mod tests {
             repo_owner: "owner2".to_string(),
             repo_name: "repo2".to_string(),
             repo_branch: "main".to_string(),
+            installed: false,
         };
 
-        let err = SubagentService::reuse_existing_install(
+        let err = SubagentService::reuse_existing_install_for_target(
             &db,
+            &ScopeTarget::Global,
             &discoverable,
             "review",
             &AgentType::Codex,
@@ -2258,6 +3487,7 @@ mod tests {
             installed_at: 1,
             content_hash: None,
             updated_at: 0,
+            target: ScopeTarget::Global,
         };
         db.save_subagent(&existing).unwrap();
 
@@ -2271,10 +3501,12 @@ mod tests {
             repo_owner: "owner".to_string(),
             repo_name: "repo".to_string(),
             repo_branch: "main".to_string(),
+            installed: false,
         };
 
-        let updated = SubagentService::reuse_existing_install(
+        let updated = SubagentService::reuse_existing_install_for_target(
             &db,
+            &ScopeTarget::Global,
             &discoverable,
             "review",
             &AgentType::Codex,
@@ -2311,6 +3543,7 @@ mod tests {
             installed_at: 1,
             content_hash: None,
             updated_at: 0,
+            target: ScopeTarget::Global,
         };
         db.save_subagent(&existing).unwrap();
 
@@ -2329,10 +3562,17 @@ mod tests {
             repo_owner: "owner".to_string(),
             repo_name: "repo".to_string(),
             repo_branch: "main".to_string(),
+            installed: false,
         };
 
-        SubagentService::reuse_existing_install(&db, &discoverable, "review", &AgentType::Codex)
-            .expect_err("sync failure must surface as an error");
+        SubagentService::reuse_existing_install_for_target(
+            &db,
+            &ScopeTarget::Global,
+            &discoverable,
+            "review",
+            &AgentType::Codex,
+        )
+        .expect_err("sync failure must surface as an error");
 
         let stored = db.get_installed_subagent(&existing.id).unwrap().unwrap();
         assert!(stored.apps.claude_code);
@@ -2368,6 +3608,7 @@ mod tests {
             installed_at: 1,
             content_hash: None,
             updated_at: 0,
+            target: ScopeTarget::Global,
         };
         db.save_subagent(&existing).unwrap();
 
@@ -2388,10 +3629,17 @@ mod tests {
             repo_owner: "owner".to_string(),
             repo_name: "repo".to_string(),
             repo_branch: "main".to_string(),
+            installed: false,
         };
 
-        SubagentService::reuse_existing_install(&db, &discoverable, "review", &AgentType::Codex)
-            .expect_err("保存失败必须返回错误");
+        SubagentService::reuse_existing_install_for_target(
+            &db,
+            &ScopeTarget::Global,
+            &discoverable,
+            "review",
+            &AgentType::Codex,
+        )
+        .expect_err("保存失败必须返回错误");
 
         assert!(
             !config::get_codex_agents_dir().join("review.md").exists(),
@@ -2428,6 +3676,7 @@ mod tests {
             installed_at: 1,
             content_hash: None,
             updated_at: 0,
+            target: ScopeTarget::Global,
         };
         db.save_subagent(&subagent).unwrap();
         SubagentService::sync_to_app_dir("scoped-agent", &AgentType::ClaudeCode).unwrap();
@@ -2513,6 +3762,7 @@ mod tests {
             installed_at: 1,
             content_hash: None,
             updated_at: 0,
+            target: ScopeTarget::Global,
         };
         db.save_subagent(&subagent).unwrap();
         SubagentService::sync_to_app_dir("uninstall-agent", &AgentType::ClaudeCode).unwrap();
@@ -2559,6 +3809,7 @@ mod tests {
             installed_at: 1,
             content_hash: None,
             updated_at: 0,
+            target: ScopeTarget::Global,
         };
         db.save_subagent(&subagent).unwrap();
         SubagentService::sync_to_app_dir("restore-agent", &AgentType::ClaudeCode).unwrap();
@@ -2819,6 +4070,7 @@ mod tests {
             installed_at: 1,
             content_hash: None,
             updated_at: 0,
+            target: ScopeTarget::Global,
         };
         db.save_subagent(&subagent).unwrap();
         SubagentService::sync_to_app_dir("migrate-agent", &AgentType::ClaudeCode).unwrap();
@@ -2871,6 +4123,7 @@ mod tests {
                 installed_at: 1,
                 content_hash: None,
                 updated_at: 0,
+                target: ScopeTarget::Global,
             };
             db.save_subagent(&subagent).unwrap();
         }
@@ -2951,6 +4204,7 @@ mod tests {
             installed_at: 1,
             content_hash: None,
             updated_at: 0,
+            target: ScopeTarget::Global,
         };
         db.save_subagent(&existing).unwrap();
 
@@ -2964,10 +4218,12 @@ mod tests {
             repo_owner: "owner".to_string(),
             repo_name: "repo".to_string(),
             repo_branch: "main".to_string(),
+            installed: false,
         };
 
-        let err = SubagentService::reuse_existing_install(
+        let err = SubagentService::reuse_existing_install_for_target(
             &db,
+            &ScopeTarget::Global,
             &discoverable,
             "review",
             &AgentType::Codex,
@@ -3003,6 +4259,7 @@ mod tests {
             installed_at: 1,
             content_hash: None,
             updated_at: 0,
+            target: ScopeTarget::Global,
         };
         db.save_subagent(&subagent).unwrap();
         SubagentService::sync_to_app_dir("uninstall-agent", &AgentType::ClaudeCode).unwrap();
@@ -3070,6 +4327,7 @@ mod tests {
 
         let updated = SubagentService::apply_downloaded_update(
             &db,
+            &ScopeTarget::Global,
             &previous,
             "owner",
             "repo",
@@ -3117,6 +4375,7 @@ mod tests {
 
         let installed = SubagentService::finish_install_under_lock(
             &db,
+            &ScopeTarget::Global,
             &subagent,
             "new-agent",
             &AgentType::ClaudeCode,
@@ -3195,6 +4454,7 @@ mod tests {
 
         let result = SubagentService::persist_and_sync_new_subagent(
             &db,
+            &ScopeTarget::Global,
             &subagent,
             &AgentType::ClaudeCode,
             Some(&dest),
@@ -3224,6 +4484,7 @@ mod tests {
 
         let result = SubagentService::persist_and_sync_new_subagent(
             &db,
+            &ScopeTarget::Global,
             &subagent,
             &AgentType::ClaudeCode,
             Some(&dest),
@@ -3256,6 +4517,7 @@ mod tests {
         // fresh_ssot_file 为 None：文件是接管/既有的，回滚时绝不能删除
         let result = SubagentService::persist_and_sync_new_subagent(
             &db,
+            &ScopeTarget::Global,
             &subagent,
             &AgentType::ClaudeCode,
             None,
