@@ -27,12 +27,12 @@ import {
 } from '../../hooks/useSkills';
 import { toUserError } from '../../lib/errors';
 import { FocusedDialog } from '../workbench/FocusedDialog';
+import { InitialAgentRadioGroup } from '../workbench/InitialAgentRadioGroup';
 import { RepoManagerPanel } from './RepoManagerPanel';
 import { SkillCard, type SkillCardSkill } from './SkillCard';
 import './skills.css';
 
 interface SkillsDiscoveryPageProps {
-  activeApp: AgentType;
   context: ConfigContext;
   projects: readonly ProjectSummary[];
 }
@@ -66,8 +66,88 @@ function targetFromValue(value: string): ScopeTarget | null {
   return value.startsWith('project:') ? { scope: 'project', projectId: value.slice(8) } : null;
 }
 
+function projectLabel(projectId: string, projects: readonly ProjectSummary[]): string {
+  const project = projects.find((candidate) => candidate.projectId === projectId);
+  if (project === undefined) return projectId;
+  const duplicateName = projects.some(
+    (candidate) =>
+      candidate.projectId !== projectId && candidate.displayName === project.displayName,
+  );
+  return duplicateName ? `${project.displayName}（${project.rootPath}）` : project.displayName;
+}
+
+function targetLabel(target: ScopeTarget, projects: readonly ProjectSummary[]): string {
+  if (target.scope === 'global') return '全局配置';
+  return `项目配置：${projectLabel(target.projectId, projects)}`;
+}
+
+function SkillInstallDialog({
+  skill,
+  targetText,
+  initialApp,
+  pending,
+  errorMessage,
+  onInitialAppChange,
+  onConfirm,
+  onClose,
+}: {
+  skill: SkillCardSkill | null;
+  targetText: string | null;
+  initialApp: AgentType | null;
+  pending: boolean;
+  errorMessage: string;
+  onInitialAppChange: (app: AgentType) => void;
+  onConfirm: () => void;
+  onClose: () => void;
+}) {
+  if (skill === null) return null;
+
+  return (
+    <FocusedDialog
+      open
+      title={`安装 ${skill.name}`}
+      onClose={onClose}
+      closeLabel={`关闭安装 ${skill.name} 对话框`}
+      className="skill-dialog"
+      footer={
+        <>
+          <button type="button" className="skill-button" onClick={onClose}>
+            取消
+          </button>
+          <button
+            type="button"
+            className="skill-button primary"
+            onClick={onConfirm}
+            disabled={pending || targetText === null || initialApp === null}
+          >
+            {pending ? <Loader2 size={15} className="spin" /> : <Download size={15} />}
+            {pending ? '安装中…' : '确认安装'}
+          </button>
+        </>
+      }
+    >
+      {errorMessage && (
+        <div className="skill-error" role="alert">
+          {errorMessage}
+        </div>
+      )}
+      <p className="skill-dialog-copy">
+        安装后仅启用所选初始 Agent，其他 Agent 可在已安装详情中调整。
+      </p>
+      <p className="skill-dialog-field-hint">安装目标：{targetText ?? '未选择目标'}</p>
+      <InitialAgentRadioGroup
+        name="skill-install-initial-agent"
+        value={initialApp}
+        onChange={onInitialAppChange}
+        disabled={pending}
+      />
+    </FocusedDialog>
+  );
+}
+
 function DiscoverySkillDetail({
   skill,
+  targetText,
   pending,
   onBack,
   backButtonRef,
@@ -75,6 +155,7 @@ function DiscoverySkillDetail({
   onUninstall,
 }: {
   skill: SkillCardSkill;
+  targetText: string | null;
   pending: boolean;
   onBack: () => void;
   backButtonRef: RefObject<HTMLButtonElement>;
@@ -138,6 +219,10 @@ function DiscoverySkillDetail({
           </dd>
         </div>
         <div>
+          <dt>安装目标</dt>
+          <dd>{targetText ?? '未选择目标'}</dd>
+        </div>
+        <div>
           <dt>仓库</dt>
           <dd>
             {skill.repoOwner}/{skill.repoName}
@@ -158,7 +243,7 @@ function DiscoverySkillDetail({
   );
 }
 
-export function SkillsDiscoveryPage({ activeApp, context, projects }: SkillsDiscoveryPageProps) {
+export function SkillsDiscoveryPage({ context, projects }: SkillsDiscoveryPageProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [filterRepo, setFilterRepo] = useState<string>('all');
   const [filterStatus, setFilterStatus] = useState<StatusFilter>('all');
@@ -166,6 +251,8 @@ export function SkillsDiscoveryPage({ activeApp, context, projects }: SkillsDisc
   const [errorMessage, setErrorMessage] = useState('');
   const [statusMessage, setStatusMessage] = useState('');
   const [selectedSkillKey, setSelectedSkillKey] = useState<string | null>(null);
+  const [installDialogKey, setInstallDialogKey] = useState<string | null>(null);
+  const [initialApp, setInitialApp] = useState<AgentType | null>(null);
   const [uninstallTarget, setUninstallTarget] = useState<InstalledSkill | null>(null);
   const [allDiscoveryTarget, setAllDiscoveryTarget] = useState<ScopeTarget | null>(null);
   const detailBackButtonRef = useRef<HTMLButtonElement>(null);
@@ -180,8 +267,8 @@ export function SkillsDiscoveryPage({ activeApp, context, projects }: SkillsDisc
     data: discoverableSkills,
     isLoading: loadingDiscoverable,
     refetch: refetchDiscoverable,
-  } = useDiscoverableSkills(discoveryTarget, activeApp);
-  const { data: installedSkills } = useInstalledSkills(context, activeApp);
+  } = useDiscoverableSkills(discoveryTarget);
+  const { data: installedSkills } = useInstalledSkills(context);
   const { data: repos = [] } = useSkillRepos();
   const installMutation = useInstallSkill();
   const uninstallMutation = useUninstallSkill();
@@ -266,6 +353,8 @@ export function SkillsDiscoveryPage({ activeApp, context, projects }: SkillsDisc
     previousContextKeyRef.current = nextContextKey;
     setAllDiscoveryTarget(null);
     setSelectedSkillKey(null);
+    setInstallDialogKey(null);
+    setInitialApp(null);
     setUninstallTarget(null);
     window.setTimeout(() => panelHeadingRef.current?.focus(), 0);
   }, [context]);
@@ -285,6 +374,8 @@ export function SkillsDiscoveryPage({ activeApp, context, projects }: SkillsDisc
 
     previousDiscoveryTargetRef.current = nextTargetValue;
     setSelectedSkillKey(null);
+    setInstallDialogKey(null);
+    setInitialApp(null);
     setUninstallTarget(null);
     window.setTimeout(() => panelHeadingRef.current?.focus(), 0);
   }, [discoveryTarget]);
@@ -312,6 +403,15 @@ export function SkillsDiscoveryPage({ activeApp, context, projects }: SkillsDisc
     setSelectedSkillKey(key);
   };
 
+  const openInstallDialog = (key: string) => {
+    const skill = skills.find((item) => item.key === key);
+    if (skill === undefined || skill.installed) return;
+    clearFeedback();
+    if (requireDiscoveryTarget() === null) return;
+    setInitialApp(null);
+    setInstallDialogKey(key);
+  };
+
   const closeDetail = () => {
     setSelectedSkillKey(null);
     window.setTimeout(() => {
@@ -324,14 +424,22 @@ export function SkillsDiscoveryPage({ activeApp, context, projects }: SkillsDisc
     }, 0);
   };
 
-  const handleInstall = async (key: string) => {
-    const skill = skills.find((item) => item.key === key);
+  const handleConfirmInstall = async () => {
+    if (installDialogKey === null) return;
+    const skill = skills.find((item) => item.key === installDialogKey);
     if (skill === undefined) return;
     clearFeedback();
     const target = requireDiscoveryTarget();
     if (target === null) return;
+    const selectedInitialApp = initialApp;
+    if (selectedInitialApp === null) {
+      setErrorMessage('请选择安装后要启用的初始 Agent。');
+      return;
+    }
     try {
-      await installMutation.mutateAsync({ skill, target, currentApp: activeApp });
+      await installMutation.mutateAsync({ skill, target, initialApp: selectedInitialApp });
+      setInstallDialogKey(null);
+      setInitialApp(null);
       setStatusMessage(`已安装 ${skill.name}。`);
     } catch (error) {
       reportError(error);
@@ -394,6 +502,10 @@ export function SkillsDiscoveryPage({ activeApp, context, projects }: SkillsDisc
             发现
           </h2>
           <p>{skills.length} 个可安装 Skill</p>
+          <p className="skill-discovery-target-hint">
+            安装状态按当前目标：
+            {discoveryTarget ? targetLabel(discoveryTarget, projects) : '未选择'}
+          </p>
         </div>
       </div>
 
@@ -448,7 +560,7 @@ export function SkillsDiscoveryPage({ activeApp, context, projects }: SkillsDisc
               <option value="global">全局配置</option>
               {projects.map((project) => (
                 <option key={project.projectId} value={`project:${project.projectId}`}>
-                  项目配置：{project.displayName}
+                  {targetLabel({ scope: 'project', projectId: project.projectId }, projects)}
                 </option>
               ))}
             </select>
@@ -476,7 +588,7 @@ export function SkillsDiscoveryPage({ activeApp, context, projects }: SkillsDisc
         )}
       </div>
 
-      {errorMessage && (
+      {errorMessage && installDialogKey === null && (
         <div className="skill-error" role="alert">
           {errorMessage}
         </div>
@@ -495,10 +607,11 @@ export function SkillsDiscoveryPage({ activeApp, context, projects }: SkillsDisc
       ) : selectedSkill !== null ? (
         <DiscoverySkillDetail
           skill={selectedSkill}
+          targetText={discoveryTarget ? targetLabel(discoveryTarget, projects) : null}
           pending={installMutation.isPending || uninstallMutation.isPending}
           onBack={closeDetail}
           backButtonRef={detailBackButtonRef}
-          onInstall={() => void handleInstall(selectedSkill.key)}
+          onInstall={() => openInstallDialog(selectedSkill.key)}
           onUninstall={() => handleUninstall(selectedSkill.key)}
         />
       ) : loadingDiscoverable ? (
@@ -531,7 +644,7 @@ export function SkillsDiscoveryPage({ activeApp, context, projects }: SkillsDisc
               skill={skill}
               selected={selectedSkillKey === skill.key}
               onSelect={selectSkill}
-              onInstall={handleInstall}
+              onInstall={openInstallDialog}
               onUninstall={handleUninstall}
               uninstallPending={uninstallMutation.isPending}
             />
@@ -546,6 +659,23 @@ export function SkillsDiscoveryPage({ activeApp, context, projects }: SkillsDisc
           onAdd={handleAddRepo}
           onRemove={handleRemoveRepo}
           onClose={() => setRepoManagerOpen(false)}
+        />
+      )}
+
+      {installDialogKey !== null && (
+        <SkillInstallDialog
+          skill={skills.find((skill) => skill.key === installDialogKey) ?? null}
+          targetText={discoveryTarget ? targetLabel(discoveryTarget, projects) : null}
+          initialApp={initialApp}
+          pending={installMutation.isPending}
+          errorMessage={errorMessage}
+          onInitialAppChange={setInitialApp}
+          onConfirm={() => void handleConfirmInstall()}
+          onClose={() => {
+            setInstallDialogKey(null);
+            setInitialApp(null);
+            clearFeedback();
+          }}
         />
       )}
 

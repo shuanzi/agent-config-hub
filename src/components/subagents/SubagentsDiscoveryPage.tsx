@@ -28,12 +28,12 @@ import {
 import { toUserError } from '../../lib/errors';
 import { AgentBrandMark, agentLabels, WORKBENCH_AGENTS } from '../workbench/AgentBrandMark';
 import { FocusedDialog } from '../workbench/FocusedDialog';
+import { InitialAgentRadioGroup } from '../workbench/InitialAgentRadioGroup';
 import { RepoManagerPanel } from './RepoManagerPanel';
 import { SubagentCard, type SubagentCardSubagent } from './SubagentCard';
 import './subagents.css';
 
 interface SubagentsDiscoveryPageProps {
-  activeApp: AgentType;
   context: ConfigContext;
   projects: readonly ProjectSummary[];
 }
@@ -87,6 +87,68 @@ function SubagentNotice({ notice }: { notice: Notice }) {
   );
 }
 
+function SubagentInstallDialog({
+  subagent,
+  targetText,
+  projectTarget,
+  initialApp,
+  pending,
+  notice,
+  onInitialAppChange,
+  onConfirm,
+  onClose,
+}: {
+  subagent: SubagentItem | null;
+  targetText: string | null;
+  projectTarget: boolean;
+  initialApp: AgentType | null;
+  pending: boolean;
+  notice: Notice;
+  onInitialAppChange: (app: AgentType) => void;
+  onConfirm: () => void;
+  onClose: () => void;
+}) {
+  if (subagent === null) return null;
+  return (
+    <FocusedDialog
+      open
+      title={`安装 ${subagent.name}`}
+      onClose={onClose}
+      closeLabel={`关闭安装 ${subagent.name} 对话框`}
+      footer={
+        <>
+          <button type="button" className="subagent-button" onClick={onClose}>
+            取消
+          </button>
+          <button
+            type="button"
+            className="subagent-button is-primary"
+            onClick={onConfirm}
+            disabled={pending || targetText === null || initialApp === null}
+          >
+            {pending ? <Loader2 size={14} className="spin" /> : <Download size={14} />}
+            {pending ? '安装中…' : '确认安装'}
+          </button>
+        </>
+      }
+    >
+      <SubagentNotice notice={notice} />
+      <p className="subagent-dialog-empty">
+        安装后仅启用所选初始 Agent，其他 Agent 可在已安装详情中调整。
+      </p>
+      <p className="subagent-dialog-empty">安装目标：{targetText ?? '未选择目标'}</p>
+      <InitialAgentRadioGroup
+        name="subagent-install-initial-agent"
+        value={initialApp}
+        onChange={onInitialAppChange}
+        disabled={pending}
+        disabledApps={projectTarget ? ['codex'] : []}
+        description={projectTarget ? '项目配置不支持 Codex Subagent。' : undefined}
+      />
+    </FocusedDialog>
+  );
+}
+
 function mapAppField(app: AgentType): keyof InstalledSubagent['apps'] {
   switch (app) {
     case 'claude-code':
@@ -104,7 +166,7 @@ function DiscoverableSubagentDetail({
   subagent,
   installedSubagent,
   installPending,
-  installUnsupported,
+  projectTarget,
   uninstallPending,
   onBack,
   backButtonRef,
@@ -114,7 +176,7 @@ function DiscoverableSubagentDetail({
   subagent: SubagentItem | null;
   installedSubagent: InstalledSubagent | null;
   installPending: boolean;
-  installUnsupported: boolean;
+  projectTarget: boolean;
   uninstallPending: boolean;
   onBack: () => void;
   backButtonRef: RefObject<HTMLButtonElement>;
@@ -223,21 +285,21 @@ function DiscoverableSubagentDetail({
           </button>
         ) : (
           <>
-            {installUnsupported && (
+            {projectTarget && (
               <p
                 id="subagent-install-unsupported"
                 className="subagent-install-unsupported"
                 role="status"
               >
-                不支持 Codex 项目级 Subagent
+                项目配置不支持 Codex Subagent，请选择其他 Agent。
               </p>
             )}
             <button
               type="button"
               className="subagent-button is-primary install"
               onClick={onInstall}
-              disabled={installPending || installUnsupported}
-              aria-describedby={installUnsupported ? 'subagent-install-unsupported' : undefined}
+              disabled={installPending}
+              aria-describedby={projectTarget ? 'subagent-install-unsupported' : undefined}
             >
               {installPending ? (
                 <Loader2 size={14} className="spin" aria-hidden="true" />
@@ -253,11 +315,7 @@ function DiscoverableSubagentDetail({
   );
 }
 
-export function SubagentsDiscoveryPage({
-  activeApp,
-  context,
-  projects,
-}: SubagentsDiscoveryPageProps) {
+export function SubagentsDiscoveryPage({ context, projects }: SubagentsDiscoveryPageProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [filterRepo, setFilterRepo] = useState<string>('all');
   const [filterStatus, setFilterStatus] = useState<StatusFilter>('all');
@@ -265,6 +323,8 @@ export function SubagentsDiscoveryPage({
   const [notice, setNotice] = useState<Notice>(null);
   const [uninstallTarget, setUninstallTarget] = useState<InstalledSubagent | null>(null);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  const [installDialogKey, setInstallDialogKey] = useState<string | null>(null);
+  const [initialApp, setInitialApp] = useState<AgentType | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
   const [allDiscoveryTarget, setAllDiscoveryTarget] = useState<ScopeTarget | null>(null);
   const initializedSelectionRef = useRef(false);
@@ -281,8 +341,8 @@ export function SubagentsDiscoveryPage({
     data: discoverableSubagents,
     isLoading: loadingDiscoverable,
     refetch: refetchDiscoverable,
-  } = useDiscoverableSubagents(discoveryTarget, activeApp);
-  const { data: installedSubagents } = useInstalledSubagents(context, activeApp);
+  } = useDiscoverableSubagents(discoveryTarget);
+  const { data: installedSubagents } = useInstalledSubagents(context);
   const { data: repos = [] } = useSubagentRepos();
   const installMutation = useInstallSubagent();
   const uninstallMutation = useUninstallSubagent();
@@ -398,6 +458,8 @@ export function SubagentsDiscoveryPage({
     previousContextKeyRef.current = nextContextKey;
     setAllDiscoveryTarget(null);
     setSelectedKey(null);
+    setInstallDialogKey(null);
+    setInitialApp(null);
     setDetailOpen(false);
     setUninstallTarget(null);
     window.setTimeout(() => panelRef.current?.focus(), 0);
@@ -417,6 +479,8 @@ export function SubagentsDiscoveryPage({
 
     previousDiscoveryTargetRef.current = discoveryTargetValue;
     setSelectedKey(null);
+    setInstallDialogKey(null);
+    setInitialApp(null);
     setDetailOpen(false);
     setUninstallTarget(null);
     window.setTimeout(() => panelRef.current?.focus(), 0);
@@ -431,7 +495,17 @@ export function SubagentsDiscoveryPage({
   const selectSubagent = (key: string) => {
     setNotice(null);
     setSelectedKey(key);
+    setInitialApp(null);
     setDetailOpen(true);
+  };
+
+  const openInstallDialog = (key: string) => {
+    const subagent = subagents.find((candidate) => candidate.key === key);
+    if (subagent === undefined || subagent.installed) return;
+    setNotice(null);
+    if (requireDiscoveryTarget() === null) return;
+    setInitialApp(null);
+    setInstallDialogKey(key);
   };
 
   const closeDetail = () => {
@@ -439,19 +513,31 @@ export function SubagentsDiscoveryPage({
     window.setTimeout(() => selectedRowRef.current?.focus(), 0);
   };
 
-  const handleInstall = async (key: string) => {
-    const subagent = subagents.find((candidate) => candidate.key === key);
+  const handleConfirmInstall = async () => {
+    if (installDialogKey === null) return;
+    const subagent = subagents.find((candidate) => candidate.key === installDialogKey);
     if (subagent === undefined) return;
     setNotice(null);
     const target = requireDiscoveryTarget();
     if (target === null) return;
-    if (target.scope === 'project' && activeApp === 'codex') {
-      setNotice({ tone: 'error', message: '不支持 Codex 项目级 Subagent。' });
+    const selectedInitialApp = initialApp;
+    if (selectedInitialApp === null) {
+      setNotice({ tone: 'error', message: '请选择安装后要启用的初始 Agent。' });
+      return;
+    }
+    if (target.scope === 'project' && selectedInitialApp === 'codex') {
+      setNotice({ tone: 'error', message: '项目配置不支持 Codex Subagent，请选择其他 Agent。' });
       return;
     }
     try {
       const { installedId: _installedId, ...discoverable } = subagent;
-      await installMutation.mutateAsync({ subagent: discoverable, target, currentApp: activeApp });
+      await installMutation.mutateAsync({
+        subagent: discoverable,
+        target,
+        initialApp: selectedInitialApp,
+      });
+      setInstallDialogKey(null);
+      setInitialApp(null);
       setNotice({ tone: 'status', message: `已安装 ${subagent.name}。` });
     } catch (error) {
       setNotice({ tone: 'error', message: messageFor(error) });
@@ -597,7 +683,7 @@ export function SubagentsDiscoveryPage({
         )}
       </div>
 
-      <SubagentNotice notice={notice} />
+      <SubagentNotice notice={installDialogKey === null ? notice : null} />
 
       {context.kind === 'all' && discoveryTarget === null ? (
         <div className="subagent-empty" role="status">
@@ -645,12 +731,12 @@ export function SubagentsDiscoveryPage({
             subagent={selectedSubagent}
             installedSubagent={selectedInstalledSubagent}
             installPending={installMutation.isPending}
-            installUnsupported={discoveryTarget?.scope === 'project' && activeApp === 'codex'}
+            projectTarget={discoveryTarget?.scope === 'project'}
             uninstallPending={uninstallMutation.isPending}
             onBack={closeDetail}
             backButtonRef={detailBackButtonRef}
             onInstall={() => {
-              if (selectedSubagent !== null) void handleInstall(selectedSubagent.key);
+              if (selectedSubagent !== null) openInstallDialog(selectedSubagent.key);
             }}
             onUninstall={() => {
               if (selectedSubagent !== null) handleUninstall(selectedSubagent.key);
@@ -666,6 +752,30 @@ export function SubagentsDiscoveryPage({
           onAdd={handleAddRepo}
           onRemove={handleRemoveRepo}
           onClose={() => setRepoManagerOpen(false)}
+        />
+      )}
+
+      {installDialogKey !== null && (
+        <SubagentInstallDialog
+          subagent={subagents.find((subagent) => subagent.key === installDialogKey) ?? null}
+          targetText={
+            discoveryTarget === null
+              ? null
+              : discoveryTarget.scope === 'global'
+                ? '全局配置'
+                : `项目配置：${projects.find((project) => project.projectId === discoveryTarget.projectId)?.displayName ?? discoveryTarget.projectId}`
+          }
+          projectTarget={discoveryTarget?.scope === 'project'}
+          initialApp={initialApp}
+          pending={installMutation.isPending}
+          notice={notice}
+          onInitialAppChange={setInitialApp}
+          onConfirm={() => void handleConfirmInstall()}
+          onClose={() => {
+            setInstallDialogKey(null);
+            setInitialApp(null);
+            setNotice(null);
+          }}
         />
       )}
 

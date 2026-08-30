@@ -7,48 +7,36 @@ import type { ConfigContext } from '../../../src/types';
 import { App } from '../../../src/App';
 
 vi.mock('../../../src/components/skills/InstalledSkillsPanel', () => ({
-  InstalledSkillsPanel: ({ activeApp, context }: { activeApp: string; context: ConfigContext }) => (
+  InstalledSkillsPanel: ({ context }: { context: ConfigContext }) => (
     <div data-testid="installed-skills-panel">
-      installed-skills:{activeApp}:
+      installed-skills:
       {context.kind === 'project' ? `project:${context.projectId}` : context.kind}
     </div>
   ),
 }));
 
 vi.mock('../../../src/components/skills/SkillsDiscoveryPage', () => ({
-  SkillsDiscoveryPage: ({ activeApp, context }: { activeApp: string; context: ConfigContext }) => (
+  SkillsDiscoveryPage: ({ context }: { context: ConfigContext }) => (
     <div data-testid="skills-discovery-panel">
-      skills-discovery:{activeApp}:
+      skills-discovery:
       {context.kind === 'project' ? `project:${context.projectId}` : context.kind}
     </div>
   ),
 }));
 
 vi.mock('../../../src/components/subagents/InstalledSubagentsPanel', () => ({
-  InstalledSubagentsPanel: ({
-    activeApp,
-    context,
-  }: {
-    activeApp: string;
-    context: ConfigContext;
-  }) => (
+  InstalledSubagentsPanel: ({ context }: { context: ConfigContext }) => (
     <div data-testid="installed-subagents-panel">
-      installed-subagents:{activeApp}:
+      installed-subagents:
       {context.kind === 'project' ? `project:${context.projectId}` : context.kind}
     </div>
   ),
 }));
 
 vi.mock('../../../src/components/subagents/SubagentsDiscoveryPage', () => ({
-  SubagentsDiscoveryPage: ({
-    activeApp,
-    context,
-  }: {
-    activeApp: string;
-    context: ConfigContext;
-  }) => (
+  SubagentsDiscoveryPage: ({ context }: { context: ConfigContext }) => (
     <div data-testid="subagents-discovery-panel">
-      subagents-discovery:{activeApp}:
+      subagents-discovery:
       {context.kind === 'project' ? `project:${context.projectId}` : context.kind}
     </div>
   ),
@@ -148,7 +136,7 @@ describe('App selected B2 shell', () => {
     const contextRail = await screen.findByRole('navigation', { name: '配置上下文' });
     expect(mockInvoke).toHaveBeenCalledWith('list_projects', undefined);
     expect(screen.queryByRole('navigation', { name: '选择 Agent' })).toBeNull();
-    expect(screen.getByLabelText('当前 Agent').closest('header, main')).not.toBeNull();
+    expect(screen.queryByLabelText('当前 Agent')).toBeNull();
 
     const allContext = within(contextRail).getByRole('button', { name: '全部' });
     const globalContext = within(contextRail).getByRole('button', { name: '全局配置' });
@@ -175,35 +163,28 @@ describe('App selected B2 shell', () => {
     expect(betaProject.getAttribute('aria-current')).toBe('page');
     expect(alphaProject.getAttribute('aria-current')).toBeNull();
     expect(screen.getByTestId('installed-skills-panel').textContent).toBe(
-      'installed-skills:claude-code:project:project-beta',
+      'installed-skills:project:project-beta',
     );
   });
 
-  it('keeps the current view and agent semantics behind the desktop rails', () => {
+  it('keeps the current view behind the desktop rails without a global Agent context', () => {
     renderApp();
 
-    expect(screen.getByTestId('installed-skills-panel').textContent).toBe(
-      'installed-skills:claude-code:all',
-    );
+    expect(screen.getByTestId('installed-skills-panel').textContent).toBe('installed-skills:all');
     expect(screen.getByRole('navigation', { name: '资产类型导航' })).toBeTruthy();
     expect(screen.getByRole('navigation', { name: '配置上下文' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Skills' }).getAttribute('aria-current')).toBe(
       'page',
     );
 
-    fireEvent.change(screen.getByLabelText('当前 Agent'), { target: { value: 'codex' } });
-    expect(screen.getByTestId('installed-skills-panel').textContent).toBe(
-      'installed-skills:codex:all',
-    );
-
     fireEvent.click(screen.getByRole('button', { name: 'Subagents' }));
     expect(screen.getByTestId('installed-subagents-panel').textContent).toBe(
-      'installed-subagents:codex:all',
+      'installed-subagents:all',
     );
 
     fireEvent.click(screen.getByRole('tab', { name: '发现' }));
     expect(screen.getByTestId('subagents-discovery-panel').textContent).toBe(
-      'subagents-discovery:codex:all',
+      'subagents-discovery:all',
     );
 
     fireEvent.click(screen.getByRole('button', { name: '长期指令' }));

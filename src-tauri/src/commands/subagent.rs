@@ -58,11 +58,11 @@ pub async fn discover_available_subagents(
 pub async fn install_subagent(
     subagent: DiscoverableSubagent,
     target: ScopeTarget,
-    current_app: String,
+    initial_app: String,
     service: tauri::State<'_, SubagentServiceState>,
     app_state: tauri::State<'_, AppState>,
 ) -> Result<InstalledSubagent, String> {
-    let app_type = parse_app_type(&current_app)?;
+    let app_type = parse_app_type(&initial_app)?;
 
     service
         .0

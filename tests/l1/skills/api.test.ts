@@ -56,7 +56,7 @@ describe('skills API wrappers', () => {
     expect(result).toBe(expected);
   });
 
-  it('installSkill forwards skill, complete target and currentApp', async () => {
+  it('installSkill forwards skill, complete target and initialApp', async () => {
     const target: ScopeTarget = { scope: 'project', projectId: 'project-alpha' };
     const skill: DiscoverableSkill = {
       key: 'a/b:foo',
@@ -80,7 +80,7 @@ describe('skills API wrappers', () => {
     expect(mockInvoke).toHaveBeenCalledWith('install_skill', {
       skill,
       target,
-      currentApp: 'codex',
+      initialApp: 'codex',
     });
   });
 

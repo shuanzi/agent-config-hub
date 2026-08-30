@@ -547,7 +547,7 @@ impl SubagentService {
         target: &ScopeTarget,
         subagent: &DiscoverableSubagent,
         install_name: &str,
-        current_app: &AgentType,
+        initial_app: &AgentType,
     ) -> Result<Option<InstalledSubagent>, AppError> {
         let existing_subagents = db.get_all_installed_subagents_for_target(target)?;
         for existing in existing_subagents.values() {
@@ -560,24 +560,24 @@ impl SubagentService {
             if same_repo {
                 if existing.id == subagent.key {
                     let mut updated = existing.clone();
-                    updated.apps.set_enabled_for(current_app, true);
+                    updated.apps.set_enabled_for(initial_app, true);
                     // 先同步投影成功再落库：同步失败时 DB 保持原启用标志，
                     // 避免出现"已启用但无可用投影"的中间状态
-                    Self::sync_to_app_dir_for_target(db, target, &updated.directory, current_app)?;
+                    Self::sync_to_app_dir_for_target(db, target, &updated.directory, initial_app)?;
                     if let Err(error) = db.save_subagent(&updated) {
                         // 落库失败：移除本次新建的投影，恢复到操作前状态；
                         // 操作前已启用的投影先于本次操作存在，保留不动
-                        if !existing.apps.is_enabled_for(current_app) {
+                        if !existing.apps.is_enabled_for(initial_app) {
                             if let Err(rollback_error) = Self::remove_from_app_for_target(
                                 db,
                                 target,
                                 &updated.directory,
-                                current_app,
+                                initial_app,
                             ) {
                                 log::error!(
                                     "保存 Subagent {} 失败后移除 {} 投影也失败: {rollback_error}",
                                     updated.name,
-                                    current_app.as_str()
+                                    initial_app.as_str()
                                 );
                             }
                         }
@@ -586,7 +586,7 @@ impl SubagentService {
                     log::info!(
                         "Subagent {} 已存在，更新 {} 启用状态",
                         updated.name,
-                        current_app.as_str()
+                        initial_app.as_str()
                     );
                     return Ok(Some(updated));
                 }
@@ -852,9 +852,9 @@ impl SubagentService {
         &self,
         db: &Arc<Database>,
         subagent: &DiscoverableSubagent,
-        current_app: &AgentType,
+        initial_app: &AgentType,
     ) -> Result<InstalledSubagent, AppError> {
-        self.install_for_target(db, &ScopeTarget::Global, subagent, current_app)
+        self.install_for_target(db, &ScopeTarget::Global, subagent, initial_app)
             .await
     }
 
@@ -863,9 +863,9 @@ impl SubagentService {
         db: &Arc<Database>,
         target: &ScopeTarget,
         subagent: &DiscoverableSubagent,
-        current_app: &AgentType,
+        initial_app: &AgentType,
     ) -> Result<InstalledSubagent, AppError> {
-        Self::ensure_app_supported_for_target(target, current_app)?;
+        Self::ensure_app_supported_for_target(target, initial_app)?;
         ProjectService::resolve_scope_target(db, target)?;
         let ssot_dir = Self::get_ssot_dir_for_target(db, target)?;
 
@@ -895,7 +895,7 @@ impl SubagentService {
                 target,
                 subagent,
                 &install_name,
-                current_app,
+                initial_app,
             )? {
                 return Ok(existing);
             }
@@ -939,7 +939,7 @@ impl SubagentService {
                     Some("checkRepoUrl"),
                 )));
             }
-            Self::validate_project_subagent_file_for_app(target, &canonical_source, current_app)?;
+            Self::validate_project_subagent_file_for_app(target, &canonical_source, initial_app)?;
 
             downloaded_source = Some((temp_guard, canonical_source));
 
@@ -959,7 +959,7 @@ impl SubagentService {
             target,
             subagent,
             &install_name,
-            current_app,
+            initial_app,
             repo_branch,
             downloaded_source
                 .as_ref()
@@ -974,19 +974,19 @@ impl SubagentService {
         target: &ScopeTarget,
         subagent: &DiscoverableSubagent,
         install_name: &str,
-        current_app: &AgentType,
+        initial_app: &AgentType,
         repo_branch: String,
         downloaded_source: Option<&Path>,
     ) -> Result<InstalledSubagent, AppError> {
         let _state_guard = subagent_state_write_guard();
-        Self::ensure_app_supported_for_target(target, current_app)?;
+        Self::ensure_app_supported_for_target(target, initial_app)?;
         ProjectService::resolve_scope_target(db, target)?;
         if let Some(existing) = Self::reuse_existing_install_for_target(
             db,
             target,
             subagent,
             install_name,
-            current_app,
+            initial_app,
         )? {
             return Ok(existing);
         }
@@ -1032,7 +1032,7 @@ impl SubagentService {
             repo_name: Some(subagent.repo_name.clone()),
             repo_branch: Some(repo_branch),
             readme_url,
-            apps: SubagentApps::only(current_app),
+            apps: SubagentApps::only(initial_app),
             installed_at: chrono::Utc::now().timestamp(),
             content_hash,
             updated_at: 0,
@@ -1043,14 +1043,14 @@ impl SubagentService {
             db,
             target,
             &installed_subagent,
-            current_app,
+            initial_app,
             Some(&dest_file),
         )?;
 
         log::info!(
             "Subagent {} 安装成功，已启用 {}",
             installed_subagent.name,
-            current_app.as_str()
+            initial_app.as_str()
         );
 
         Ok(installed_subagent)
@@ -2349,8 +2349,6 @@ impl SubagentService {
     pub fn restore_from_backup(
         db: &Arc<Database>,
         backup_id: &str,
-        // 恢复以备份中记录的启用状态为准；current_app 仅保留以维持命令层签名
-        _current_app: &AgentType,
     ) -> Result<InstalledSubagent, AppError> {
         Self::restore_from_backup_for_target(db, backup_id, &ScopeTarget::Global)
     }
@@ -3463,7 +3461,7 @@ mod tests {
 
     #[test]
     #[serial]
-    fn install_same_repo_reuses_and_enables_current_app() {
+    fn install_same_repo_reuses_and_enables_initial_app() {
         let tmp = tempdir().unwrap();
         let _guard = TestHomeGuard::set(tmp.path());
 
@@ -3515,6 +3513,8 @@ mod tests {
         .expect("returns existing");
         assert!(updated.apps.claude_code);
         assert!(updated.apps.codex);
+        assert!(!updated.apps.gemini_cli);
+        assert!(!updated.apps.opencode);
     }
 
     #[test]
@@ -3823,8 +3823,7 @@ mod tests {
             .unwrap()
             .to_string();
 
-        let restored = SubagentService::restore_from_backup(&db, &backup_id, &AgentType::Codex)
-            .expect("restore");
+        let restored = SubagentService::restore_from_backup(&db, &backup_id).expect("restore");
         assert_eq!(restored.directory, "restore-agent");
         // 恢复以备份中记录的启用标志为准，而非仅 UI 当前 Agent
         assert!(restored.apps.claude_code);
@@ -3869,9 +3868,7 @@ mod tests {
             .unwrap()
             .to_string();
 
-        let restored =
-            SubagentService::restore_from_backup(&db, &backup_id, &AgentType::ClaudeCode)
-                .expect("restore");
+        let restored = SubagentService::restore_from_backup(&db, &backup_id).expect("restore");
 
         // apps 标志与卸载前一致
         assert!(restored.apps.claude_code);
@@ -3936,7 +3933,7 @@ mod tests {
         )
         .unwrap();
 
-        SubagentService::restore_from_backup(&db, &backup_id, &AgentType::ClaudeCode)
+        SubagentService::restore_from_backup(&db, &backup_id)
             .expect_err("第二个 Agent 同步失败必须返回错误");
 
         // 本次恢复创建的前序投影必须被移除

@@ -58,11 +58,11 @@ pub async fn discover_available_skills(
 pub async fn install_skill(
     skill: DiscoverableSkill,
     target: ScopeTarget,
-    current_app: String,
+    initial_app: String,
     service: tauri::State<'_, SkillServiceState>,
     app_state: tauri::State<'_, AppState>,
 ) -> Result<InstalledSkill, String> {
-    let app_type = parse_app_type(&current_app)?;
+    let app_type = parse_app_type(&initial_app)?;
 
     service
         .0
@@ -166,11 +166,11 @@ pub fn import_skills_from_apps(
 #[tauri::command]
 pub fn install_skills_from_zip(
     file_path: String,
-    current_app: String,
+    initial_app: String,
     target: ScopeTarget,
     app_state: tauri::State<'_, AppState>,
 ) -> Result<Vec<InstalledSkill>, String> {
-    let app_type = parse_app_type(&current_app)?;
+    let app_type = parse_app_type(&initial_app)?;
     let path = Path::new(&file_path);
 
     SkillService::install_from_zip_for_target(&app_state.db, &target, path, &app_type)

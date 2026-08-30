@@ -9,36 +9,29 @@ import type {
 } from '../types';
 
 const keys = {
-  installed: (context: ConfigContext, activeApp: AgentType) =>
-    ['subagents', 'installed', context, activeApp] as const,
-  discoverable: (target: ScopeTarget | null, activeApp: AgentType) =>
-    ['subagents', 'discoverable', target, activeApp] as const,
+  installed: (context: ConfigContext) => ['subagents', 'installed', context] as const,
+  discoverable: (target: ScopeTarget | null) => ['subagents', 'discoverable', target] as const,
   repos: ['subagents', 'repos'] as const,
-  backups: (target: ScopeTarget | null, activeApp: AgentType) =>
-    ['subagents', 'backups', target, activeApp] as const,
-  updates: (target: ScopeTarget | null, activeApp: AgentType) =>
-    ['subagents', 'updates', target, activeApp] as const,
+  backups: (target: ScopeTarget | null) => ['subagents', 'backups', target] as const,
+  updates: (target: ScopeTarget | null) => ['subagents', 'updates', target] as const,
 };
 
 function invalidateSubagentQueries(queryClient: ReturnType<typeof useQueryClient>) {
   return queryClient.invalidateQueries({ queryKey: ['subagents'] });
 }
 
-export function useInstalledSubagents(
-  context: ConfigContext = { kind: 'global' },
-  activeApp: AgentType = 'claude-code',
-) {
+export function useInstalledSubagents(context: ConfigContext = { kind: 'global' }) {
   return useQuery({
-    queryKey: keys.installed(context, activeApp),
+    queryKey: keys.installed(context),
     queryFn: () => subagentsApi.getInstalledSubagents(context),
     staleTime: Infinity,
     placeholderData: keepPreviousData,
   });
 }
 
-export function useDiscoverableSubagents(target: ScopeTarget | null, activeApp: AgentType) {
+export function useDiscoverableSubagents(target: ScopeTarget | null) {
   return useQuery({
-    queryKey: keys.discoverable(target, activeApp),
+    queryKey: keys.discoverable(target),
     queryFn: (): Promise<DiscoverableSubagent[]> =>
       target === null ? Promise.resolve([]) : subagentsApi.discoverAvailableSubagents(target),
     enabled: target !== null,
@@ -54,18 +47,18 @@ export function useSubagentRepos() {
   });
 }
 
-export function useSubagentBackups(target: ScopeTarget | null, activeApp: AgentType) {
+export function useSubagentBackups(target: ScopeTarget | null) {
   return useQuery({
-    queryKey: keys.backups(target, activeApp),
+    queryKey: keys.backups(target),
     queryFn: () =>
       target === null ? Promise.resolve([]) : subagentsApi.getSubagentBackups(target),
     enabled: false,
   });
 }
 
-export function useCheckSubagentUpdates(target: ScopeTarget | null, activeApp: AgentType) {
+export function useCheckSubagentUpdates(target: ScopeTarget | null) {
   return useQuery({
-    queryKey: keys.updates(target, activeApp),
+    queryKey: keys.updates(target),
     queryFn: () =>
       target === null ? Promise.resolve([]) : subagentsApi.checkSubagentUpdates(target),
     enabled: false,
@@ -79,12 +72,12 @@ export function useInstallSubagent() {
     mutationFn: ({
       subagent,
       target,
-      currentApp,
+      initialApp,
     }: {
       subagent: DiscoverableSubagent;
       target: ScopeTarget;
-      currentApp: AgentType;
-    }) => subagentsApi.installSubagent(subagent, target, currentApp),
+      initialApp: AgentType;
+    }) => subagentsApi.installSubagent(subagent, target, initialApp),
     onSettled: () => invalidateSubagentQueries(queryClient),
   });
 }

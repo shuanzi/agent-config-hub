@@ -24,9 +24,9 @@ export async function discoverAvailableSubagents(
 export async function installSubagent(
   subagent: DiscoverableSubagent,
   target: ScopeTarget,
-  currentApp: AgentType,
+  initialApp: AgentType,
 ): Promise<InstalledSubagent> {
-  return invoke('install_subagent', { subagent, target, currentApp });
+  return invoke('install_subagent', { subagent, target, initialApp });
 }
 
 export async function uninstallSubagent(

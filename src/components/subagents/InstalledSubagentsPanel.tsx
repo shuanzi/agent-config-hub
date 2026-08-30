@@ -33,7 +33,6 @@ import { FocusedDialog } from '../workbench/FocusedDialog';
 import './subagents.css';
 
 interface InstalledSubagentsPanelProps {
-  activeApp: AgentType;
   context: ConfigContext;
   projects: readonly ProjectSummary[];
 }
@@ -347,11 +346,7 @@ function BackupsDialog({
   );
 }
 
-export function InstalledSubagentsPanel({
-  activeApp,
-  context,
-  projects,
-}: InstalledSubagentsPanelProps) {
+export function InstalledSubagentsPanel({ context, projects }: InstalledSubagentsPanelProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [notice, setNotice] = useState<Notice>(null);
   const [backupsDialogOpen, setBackupsDialogOpen] = useState(false);
@@ -373,16 +368,16 @@ export function InstalledSubagentsPanel({
     data: subagents,
     isLoading,
     error: installedSubagentsError,
-  } = useInstalledSubagents(context, activeApp);
+  } = useInstalledSubagents(context);
   const toggleAppMutation = useToggleSubagentApp();
   const uninstallMutation = useUninstallSubagent();
   const {
     data: updates,
     refetch: checkUpdates,
     isFetching: isCheckingUpdates,
-  } = useCheckSubagentUpdates(operationTarget, activeApp);
+  } = useCheckSubagentUpdates(operationTarget);
   const updateSubagentMutation = useUpdateSubagent();
-  const { data: backups, refetch: refetchBackups } = useSubagentBackups(operationTarget, activeApp);
+  const { data: backups, refetch: refetchBackups } = useSubagentBackups(operationTarget);
   const restoreMutation = useRestoreSubagentBackup();
   const deleteBackupMutation = useDeleteSubagentBackup();
 

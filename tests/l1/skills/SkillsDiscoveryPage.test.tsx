@@ -70,8 +70,9 @@ function renderPage(
   Page: Awaited<ReturnType<typeof loadPage>>,
   queryClient: QueryClient,
   context: ConfigContext = globalContext,
+  projectList: readonly ProjectSummary[] = projects,
 ) {
-  return render(<Page activeApp="claude-code" context={context} projects={projects} />, {
+  return render(<Page context={context} projects={projectList} />, {
     wrapper: createWrapper(queryClient),
   });
 }
@@ -102,11 +103,14 @@ describe('SkillsDiscoveryPage 配置目标合同', () => {
       target: { value: 'global' },
     });
     fireEvent.click(await screen.findByRole('button', { name: '安装' }));
+    const globalInstallDialog = await screen.findByRole('dialog', { name: '安装 TestSkill' });
+    fireEvent.click(within(globalInstallDialog).getByRole('radio', { name: 'Codex' }));
+    fireEvent.click(within(globalInstallDialog).getByRole('button', { name: '确认安装' }));
     await waitFor(() =>
       expect(mockApi.installSkill).toHaveBeenCalledWith(
         expect.objectContaining({ key: 'a/b:skill' }),
         globalTarget,
-        'claude-code',
+        'codex',
       ),
     );
 
@@ -114,11 +118,14 @@ describe('SkillsDiscoveryPage 配置目标合同', () => {
       target: { value: 'project:project-alpha' },
     });
     fireEvent.click(await screen.findByRole('button', { name: '安装' }));
+    const projectInstallDialog = await screen.findByRole('dialog', { name: '安装 TestSkill' });
+    fireEvent.click(within(projectInstallDialog).getByRole('radio', { name: 'OpenCode' }));
+    fireEvent.click(within(projectInstallDialog).getByRole('button', { name: '确认安装' }));
     await waitFor(() =>
       expect(mockApi.installSkill).toHaveBeenLastCalledWith(
         expect.objectContaining({ key: 'a/b:skill' }),
         projectTarget,
-        'claude-code',
+        'opencode',
       ),
     );
   });
@@ -185,6 +192,67 @@ describe('SkillsDiscoveryPage 配置目标合同', () => {
     expect((await screen.findByRole('alert')).textContent).toContain('操作失败，请稍后重试。');
     expect(screen.getByRole('button', { name: '卸载' })).toBeTruthy();
   });
+
+  it('安装失败在对话框内提示并保留 Agent 选择以便重试', async () => {
+    mockApi.installSkill.mockRejectedValueOnce(new Error('boom'));
+    const Page = await loadPage();
+    renderPage(Page, queryClient);
+
+    fireEvent.click(await screen.findByRole('button', { name: '安装' }));
+    const dialog = await screen.findByRole('dialog', { name: '安装 TestSkill' });
+    const codexRadio = within(dialog).getByRole('radio', { name: 'Codex' });
+    fireEvent.click(codexRadio);
+    fireEvent.click(within(dialog).getByRole('button', { name: '确认安装' }));
+
+    expect((await within(dialog).findByRole('alert')).textContent).toContain(
+      '操作失败，请稍后重试。',
+    );
+    expect(codexRadio).toHaveProperty('checked', true);
+    const retryButton = within(dialog).getByRole('button', { name: '确认安装' });
+    expect(retryButton).toHaveProperty('disabled', false);
+
+    fireEvent.click(retryButton);
+    await waitFor(() => expect(mockApi.installSkill).toHaveBeenCalledTimes(2));
+    expect(mockApi.installSkill).toHaveBeenLastCalledWith(
+      expect.objectContaining({ key: 'a/b:skill' }),
+      globalTarget,
+      'codex',
+    );
+  });
+
+  it('项目 displayName 重名时发现目标和安装对话框用 rootPath 消歧', async () => {
+    const duplicateProjects: readonly ProjectSummary[] = [
+      { projectId: 'project-alpha', displayName: '同名项目', rootPath: '/workspaces/alpha' },
+      { projectId: 'project-beta', displayName: '同名项目', rootPath: '/workspaces/beta' },
+    ];
+    const betaTarget: ScopeTarget = { scope: 'project', projectId: 'project-beta' };
+    const Page = await loadPage();
+    renderPage(Page, queryClient, allContext, duplicateProjects);
+
+    const selector = await screen.findByLabelText('选择 Skill 发现目标');
+    expect(
+      screen.getByRole('option', { name: '项目配置：同名项目（/workspaces/alpha）' }),
+    ).toBeTruthy();
+    expect(
+      screen.getByRole('option', { name: '项目配置：同名项目（/workspaces/beta）' }),
+    ).toBeTruthy();
+    fireEvent.change(selector, { target: { value: 'project:project-beta' } });
+    fireEvent.click(await screen.findByRole('button', { name: '安装' }));
+    const dialog = await screen.findByRole('dialog', { name: '安装 TestSkill' });
+    expect(
+      within(dialog).getByText('安装目标：项目配置：同名项目（/workspaces/beta）'),
+    ).toBeTruthy();
+    fireEvent.click(within(dialog).getByRole('radio', { name: 'OpenCode' }));
+    fireEvent.click(within(dialog).getByRole('button', { name: '确认安装' }));
+
+    await waitFor(() =>
+      expect(mockApi.installSkill).toHaveBeenCalledWith(
+        expect.objectContaining({ key: 'a/b:skill' }),
+        betaTarget,
+        'opencode',
+      ),
+    );
+  });
 });
 
 describe('SkillsDiscoveryPage 列表与上下文切换', () => {
@@ -215,7 +283,7 @@ describe('SkillsDiscoveryPage 列表与上下文切换', () => {
     fireEvent.change(screen.getByLabelText('按安装状态筛选'), { target: { value: 'all' } });
     fireEvent.click(await screen.findByRole('heading', { name: 'TestSkill' }));
     await screen.findByLabelText('TestSkill 详情');
-    rerender(<Page activeApp="claude-code" context={allContext} projects={projects} />);
+    rerender(<Page context={allContext} projects={projects} />);
 
     await waitFor(() => expect(screen.queryByLabelText('TestSkill 详情')).toBeNull());
     expect(screen.getByText('先选择发现目标')).toBeTruthy();
@@ -234,6 +302,23 @@ describe('SkillsDiscoveryPage 列表与上下文切换', () => {
     fireEvent.click(backButton);
     await waitFor(() =>
       expect(document.activeElement).toBe(screen.getByRole('button', { name: /TestSkill/ })),
+    );
+  });
+
+  it('安装对话框展示四个真实 Agent，选择前不能确认', async () => {
+    const Page = await loadPage();
+    renderPage(Page, queryClient);
+
+    fireEvent.click(await screen.findByRole('button', { name: '安装' }));
+    const dialog = await screen.findByRole('dialog', { name: '安装 TestSkill' });
+    expect(within(dialog).getAllByRole('radio')).toHaveLength(4);
+    expect(within(dialog).getByRole('radio', { name: 'Claude Code' })).toBeTruthy();
+    expect(within(dialog).getByRole('radio', { name: 'Codex' })).toBeTruthy();
+    expect(within(dialog).getByRole('radio', { name: 'Gemini CLI' })).toBeTruthy();
+    expect(within(dialog).getByRole('radio', { name: 'OpenCode' })).toBeTruthy();
+    expect(within(dialog).getByRole('button', { name: '确认安装' })).toHaveProperty(
+      'disabled',
+      true,
     );
   });
 });

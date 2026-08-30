@@ -56,6 +56,18 @@ interface InstructionDocumentFixture {
   updatedAt?: number;
 }
 
+function requireInitialApp(value: unknown): AgentType {
+  if (
+    value === 'claude-code' ||
+    value === 'codex' ||
+    value === 'gemini-cli' ||
+    value === 'opencode'
+  ) {
+    return value;
+  }
+  throw new Error('INVALID_APP_TYPE');
+}
+
 function createInstalledSkill(
   skill: DiscoverableSkill,
   app: AgentType,
@@ -455,21 +467,21 @@ export function setupMockInvoke() {
       case 'install_skill': {
         const skill = args?.skill as DiscoverableSkill;
         const target = args?.target as ScopeTarget;
-        const currentApp = (args?.currentApp as AgentType) ?? 'claude-code';
+        const initialApp = requireInitialApp(args?.initialApp);
         const existingIndex = state.installed.findIndex(
           (installed) => installed.id === skill.key && sameTarget(installed.target, target),
         );
         if (existingIndex >= 0) {
           const existing = state.installed[existingIndex];
           existing.apps = {
-            claudeCode: existing.apps.claudeCode || currentApp === 'claude-code',
-            codex: existing.apps.codex || currentApp === 'codex',
-            geminiCli: existing.apps.geminiCli || currentApp === 'gemini-cli',
-            opencode: existing.apps.opencode || currentApp === 'opencode',
+            claudeCode: existing.apps.claudeCode || initialApp === 'claude-code',
+            codex: existing.apps.codex || initialApp === 'codex',
+            geminiCli: existing.apps.geminiCli || initialApp === 'gemini-cli',
+            opencode: existing.apps.opencode || initialApp === 'opencode',
           };
           return existing;
         }
-        const installed = createInstalledSkill(skill, currentApp, target);
+        const installed = createInstalledSkill(skill, initialApp, target);
         state.installed.push(installed);
         return installed;
       }
@@ -518,19 +530,13 @@ export function setupMockInvoke() {
       case 'restore_skill_backup': {
         const backupId = args?.backupId as string;
         const target = args?.target as ScopeTarget;
-        const currentApp = (args?.currentApp as AgentType) ?? 'claude-code';
         const backup = state.backups.find(
           (entry) => entry.backupId === backupId && sameTarget(entry.skill.target, target),
         );
         if (backup === undefined) throw new Error('Backup not found');
         const restored: InstalledSkill = {
           ...backup.skill,
-          apps: {
-            claudeCode: currentApp === 'claude-code',
-            codex: currentApp === 'codex',
-            geminiCli: currentApp === 'gemini-cli',
-            opencode: currentApp === 'opencode',
-          },
+          apps: { ...backup.skill.apps },
         };
         state.installed.push(restored);
         return restored;
@@ -598,7 +604,7 @@ export function setupMockInvoke() {
 
       case 'install_skills_from_zip': {
         const filePath = args?.filePath as string;
-        const currentApp = args?.currentApp as AgentType;
+        const initialApp = requireInitialApp(args?.initialApp);
         const target = args?.target as ScopeTarget;
         const directory =
           filePath
@@ -617,7 +623,7 @@ export function setupMockInvoke() {
             repoBranch: 'local',
             installed: false,
           },
-          currentApp,
+          initialApp,
           target,
         );
         state.installed.push(installed);
@@ -665,21 +671,24 @@ export function setupMockInvoke() {
       case 'install_subagent': {
         const subagent = args?.subagent as DiscoverableSubagent;
         const target = args?.target as ScopeTarget;
-        const currentApp = (args?.currentApp as AgentType) ?? 'claude-code';
+        const initialApp = requireInitialApp(args?.initialApp);
+        if (target.scope === 'project' && initialApp === 'codex') {
+          throw new Error('UNSUPPORTED_AGENT');
+        }
         const existingIndex = state.installedSubagents.findIndex(
           (installed) => installed.id === subagent.key && sameTarget(installed.target, target),
         );
         if (existingIndex >= 0) {
           const existing = state.installedSubagents[existingIndex];
           existing.apps = {
-            claudeCode: existing.apps.claudeCode || currentApp === 'claude-code',
-            codex: existing.apps.codex || currentApp === 'codex',
-            geminiCli: existing.apps.geminiCli || currentApp === 'gemini-cli',
-            opencode: existing.apps.opencode || currentApp === 'opencode',
+            claudeCode: existing.apps.claudeCode || initialApp === 'claude-code',
+            codex: existing.apps.codex || initialApp === 'codex',
+            geminiCli: existing.apps.geminiCli || initialApp === 'gemini-cli',
+            opencode: existing.apps.opencode || initialApp === 'opencode',
           };
           return existing;
         }
-        const installed = createInstalledSubagent(subagent, currentApp, target);
+        const installed = createInstalledSubagent(subagent, initialApp, target);
         state.installedSubagents.push(installed);
         return installed;
       }
@@ -728,19 +737,13 @@ export function setupMockInvoke() {
       case 'restore_subagent_backup': {
         const backupId = args?.backupId as string;
         const target = args?.target as ScopeTarget;
-        const currentApp = (args?.currentApp as AgentType) ?? 'claude-code';
         const backup = state.subagentBackups.find(
           (entry) => entry.backupId === backupId && sameTarget(entry.subagent.target, target),
         );
         if (backup === undefined) throw new Error('Backup not found');
         const restored: InstalledSubagent = {
           ...backup.subagent,
-          apps: {
-            claudeCode: currentApp === 'claude-code',
-            codex: currentApp === 'codex',
-            geminiCli: currentApp === 'gemini-cli',
-            opencode: currentApp === 'opencode',
-          },
+          apps: { ...backup.subagent.apps },
         };
         state.installedSubagents.push(restored);
         return restored;

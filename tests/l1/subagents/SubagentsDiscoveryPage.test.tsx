@@ -72,9 +72,8 @@ function renderPage(
   Page: Awaited<ReturnType<typeof loadPage>>,
   queryClient: QueryClient,
   context: ConfigContext = globalContext,
-  activeApp: 'claude-code' | 'codex' = 'claude-code',
 ) {
-  return render(<Page activeApp={activeApp} context={context} projects={projects} />, {
+  return render(<Page context={context} projects={projects} />, {
     wrapper: createWrapper(queryClient),
   });
 }
@@ -106,11 +105,14 @@ describe('SubagentsDiscoveryPage scope contracts', () => {
     });
     fireEvent.click((await screen.findAllByRole('button', { name: /Reviewer/ }))[0]);
     fireEvent.click(await screen.findByRole('button', { name: '安装' }));
+    const globalInstallDialog = await screen.findByRole('dialog', { name: '安装 Reviewer' });
+    fireEvent.click(within(globalInstallDialog).getByRole('radio', { name: 'Gemini CLI' }));
+    fireEvent.click(within(globalInstallDialog).getByRole('button', { name: '确认安装' }));
     await waitFor(() =>
       expect(mockApi.installSubagent).toHaveBeenCalledWith(
         expect.objectContaining({ key: 'a/b:reviewer.md' }),
         globalTarget,
-        'claude-code',
+        'gemini-cli',
       ),
     );
 
@@ -119,8 +121,35 @@ describe('SubagentsDiscoveryPage scope contracts', () => {
     });
     fireEvent.click(await screen.findByRole('button', { name: /Reviewer/ }));
     fireEvent.click(await screen.findByRole('button', { name: '安装' }));
+    const projectInstallDialog = await screen.findByRole('dialog', { name: '安装 Reviewer' });
+    fireEvent.click(within(projectInstallDialog).getByRole('radio', { name: 'OpenCode' }));
+    fireEvent.click(within(projectInstallDialog).getByRole('button', { name: '确认安装' }));
     await waitFor(() =>
       expect(mockApi.installSubagent).toHaveBeenLastCalledWith(
+        expect.objectContaining({ key: 'a/b:reviewer.md' }),
+        projectTarget,
+        'opencode',
+      ),
+    );
+  });
+
+  it('项目安装对话框禁用 Codex，选择支持的 Agent 后可确认', async () => {
+    const Page = await loadPage();
+    renderPage(Page, queryClient, projectContext);
+
+    fireEvent.click(await screen.findByRole('button', { name: /Reviewer/ }));
+    fireEvent.click(await screen.findByRole('button', { name: '安装' }));
+    const dialog = await screen.findByRole('dialog', { name: '安装 Reviewer' });
+    expect(within(dialog).getAllByRole('radio')).toHaveLength(4);
+    expect(within(dialog).getByRole('radio', { name: /Codex/ })).toHaveProperty('disabled', true);
+    expect(within(dialog).getByText('项目配置不支持 Codex Subagent。')).toBeTruthy();
+    const confirm = within(dialog).getByRole('button', { name: '确认安装' });
+    expect(confirm).toHaveProperty('disabled', true);
+    fireEvent.click(within(dialog).getByRole('radio', { name: 'Claude Code' }));
+    expect(confirm).toHaveProperty('disabled', false);
+    fireEvent.click(confirm);
+    await waitFor(() =>
+      expect(mockApi.installSubagent).toHaveBeenCalledWith(
         expect.objectContaining({ key: 'a/b:reviewer.md' }),
         projectTarget,
         'claude-code',
@@ -128,16 +157,32 @@ describe('SubagentsDiscoveryPage scope contracts', () => {
     );
   });
 
-  it('项目级 Codex 安装入口禁用且不写入', async () => {
+  it('安装失败在对话框内提示并保留 Agent 选择以便重试', async () => {
+    mockApi.installSubagent.mockRejectedValueOnce(new Error('boom'));
     const Page = await loadPage();
-    renderPage(Page, queryClient, projectContext, 'codex');
+    renderPage(Page, queryClient);
 
     fireEvent.click(await screen.findByRole('button', { name: /Reviewer/ }));
-    const install = await screen.findByRole('button', { name: '安装' });
-    expect(install).toHaveProperty('disabled', true);
-    fireEvent.click(install);
-    expect(mockApi.installSubagent).not.toHaveBeenCalled();
-    expect(screen.getByRole('status').textContent).toContain('不支持 Codex 项目级 Subagent');
+    fireEvent.click(await screen.findByRole('button', { name: '安装' }));
+    const dialog = await screen.findByRole('dialog', { name: '安装 Reviewer' });
+    const geminiRadio = within(dialog).getByRole('radio', { name: 'Gemini CLI' });
+    fireEvent.click(geminiRadio);
+    fireEvent.click(within(dialog).getByRole('button', { name: '确认安装' }));
+
+    expect((await within(dialog).findByRole('alert')).textContent).toContain(
+      '操作失败，请稍后重试。',
+    );
+    expect(geminiRadio).toHaveProperty('checked', true);
+    const retryButton = within(dialog).getByRole('button', { name: '确认安装' });
+    expect(retryButton).toHaveProperty('disabled', false);
+
+    fireEvent.click(retryButton);
+    await waitFor(() => expect(mockApi.installSubagent).toHaveBeenCalledTimes(2));
+    expect(mockApi.installSubagent).toHaveBeenLastCalledWith(
+      expect.objectContaining({ key: 'a/b:reviewer.md' }),
+      globalTarget,
+      'gemini-cli',
+    );
   });
 
   it('卸载发现项从已安装记录派生 target', async () => {
@@ -195,7 +240,7 @@ describe('SubagentsDiscoveryPage scope contracts', () => {
     expect((await screen.findByLabelText('Reviewer 详情')).dataset.subagentDetailKey).toBe(
       'other/repo:reviewer.md',
     );
-    rerender(<Page activeApp="claude-code" context={allContext} projects={projects} />);
+    rerender(<Page context={allContext} projects={projects} />);
 
     await waitFor(() => expect(screen.queryByLabelText('Reviewer 详情')).toBeNull());
     expect(screen.getByText('先选择发现目标')).toBeTruthy();

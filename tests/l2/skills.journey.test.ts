@@ -39,6 +39,10 @@ describe('Skill management journey', () => {
     const installButton = await discoveryDetail.$(".//button[normalize-space()='安装']");
     await installButton.waitForDisplayed();
     await installButton.click();
+    const installDialog = await $("[role='dialog']");
+    await installDialog.waitForDisplayed();
+    await installDialog.$(".//input[@type='radio' and @value='codex']").click();
+    await installDialog.$(".//button[normalize-space()='确认安装']").click();
 
     // 等待安装完成并切换回已安装视图
     await browser.waitUntil(async () => (await (await $$('.spin')).length) === 0);
@@ -95,6 +99,25 @@ describe('Skill management journey', () => {
     await waitForStable();
 
     const installedRow = await $("[data-skill-id='anthropics/skills:testing-strategy']");
+    const actionBounds = await browser.execute(() => {
+      const actionCell = document.querySelector<HTMLElement>(
+        "[data-skill-id='anthropics/skills:testing-strategy'] .skill-row-actions",
+      );
+      if (actionCell === null) return { cellLeft: Number.NaN, cellRight: Number.NaN, controls: [] };
+      const cellRect = actionCell.getBoundingClientRect();
+      const controls = Array.from(actionCell.querySelectorAll<HTMLElement>('button')).map(
+        (control) => {
+          const rect = control.getBoundingClientRect();
+          return { left: rect.left, right: rect.right };
+        },
+      );
+      return { cellLeft: cellRect.left, cellRight: cellRect.right, controls };
+    });
+    expect(actionBounds.controls.length).toBe(2);
+    for (const control of actionBounds.controls) {
+      expect(control.left).toBeGreaterThanOrEqual(actionBounds.cellLeft - 1);
+      expect(control.right).toBeLessThanOrEqual(actionBounds.cellRight + 1);
+    }
     await installedRow.$('.skill-row-select').click();
     const detail = await $("[data-skill-detail='anthropics/skills:testing-strategy']");
     await detail.waitForDisplayed();

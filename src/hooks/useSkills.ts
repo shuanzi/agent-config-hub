@@ -1,40 +1,39 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import * as skillsApi from '../lib/api/skills';
-import type { AgentType, ConfigContext, DiscoverableSkill, ScopeTarget, SkillRepo } from '../types';
+import type {
+  AgentType,
+  ConfigContext,
+  DiscoverableSkill,
+  ScopeTarget,
+  SkillRepo,
+  SkillUpdateInfo,
+} from '../types';
 
 const keys = {
-  installed: (context: ConfigContext, activeApp: AgentType) =>
-    ['skills', 'installed', context, activeApp] as const,
-  discoverable: (target: ScopeTarget | null, activeApp: AgentType) =>
-    ['skills', 'discoverable', target, activeApp] as const,
+  installed: (context: ConfigContext) => ['skills', 'installed', context] as const,
+  discoverable: (target: ScopeTarget | null) => ['skills', 'discoverable', target] as const,
   repos: ['skills', 'repos'] as const,
-  backups: (target: ScopeTarget | null, activeApp: AgentType) =>
-    ['skills', 'backups', target, activeApp] as const,
-  unmanaged: (target: ScopeTarget | null, activeApp: AgentType) =>
-    ['skills', 'unmanaged', target, activeApp] as const,
-  updates: (target: ScopeTarget | null, activeApp: AgentType) =>
-    ['skills', 'updates', target, activeApp] as const,
+  backups: (target: ScopeTarget | null) => ['skills', 'backups', target] as const,
+  unmanaged: (target: ScopeTarget | null) => ['skills', 'unmanaged', target] as const,
+  updates: (target: ScopeTarget | null) => ['skills', 'updates', target] as const,
 };
 
 function invalidateSkillQueries(queryClient: ReturnType<typeof useQueryClient>) {
   return queryClient.invalidateQueries({ queryKey: ['skills'] });
 }
 
-export function useInstalledSkills(
-  context: ConfigContext = { kind: 'global' },
-  activeApp: AgentType = 'claude-code',
-) {
+export function useInstalledSkills(context: ConfigContext = { kind: 'global' }) {
   return useQuery({
-    queryKey: keys.installed(context, activeApp),
+    queryKey: keys.installed(context),
     queryFn: () => skillsApi.getInstalledSkills(context),
     staleTime: Infinity,
     placeholderData: keepPreviousData,
   });
 }
 
-export function useDiscoverableSkills(target: ScopeTarget | null, activeApp: AgentType) {
+export function useDiscoverableSkills(target: ScopeTarget | null) {
   return useQuery({
-    queryKey: keys.discoverable(target, activeApp),
+    queryKey: keys.discoverable(target),
     queryFn: (): Promise<DiscoverableSkill[]> =>
       target === null ? Promise.resolve([]) : skillsApi.discoverAvailableSkills(target),
     enabled: target !== null,
@@ -50,9 +49,9 @@ export function useSkillRepos() {
   });
 }
 
-export function useSkillBackups(target: ScopeTarget | null, activeApp: AgentType) {
+export function useSkillBackups(target: ScopeTarget | null) {
   return useQuery({
-    queryKey: keys.backups(target, activeApp),
+    queryKey: keys.backups(target),
     queryFn: () => (target === null ? Promise.resolve([]) : skillsApi.getSkillBackups(target)),
     enabled: false,
   });
@@ -60,11 +59,10 @@ export function useSkillBackups(target: ScopeTarget | null, activeApp: AgentType
 
 export function useScanUnmanagedSkills(
   target: ScopeTarget | null,
-  activeApp: AgentType,
   options?: { enabled?: boolean },
 ) {
   return useQuery({
-    queryKey: keys.unmanaged(target, activeApp),
+    queryKey: keys.unmanaged(target),
     queryFn: () => (target === null ? Promise.resolve([]) : skillsApi.scanUnmanagedSkills(target)),
     enabled: target !== null && (options?.enabled ?? false),
     staleTime: 30 * 1000,
@@ -72,9 +70,9 @@ export function useScanUnmanagedSkills(
   });
 }
 
-export function useCheckSkillUpdates(target: ScopeTarget | null, activeApp: AgentType) {
+export function useCheckSkillUpdates(target: ScopeTarget | null) {
   return useQuery({
-    queryKey: keys.updates(target, activeApp),
+    queryKey: keys.updates(target),
     queryFn: () => (target === null ? Promise.resolve([]) : skillsApi.checkSkillUpdates(target)),
     enabled: false,
     staleTime: 5 * 60 * 1000,
@@ -87,12 +85,12 @@ export function useInstallSkill() {
     mutationFn: ({
       skill,
       target,
-      currentApp,
+      initialApp,
     }: {
       skill: DiscoverableSkill;
       target: ScopeTarget;
-      currentApp: AgentType;
-    }) => skillsApi.installSkill(skill, target, currentApp),
+      initialApp: AgentType;
+    }) => skillsApi.installSkill(skill, target, initialApp),
     onSettled: () => invalidateSkillQueries(queryClient),
   });
 }
@@ -129,6 +127,11 @@ export function useUpdateSkill() {
   return useMutation({
     mutationFn: ({ id, target }: { id: string; target: ScopeTarget }) =>
       skillsApi.updateSkill(id, target),
+    onSuccess: (_skill, { id, target }) => {
+      queryClient.setQueryData<SkillUpdateInfo[]>(keys.updates(target), (current) =>
+        current?.filter((update) => update.id !== id),
+      );
+    },
     onSettled: () => invalidateSkillQueries(queryClient),
   });
 }
@@ -138,13 +141,13 @@ export function useInstallSkillsFromZip() {
   return useMutation({
     mutationFn: ({
       filePath,
-      currentApp,
+      initialApp,
       target,
     }: {
       filePath: string;
-      currentApp: AgentType;
+      initialApp: AgentType;
       target: ScopeTarget;
-    }) => skillsApi.installSkillsFromZip(filePath, currentApp, target),
+    }) => skillsApi.installSkillsFromZip(filePath, initialApp, target),
     onSettled: () => invalidateSkillQueries(queryClient),
   });
 }

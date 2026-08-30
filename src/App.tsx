@@ -10,7 +10,7 @@ import {
   Trash2,
   type LucideIcon,
 } from 'lucide-react';
-import type { AgentType, ConfigContext, ProjectSummary } from './types';
+import type { ConfigContext, ProjectSummary } from './types';
 import { InstalledSkillsPanel } from './components/skills/InstalledSkillsPanel';
 import { SkillsDiscoveryPage } from './components/skills/SkillsDiscoveryPage';
 import { InstalledSubagentsPanel } from './components/subagents/InstalledSubagentsPanel';
@@ -25,7 +25,6 @@ import {
   useRemoveProject,
 } from './hooks/useProjects';
 import { FocusedDialog } from './components/workbench/FocusedDialog';
-import { agentLabels, WORKBENCH_AGENTS } from './components/workbench/AgentBrandMark';
 
 type View = 'skills' | 'instructions' | 'subagents' | 'settings';
 type SkillsSubView = 'installed' | 'discovery';
@@ -132,27 +131,6 @@ function AssetTypeRail({
         </button>
       </div>
     </aside>
-  );
-}
-
-function CompactAgentControl({
-  activeApp,
-  onSelect,
-}: {
-  activeApp: AgentType;
-  onSelect: (app: AgentType) => void;
-}) {
-  return (
-    <label className="current-agent-control">
-      <span>当前 Agent</span>
-      <select value={activeApp} onChange={(event) => onSelect(event.target.value as AgentType)}>
-        {WORKBENCH_AGENTS.map((app) => (
-          <option key={app} value={app}>
-            {agentLabels[app]}
-          </option>
-        ))}
-      </select>
-    </label>
   );
 }
 
@@ -535,7 +513,6 @@ export function App() {
   const [currentView, setCurrentView] = useState<View>('skills');
   const [skillsSubView, setSkillsSubView] = useState<SkillsSubView>('installed');
   const [subagentsSubView, setSubagentsSubView] = useState<SubagentsSubView>('installed');
-  const [activeApp, setActiveApp] = useState<AgentType>('claude-code');
   const [configContext, setConfigContext] = useState<ConfigContext>({ kind: 'all' });
   const [narrowStep, setNarrowStep] = useState<NarrowStep>('type');
   const isNarrow = useNarrowWorkbench();
@@ -673,9 +650,6 @@ export function App() {
             {isNarrow ? compactTitle : title}
           </span>
         </div>
-        {currentView !== 'instructions' && (
-          <CompactAgentControl activeApp={activeApp} onSelect={setActiveApp} />
-        )}
       </header>
 
       <div
@@ -727,16 +701,12 @@ export function App() {
                 >
                   {skillsSubView === 'installed' ? (
                     <InstalledSkillsPanel
-                      activeApp={activeApp}
                       context={selectedContext}
                       projects={projects}
+                      onOpenDiscovery={() => setSkillsSubView('discovery')}
                     />
                   ) : (
-                    <SkillsDiscoveryPage
-                      activeApp={activeApp}
-                      context={selectedContext}
-                      projects={projects}
-                    />
+                    <SkillsDiscoveryPage context={selectedContext} projects={projects} />
                   )}
                 </div>
               </div>
@@ -758,17 +728,9 @@ export function App() {
                   aria-labelledby={`subagents-${subagentsSubView}-tab`}
                 >
                   {subagentsSubView === 'installed' ? (
-                    <InstalledSubagentsPanel
-                      activeApp={activeApp}
-                      context={selectedContext}
-                      projects={projects}
-                    />
+                    <InstalledSubagentsPanel context={selectedContext} projects={projects} />
                   ) : (
-                    <SubagentsDiscoveryPage
-                      activeApp={activeApp}
-                      context={selectedContext}
-                      projects={projects}
-                    />
+                    <SubagentsDiscoveryPage context={selectedContext} projects={projects} />
                   )}
                 </div>
               </div>

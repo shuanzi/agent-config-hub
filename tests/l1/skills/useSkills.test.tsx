@@ -59,18 +59,12 @@ describe('useSkills context and target contracts', () => {
       Promise.resolve(context.kind === 'project' ? [{ id: 'project-only' }] : []),
     );
     const hooks = await loadHooks();
-    const { result: globalResult } = renderHook(
-      () => hooks.useInstalledSkills(globalContext, 'claude-code'),
-      {
-        wrapper: createWrapper(queryClient),
-      },
-    );
-    const { result: projectResult } = renderHook(
-      () => hooks.useInstalledSkills(projectContext, 'claude-code'),
-      {
-        wrapper: createWrapper(queryClient),
-      },
-    );
+    const { result: globalResult } = renderHook(() => hooks.useInstalledSkills(globalContext), {
+      wrapper: createWrapper(queryClient),
+    });
+    const { result: projectResult } = renderHook(() => hooks.useInstalledSkills(projectContext), {
+      wrapper: createWrapper(queryClient),
+    });
 
     await waitFor(() => expect(globalResult.current.isSuccess).toBe(true));
     await waitFor(() => expect(projectResult.current.isSuccess).toBe(true));
@@ -115,12 +109,9 @@ describe('useSkills context and target contracts', () => {
       .mockResolvedValue([existing[0], installed]);
     mockApi.installSkill.mockResolvedValue(installed);
     const hooks = await loadHooks();
-    const { result: queryResult } = renderHook(
-      () => hooks.useInstalledSkills(globalContext, 'claude-code'),
-      {
-        wrapper: createWrapper(queryClient),
-      },
-    );
+    const { result: queryResult } = renderHook(() => hooks.useInstalledSkills(globalContext), {
+      wrapper: createWrapper(queryClient),
+    });
 
     await waitFor(() => expect(queryResult.current.data).toEqual(existing));
 
@@ -131,7 +122,7 @@ describe('useSkills context and target contracts', () => {
       await mutationResult.current.mutateAsync({
         skill,
         target: globalTarget,
-        currentApp: 'codex',
+        initialApp: 'codex',
       });
     });
 
@@ -165,10 +156,9 @@ describe('useSkills context and target contracts', () => {
     mockApi.uninstallSkill.mockResolvedValue({ backupPath: '/tmp/bak' });
 
     const hooks = await loadHooks();
-    const { result: queryResult } = renderHook(
-      () => hooks.useInstalledSkills(globalContext, 'claude-code'),
-      { wrapper: createWrapper(queryClient) },
-    );
+    const { result: queryResult } = renderHook(() => hooks.useInstalledSkills(globalContext), {
+      wrapper: createWrapper(queryClient),
+    });
     await waitFor(() => expect(queryResult.current.data).toEqual(existing));
 
     const { result: mutationResult } = renderHook(() => hooks.useUninstallSkill(), {
