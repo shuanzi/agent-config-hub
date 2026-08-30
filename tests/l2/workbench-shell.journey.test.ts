@@ -156,8 +156,8 @@ describe('Workbench shell and visual fixture', () => {
   });
 
   it('uses a type, context, content stack below the desktop breakpoint', async () => {
-    await browser.setWindowSize(1199, 900);
-    await browser.url(ENTRY);
+    await browser.setViewport({ width: 1199, height: 900 });
+    await browser.url(`${ENTRY}?fixture=visual`);
     await waitForStable();
 
     await $("[data-workbench-rail='asset-type']").waitForDisplayed();
@@ -177,10 +177,34 @@ describe('Workbench shell and visual fixture', () => {
     await allContext.click();
     await $('.app-main-surface').waitForDisplayed();
     expect(await $("[data-workbench-rail='context']").isExisting()).toBe(false);
+    await $('.skill-table').waitForDisplayed();
+    const tableLayout = await browser.execute(() => {
+      const table = document.querySelector<HTMLElement>('.skill-table');
+      const row = document.querySelector<HTMLElement>('.skill-table .skill-row');
+      const cell = document.querySelector<HTMLElement>('.skill-table .skill-row > td');
+      const headers = Array.from(table?.querySelectorAll<HTMLElement>('th') ?? []);
+      const tableRect = table?.getBoundingClientRect();
+      return {
+        tableDisplay: table ? getComputedStyle(table).display : '',
+        rowDisplay: row ? getComputedStyle(row).display : '',
+        cellDisplay: cell ? getComputedStyle(cell).display : '',
+        headerCount: headers.length,
+        tableLeft: tableRect?.left ?? Number.NaN,
+        tableRight: tableRect?.right ?? Number.NaN,
+        viewportWidth: window.innerWidth,
+      };
+    });
+    expect(tableLayout.tableDisplay).toBe('table');
+    expect(tableLayout.rowDisplay).toBe('table-row');
+    expect(tableLayout.cellDisplay).toBe('table-cell');
+    expect(tableLayout.headerCount).toBe(5);
+    expect(tableLayout.tableLeft).toBeGreaterThanOrEqual(0);
+    expect(tableLayout.tableRight).toBeLessThanOrEqual(tableLayout.viewportWidth + 1);
+    await expectNoHorizontalOverflow();
   });
 
   it('does not overflow horizontally at 390px through the narrow navigation path', async () => {
-    await browser.setWindowSize(390, 844);
+    await browser.setViewport({ width: 390, height: 844 });
     await browser.url(`${ENTRY}?fixture=visual`);
     await waitForStable();
 
@@ -198,6 +222,28 @@ describe('Workbench shell and visual fixture', () => {
     await allContext.click();
     await $('.app-main-surface').waitForDisplayed();
     await expectNoHorizontalOverflow();
+
+    const compactTableLayout = await browser.execute(() => {
+      const table = document.querySelector<HTMLElement>('.skill-table');
+      const head = document.querySelector<HTMLElement>('.skill-table thead');
+      const row = document.querySelector<HTMLElement>('.skill-table .skill-row');
+      const rowRect = row?.getBoundingClientRect();
+      return {
+        tableDisplay: table ? getComputedStyle(table).display : '',
+        headPosition: head ? getComputedStyle(head).position : '',
+        rowDisplay: row ? getComputedStyle(row).display : '',
+        agentCount: row?.querySelectorAll("input[type='checkbox']").length ?? 0,
+        rowLeft: rowRect?.left ?? Number.NaN,
+        rowRight: rowRect?.right ?? Number.NaN,
+        viewportWidth: window.innerWidth,
+      };
+    });
+    expect(compactTableLayout.tableDisplay).toBe('block');
+    expect(compactTableLayout.headPosition).toBe('absolute');
+    expect(compactTableLayout.rowDisplay).toBe('grid');
+    expect(compactTableLayout.agentCount).toBe(4);
+    expect(compactTableLayout.rowLeft).toBeGreaterThanOrEqual(0);
+    expect(compactTableLayout.rowRight).toBeLessThanOrEqual(compactTableLayout.viewportWidth + 1);
 
     const skillRow = await $(
       "[data-skill-id='anthropics/skills:testing-strategy'] .skill-row-select",
@@ -220,7 +266,7 @@ describe('Workbench shell and visual fixture', () => {
   });
 
   it('keeps the default fixture empty and enables visual data only with its query parameter', async () => {
-    await browser.setWindowSize(1280, 900);
+    await browser.setViewport({ width: 1280, height: 900 });
     await browser.url(ENTRY);
     await waitForStable();
     expect(await $('.skill-empty h3').getText()).toContain('尚未安装');

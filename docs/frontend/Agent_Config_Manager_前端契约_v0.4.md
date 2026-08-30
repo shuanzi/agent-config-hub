@@ -1,16 +1,18 @@
 # Agent Config Manager：前端契约 v0.4
 
-> 状态：**Implemented（已实施）**
+> 状态：**Implemented（本 worktree 自动化验证通过；原生 ZIP picker 实机验收与集成待完成）**
 >
 > 日期：2026-08-26
 >
 > 上位产品基线：[`Agent_Config_Manager_MVP_产品决策基线_v0.4`](../product/Agent_Config_Manager_MVP_产品决策基线_v0.4.md)
 >
 > 正式 source of truth：OpenSpec 主规格 [`project-context`](../../openspec/specs/project-context/spec.md)、[`app-shell`](../../openspec/specs/app-shell/spec.md)、[`instruction-management`](../../openspec/specs/instruction-management/spec.md)、[`skill-management`](../../openspec/specs/skill-management/spec.md)、[`subagent-management`](../../openspec/specs/subagent-management/spec.md)
+>
+> 当前契约调整：[`explicit-initial-agent-install`](../../openspec/changes/explicit-initial-agent-install/)。该 change 在本 worktree 中实现，尚未归档或集成到主分支。
 
 ## 1. 视图与导航
 
-一级视图为 Skills（已安装／发现）、长期指令、Subagents（已安装／发现）和设置。默认入口是 Skills → 已安装，当前 Agent 默认 Claude Code。
+一级视图为 Skills（已安装／发现）、长期指令、Subagents（已安装／发现）和设置。默认入口是 Skills → 已安装。Skills 与 Subagents 的新安装在操作面板内显式选择 `initialApp`；不提供全局 Agent 默认上下文。
 
 宽屏的第二栏是配置上下文，不是 Agent rail：
 
@@ -18,14 +20,15 @@
 - `global`：全局配置；
 - `project(projectId)`：一个真实登记项目。
 
-项目显示名和路径只用于展示；选择、重新关联、移除及所有资产 target 均使用稳定 `projectId`。当前 Agent 位于 Header 紧凑控件，只影响 Skills／Subagents 的既有 Agent 语义。
+项目显示名和路径只用于展示；选择、重新关联、移除及所有资产 target 均使用稳定 `projectId`。四个一等 Agent 的状态继续显示在 Skills／Subagents 资产行中，安装初始投影由本次操作的 `initialApp` 决定。
 
 ## 2. 数据与 mutation target
 
 - `ProjectSummary`、`ConfigContext` 与 `ScopeTarget` 由 `src/types.ts` 镜像 Rust serde DTO；
-- Skills／Subagents 的列表和发现 query key 包含完整 `ConfigContext`，业务需要时继续包含当前 Agent；
-- 长期指令 query key 只包含资产类型与 `ConfigContext`，不包含当前 Agent；
+- Skills／Subagents 的列表和发现 query key 包含完整 `ConfigContext`，不依赖全局 Agent 选择；
+- 长期指令 query key 只包含资产类型与 `ConfigContext`；
 - 已存在资产的更新、卸载、toggle 与备份操作从当前 query 记录派生完整 target；
+- Skills／Subagents 的仓库发现安装与 ZIP 安装必须在提交前提供有效 `initialApp`；前端请求使用 `initialApp`、Tauri/Rust 请求使用 `initial_app`；新记录默认只启用该 Agent，local import 继续使用导入面板内的显式 Agent 选择；
 - “全部”中的新安装、ZIP 导入、未接管导入等操作必须先选择 global 或具体 project，不默认 global；
 - mutation 成功后失效该资产类型受影响的全部 context；项目 registry 变更同时失效项目列表。
 
@@ -35,7 +38,7 @@
 
 ### 3.1 Skills
 
-列表使用名称／状态、来源或路径、四 Agent 状态三列紧凑行。详情和列表数据都从当前 query 结果派生；筛选、刷新或 context 变化导致记录消失时清空选择。项目目标操作始终传入行记录的 target。
+已安装列表使用原生五列表格：Skill 名称／描述／更新状态、真实来源、完整 ownership 目标、四 Agent 状态、行操作。`all` 按 global 和具体项目分组；项目上下文区分 project-owned 与 global-applicable；同名项目以 registry 的真实 `rootPath` 消歧。详情和列表数据都从当前 query 结果派生；筛选、刷新或 context 变化导致记录消失时清空选择。项目目标操作始终传入行记录的完整 target，不去重、不复制、不 retarget。
 
 ### 3.2 长期指令
 
@@ -55,4 +58,4 @@
 
 ## 5. 明确不引入
 
-前端不引入通用资产业务抽象、全局状态库、假项目数据、旧 Demo stage 状态机、Adapter/provenance、全局搜索、跨 Agent 转换或事务式 prepare/apply 语义。
+前端不引入全局 Agent 选择状态、通用资产业务抽象、全局状态库、假项目数据、旧 Demo stage 状态机、Adapter/provenance、全局搜索、跨 Agent 转换或事务式 prepare/apply 语义。

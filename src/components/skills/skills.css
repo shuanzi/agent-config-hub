@@ -910,3 +910,284 @@
     width: 100%;
   }
 }
+
+/* Installed Skills use a semantic table. These rules intentionally follow the legacy row media
+   rules so their grid declarations cannot replace the table formatting context. */
+.skill-scope-groups {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+}
+
+.skill-scope-group {
+  min-width: 0;
+}
+
+.skill-scope-group-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0 2px 6px;
+  color: var(--wb-ink);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.skill-scope-group-heading > span {
+  color: var(--wb-faint);
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+}
+
+.skill-table {
+  display: table;
+  width: 100%;
+  table-layout: fixed;
+  border-collapse: collapse;
+}
+
+.skill-table thead {
+  display: table-header-group;
+}
+
+.skill-table th {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--wb-line);
+  color: var(--wb-faint);
+  background: var(--wb-panel-muted);
+  font-size: 11px;
+  font-weight: 600;
+  text-align: left;
+}
+
+.skill-table th:nth-child(1) {
+  width: 29%;
+}
+
+.skill-table th:nth-child(2) {
+  width: 20%;
+}
+
+.skill-table th:nth-child(3) {
+  width: 16%;
+}
+
+.skill-table th:nth-child(4) {
+  width: 25%;
+}
+
+.skill-table th:nth-child(5) {
+  width: 110px;
+}
+
+.skill-table .skill-row {
+  display: table-row;
+  min-width: 0;
+  height: 64px;
+  border: 0;
+}
+
+.skill-table .skill-row > td {
+  display: table-cell;
+  min-width: 0;
+  padding: 9px 12px;
+  overflow: hidden;
+  border-bottom: 1px solid var(--wb-line);
+  vertical-align: middle;
+}
+
+.skill-table tbody .skill-row:last-child > td {
+  border-bottom: 0;
+}
+
+.skill-table .skill-row-select {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  padding: 0;
+}
+
+.skill-table .skill-row-source {
+  display: table-cell;
+}
+
+.skill-table .skill-row-source > span {
+  display: block;
+}
+
+.skill-table .skill-row-title-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.skill-table .skill-row-title-line .skill-row-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.skill-table .skill-row-title-line .skill-update-badge {
+  flex: none;
+}
+
+.skill-table .skill-row-target,
+.skill-table .skill-row-agent-cell,
+.skill-table .skill-row-actions {
+  white-space: nowrap;
+}
+
+.skill-table .skill-target-badge {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.skill-table .skill-row-actions {
+  display: table-cell;
+  padding: 9px 10px;
+  text-align: right;
+  vertical-align: middle;
+}
+
+.initial-agent-radio-group {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.initial-agent-radio-group legend {
+  margin-bottom: 8px;
+  color: var(--wb-ink);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.initial-agent-radio-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.initial-agent-radio-options label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 34px;
+  padding: 0 9px;
+  border: 1px solid var(--wb-line-strong);
+  border-radius: 7px;
+  color: var(--wb-muted);
+  background: var(--wb-panel);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.initial-agent-radio-options label:has(input:checked) {
+  border-color: var(--wb-blue);
+  color: var(--wb-ink);
+  background: var(--wb-blue-soft);
+}
+
+.initial-agent-radio-options label:has(input:focus-visible) {
+  outline: 2px solid var(--wb-blue);
+  outline-offset: 2px;
+}
+
+.initial-agent-radio-options label.is-disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.initial-agent-radio-options input {
+  margin: 0;
+  accent-color: var(--wb-blue);
+}
+
+.initial-agent-radio-description {
+  margin: 8px 0 0;
+  color: var(--wb-muted);
+  font-size: 12px;
+}
+
+@media (max-width: 420px) {
+  .skill-table {
+    display: block;
+    overflow: visible;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+  }
+
+  .skill-table thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+  }
+
+  .skill-table tbody {
+    display: grid;
+    gap: 8px;
+  }
+
+  .skill-table .skill-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      'name actions'
+      'source source'
+      'target agents';
+    min-height: 0;
+    height: auto;
+    overflow: hidden;
+    border: 1px solid var(--wb-line);
+    border-radius: 8px;
+  }
+
+  .skill-table .skill-row > td {
+    display: block;
+    padding: 6px 10px;
+    overflow: hidden;
+    border: 0;
+  }
+
+  .skill-table .skill-row-name {
+    grid-area: name;
+    padding-top: 10px;
+  }
+
+  .skill-table .skill-row-source {
+    grid-area: source;
+  }
+
+  .skill-table .skill-row-target {
+    grid-area: target;
+    padding-bottom: 10px;
+  }
+
+  .skill-table .skill-row-agent-cell {
+    grid-area: agents;
+    padding-bottom: 10px;
+    text-align: right;
+  }
+
+  .skill-table .skill-row-actions {
+    grid-area: actions;
+    padding-top: 8px;
+  }
+
+  .skill-table .skill-update-badge {
+    display: none;
+  }
+
+  .initial-agent-radio-options label {
+    flex: 1 1 130px;
+  }
+}

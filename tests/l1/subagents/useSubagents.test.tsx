@@ -56,12 +56,11 @@ describe('useSubagents context and target contracts', () => {
       Promise.resolve(context.kind === 'project' ? [{ id: 'project-only' }] : []),
     );
     const hooks = await loadHooks();
-    const { result: globalResult } = renderHook(
-      () => hooks.useInstalledSubagents(globalContext, 'claude-code'),
-      { wrapper: createWrapper(queryClient) },
-    );
+    const { result: globalResult } = renderHook(() => hooks.useInstalledSubagents(globalContext), {
+      wrapper: createWrapper(queryClient),
+    });
     const { result: projectResult } = renderHook(
-      () => hooks.useInstalledSubagents(projectContext, 'claude-code'),
+      () => hooks.useInstalledSubagents(projectContext),
       { wrapper: createWrapper(queryClient) },
     );
 
@@ -110,10 +109,9 @@ describe('useSubagents context and target contracts', () => {
     mockApi.installSubagent.mockResolvedValue(installed);
 
     const hooks = await loadHooks();
-    const { result: queryResult } = renderHook(
-      () => hooks.useInstalledSubagents(globalContext, 'claude-code'),
-      { wrapper: createWrapper(queryClient) },
-    );
+    const { result: queryResult } = renderHook(() => hooks.useInstalledSubagents(globalContext), {
+      wrapper: createWrapper(queryClient),
+    });
     await waitFor(() => expect(queryResult.current.data).toEqual(existing));
 
     const { result: mutationResult } = renderHook(() => hooks.useInstallSubagent(), {
@@ -123,7 +121,7 @@ describe('useSubagents context and target contracts', () => {
       await mutationResult.current.mutateAsync({
         subagent,
         target: globalTarget,
-        currentApp: 'codex',
+        initialApp: 'codex',
       });
     });
 
@@ -157,10 +155,9 @@ describe('useSubagents context and target contracts', () => {
     mockApi.uninstallSubagent.mockResolvedValue({ backupPath: '/tmp/bak' });
 
     const hooks = await loadHooks();
-    const { result: queryResult } = renderHook(
-      () => hooks.useInstalledSubagents(globalContext, 'claude-code'),
-      { wrapper: createWrapper(queryClient) },
-    );
+    const { result: queryResult } = renderHook(() => hooks.useInstalledSubagents(globalContext), {
+      wrapper: createWrapper(queryClient),
+    });
     await waitFor(() => expect(queryResult.current.data).toEqual(existing));
 
     const { result: mutationResult } = renderHook(() => hooks.useUninstallSubagent(), {

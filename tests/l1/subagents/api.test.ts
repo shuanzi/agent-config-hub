@@ -50,7 +50,7 @@ describe('subagents API wrappers', () => {
     expect(result).toBe(expected);
   });
 
-  it('installSubagent forwards subagent, complete target and currentApp', async () => {
+  it('installSubagent forwards subagent, complete target and initialApp', async () => {
     const target: ScopeTarget = { scope: 'project', projectId: 'project-alpha' };
     const subagent: DiscoverableSubagent = {
       key: 'a/b:foo',
@@ -75,7 +75,7 @@ describe('subagents API wrappers', () => {
     expect(mockInvoke).toHaveBeenCalledWith('install_subagent', {
       subagent,
       target,
-      currentApp: 'codex',
+      initialApp: 'codex',
     });
   });
 

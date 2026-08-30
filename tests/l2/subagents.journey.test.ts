@@ -47,6 +47,10 @@ describe('Subagent management journey', () => {
     const installButton = await discoveryDetail.$(".//button[normalize-space()='安装']");
     await installButton.waitForDisplayed();
     await installButton.click();
+    const installDialog = await $("[role='dialog']");
+    await installDialog.waitForDisplayed();
+    await installDialog.$(".//input[@type='radio' and @value='codex']").click();
+    await installDialog.$(".//button[normalize-space()='确认安装']").click();
 
     // 等待安装完成并切换回已安装视图
     await browser.waitUntil(async () => (await (await $$('.spin')).length) === 0);

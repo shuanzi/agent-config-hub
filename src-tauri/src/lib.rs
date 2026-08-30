@@ -84,6 +84,7 @@ pub fn run() {
 
     #[allow(unused_mut)]
     let mut builder = tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .manage(app_state)
         .manage(skill_service_state)
         .manage(subagent_service_state);

@@ -662,7 +662,7 @@ impl SkillService {
         target: &ScopeTarget,
         skill: &DiscoverableSkill,
         install_name: &str,
-        current_app: &AgentType,
+        initial_app: &AgentType,
     ) -> Result<Option<InstalledSkill>, AppError> {
         let existing_skills = db.get_all_installed_skills_for_target(target)?;
         for existing in existing_skills.values() {
@@ -678,24 +678,24 @@ impl SkillService {
                 // 身份，身份不同即冲突，绝不冒名启用另一来源的内容
                 if existing.id == skill.key {
                     let mut updated = existing.clone();
-                    updated.apps.set_enabled_for(current_app, true);
+                    updated.apps.set_enabled_for(initial_app, true);
                     // 先同步投影成功再落库：同步失败时 DB 保持原启用标志，
                     // 避免出现"已启用但无可用投影"的中间状态
-                    Self::sync_to_app_dir_for_target(db, target, &updated.directory, current_app)?;
+                    Self::sync_to_app_dir_for_target(db, target, &updated.directory, initial_app)?;
                     if let Err(error) = db.save_skill(&updated) {
                         // 落库失败：移除本次新建的投影，恢复到操作前状态；
                         // 操作前已启用的投影先于本次操作存在，保留不动
-                        if !existing.apps.is_enabled_for(current_app) {
+                        if !existing.apps.is_enabled_for(initial_app) {
                             if let Err(rollback_error) = Self::remove_from_app_for_target(
                                 db,
                                 target,
                                 &updated.directory,
-                                current_app,
+                                initial_app,
                             ) {
                                 log::error!(
                                     "保存 Skill {} 失败后移除 {} 投影也失败: {rollback_error}",
                                     updated.name,
-                                    current_app.as_str()
+                                    initial_app.as_str()
                                 );
                             }
                         }
@@ -704,7 +704,7 @@ impl SkillService {
                     log::info!(
                         "Skill {} 已存在，更新 {} 启用状态",
                         updated.name,
-                        current_app.as_str()
+                        initial_app.as_str()
                     );
                     return Ok(Some(updated));
                 }
@@ -777,9 +777,9 @@ impl SkillService {
         &self,
         db: &Arc<Database>,
         skill: &DiscoverableSkill,
-        current_app: &AgentType,
+        initial_app: &AgentType,
     ) -> Result<InstalledSkill, AppError> {
-        self.install_for_target(db, &ScopeTarget::Global, skill, current_app)
+        self.install_for_target(db, &ScopeTarget::Global, skill, initial_app)
             .await
     }
 
@@ -788,7 +788,7 @@ impl SkillService {
         db: &Arc<Database>,
         target: &ScopeTarget,
         skill: &DiscoverableSkill,
-        current_app: &AgentType,
+        initial_app: &AgentType,
     ) -> Result<InstalledSkill, AppError> {
         ProjectService::resolve_scope_target(db, target)?;
         let ssot_dir = Self::get_ssot_dir_for_target(db, target)?;
@@ -819,7 +819,7 @@ impl SkillService {
                 target,
                 skill,
                 &install_name,
-                current_app,
+                initial_app,
             )? {
                 return Ok(existing);
             }
@@ -892,7 +892,7 @@ impl SkillService {
             target,
             skill,
             &install_name,
-            current_app,
+            initial_app,
             repo_branch,
             resolved_doc_path,
             downloaded_source
@@ -910,14 +910,14 @@ impl SkillService {
         target: &ScopeTarget,
         skill: &DiscoverableSkill,
         install_name: &str,
-        current_app: &AgentType,
+        initial_app: &AgentType,
         repo_branch: String,
         resolved_doc_path: Option<String>,
         downloaded_source: Option<&Path>,
     ) -> Result<InstalledSkill, AppError> {
         let _state_guard = skill_state_write_guard();
         if let Some(existing) =
-            Self::reuse_existing_install_for_target(db, target, skill, install_name, current_app)?
+            Self::reuse_existing_install_for_target(db, target, skill, install_name, initial_app)?
         {
             return Ok(existing);
         }
@@ -964,7 +964,7 @@ impl SkillService {
             repo_name: Some(skill.repo_name.clone()),
             repo_branch: Some(repo_branch),
             readme_url,
-            apps: SkillApps::only(current_app),
+            apps: SkillApps::only(initial_app),
             installed_at: chrono::Utc::now().timestamp(),
             content_hash,
             updated_at: 0,
@@ -975,14 +975,14 @@ impl SkillService {
             db,
             target,
             &installed_skill,
-            current_app,
+            initial_app,
             Some(&dest),
         )?;
 
         log::info!(
             "Skill {} 安装成功，已启用 {}",
             installed_skill.name,
-            current_app.as_str()
+            initial_app.as_str()
         );
 
         Ok(installed_skill)
@@ -2013,8 +2013,6 @@ impl SkillService {
     pub fn restore_from_backup(
         db: &Arc<Database>,
         backup_id: &str,
-        // 恢复以备份中记录的启用状态为准；current_app 仅保留以维持命令层签名
-        _current_app: &AgentType,
     ) -> Result<InstalledSkill, AppError> {
         Self::restore_from_backup_for_target(db, backup_id, &ScopeTarget::Global)
     }
@@ -3700,16 +3698,16 @@ impl SkillService {
     pub fn install_from_zip(
         db: &Arc<Database>,
         zip_path: &Path,
-        current_app: &AgentType,
+        initial_app: &AgentType,
     ) -> Result<Vec<InstalledSkill>, AppError> {
-        Self::install_from_zip_for_target(db, &ScopeTarget::Global, zip_path, current_app)
+        Self::install_from_zip_for_target(db, &ScopeTarget::Global, zip_path, initial_app)
     }
 
     pub fn install_from_zip_for_target(
         db: &Arc<Database>,
         target: &ScopeTarget,
         zip_path: &Path,
-        current_app: &AgentType,
+        initial_app: &AgentType,
     ) -> Result<Vec<InstalledSkill>, AppError> {
         ProjectService::resolve_scope_target(db, target)?;
         let temp_guard = Self::extract_local_zip(zip_path)?;
@@ -3837,20 +3835,20 @@ impl SkillService {
         for entry in entries {
             let (skill_dir, meta, install_name) = match entry {
                 ZipEntry::Reuse(existing) => {
-                    if existing.apps.is_enabled_for(current_app) {
+                    if existing.apps.is_enabled_for(initial_app) {
                         installed.push(existing);
                         continue;
                     }
 
                     let mut updated = existing.clone();
-                    updated.apps.set_enabled_for(current_app, true);
-                    Self::sync_to_app_dir_for_target(db, target, &updated.directory, current_app)?;
+                    updated.apps.set_enabled_for(initial_app, true);
+                    Self::sync_to_app_dir_for_target(db, target, &updated.directory, initial_app)?;
                     if let Err(error) = db.save_skill(&updated) {
                         if let Err(rollback_error) = Self::remove_from_app_for_target(
                             db,
                             target,
                             &updated.directory,
-                            current_app,
+                            initial_app,
                         ) {
                             log::error!(
                                 "复用 ZIP Skill {} 落库失败后移除投影也失败: {rollback_error}",
@@ -3891,7 +3889,7 @@ impl SkillService {
                 repo_name: None,
                 repo_branch: None,
                 readme_url: None,
-                apps: SkillApps::only(current_app),
+                apps: SkillApps::only(initial_app),
                 installed_at: chrono::Utc::now().timestamp(),
                 content_hash,
                 updated_at: 0,
@@ -3902,14 +3900,14 @@ impl SkillService {
                 db,
                 target,
                 &skill,
-                current_app,
+                initial_app,
                 Some(&dest),
             )?;
 
             log::info!(
                 "Skill {} installed from ZIP, enabled for {:?}",
                 skill.name,
-                current_app
+                initial_app
             );
             installed.push(skill);
         }
@@ -5186,7 +5184,7 @@ mod tests {
 
     #[test]
     #[serial]
-    fn install_from_zip_creates_ssot_and_projection() {
+    fn install_from_zip_uses_initial_app_for_projection() {
         let tmp = tempdir().unwrap();
         let _guard = TestHomeGuard::set(tmp.path());
 
@@ -5209,6 +5207,9 @@ mod tests {
         assert_eq!(installed.len(), 1);
         assert_eq!(installed[0].name, "My Skill");
         assert!(installed[0].apps.claude_code);
+        assert!(!installed[0].apps.codex);
+        assert!(!installed[0].apps.gemini_cli);
+        assert!(!installed[0].apps.opencode);
 
         let ssot = SkillService::get_ssot_dir().unwrap().join("my-skill");
         assert!(ssot.join("SKILL.md").exists());
@@ -5330,7 +5331,7 @@ mod tests {
 
     #[test]
     #[serial]
-    fn install_same_repo_reuses_and_enables_current_app() {
+    fn install_same_repo_reuses_and_enables_initial_app() {
         let tmp = tempdir().unwrap();
         let _guard = TestHomeGuard::set(tmp.path());
 
@@ -5380,6 +5381,8 @@ mod tests {
         .expect("returns existing");
         assert!(updated.apps.claude_code);
         assert!(updated.apps.codex);
+        assert!(!updated.apps.gemini_cli);
+        assert!(!updated.apps.opencode);
     }
 
     #[test]
@@ -5716,9 +5719,7 @@ mod tests {
             .unwrap()
             .to_string();
 
-        // current_app 与备份启用状态不同：恢复以备份中记录的启用标志为准
-        let restored =
-            SkillService::restore_from_backup(&db, &backup_id, &AgentType::Codex).expect("restore");
+        let restored = SkillService::restore_from_backup(&db, &backup_id).expect("restore");
         assert_eq!(restored.directory, "restore-skill");
         assert!(restored.apps.claude_code);
         assert!(!restored.apps.codex);
@@ -5774,8 +5775,7 @@ mod tests {
             .unwrap()
             .to_string();
 
-        let restored = SkillService::restore_from_backup(&db, &backup_id, &AgentType::ClaudeCode)
-            .expect("restore");
+        let restored = SkillService::restore_from_backup(&db, &backup_id).expect("restore");
 
         // apps 标志与卸载前一致
         assert!(restored.apps.claude_code);
@@ -6702,7 +6702,7 @@ mod tests {
         )
         .unwrap();
 
-        SkillService::restore_from_backup(&db, &backup_id, &AgentType::ClaudeCode)
+        SkillService::restore_from_backup(&db, &backup_id)
             .expect_err("第二个 Agent 同步失败必须返回错误");
 
         // 本次恢复创建的前序投影必须被移除

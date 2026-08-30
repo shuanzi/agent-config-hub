@@ -9,7 +9,7 @@ export type SkillCardSkill = DiscoverableSkill & {
 
 interface SkillCardProps {
   skill: SkillCardSkill;
-  onInstall: (key: string) => Promise<void>;
+  onInstall: (key: string) => void | Promise<void>;
   onUninstall: (key: string) => void;
   onSelect: (key: string) => void;
   selected?: boolean;
@@ -40,6 +40,7 @@ export function SkillCard({
 
   return (
     <article
+      role="listitem"
       className={selected ? 'skill-row skill-card is-selected' : 'skill-row skill-card'}
       data-skill-key={skill.key}
     >

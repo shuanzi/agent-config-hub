@@ -67,9 +67,8 @@ function renderPanel(
   Panel: Awaited<ReturnType<typeof loadPanel>>,
   queryClient: QueryClient,
   context: ConfigContext = globalContext,
-  activeApp: 'claude-code' | 'codex' = 'claude-code',
 ) {
-  return render(<Panel activeApp={activeApp} context={context} projects={projects} />, {
+  return render(<Panel context={context} projects={projects} />, {
     wrapper: createWrapper(queryClient),
   });
 }
@@ -156,7 +155,7 @@ describe('InstalledSubagentsPanel scope contracts', () => {
     const projectSubagent = installedSubagent('project-sub', 'Project Sub', projectTarget);
     mockApi.getInstalledSubagents.mockResolvedValue([projectSubagent]);
     const Panel = await loadPanel();
-    renderPanel(Panel, queryClient, allContext, 'codex');
+    renderPanel(Panel, queryClient, allContext);
 
     fireEvent.click(await screen.findByRole('button', { name: /Project Sub/ }));
     const codexToggle = await screen.findByRole('checkbox', { name: 'Codex：项目配置不支持' });
@@ -219,7 +218,7 @@ describe('InstalledSubagentsPanel scope contracts', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: /SubA/ }));
     await screen.findByLabelText('SubA 详情');
-    rerender(<Panel activeApp="claude-code" context={allContext} projects={projects} />);
+    rerender(<Panel context={allContext} projects={projects} />);
 
     await waitFor(() => expect(screen.queryByLabelText('SubA 详情')).toBeNull());
     expect(screen.getByLabelText('已安装 Subagents')).toBeTruthy();

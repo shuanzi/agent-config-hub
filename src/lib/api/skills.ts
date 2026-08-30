@@ -24,9 +24,9 @@ export async function discoverAvailableSkills(target: ScopeTarget): Promise<Disc
 export async function installSkill(
   skill: DiscoverableSkill,
   target: ScopeTarget,
-  currentApp: AgentType,
+  initialApp: AgentType,
 ): Promise<InstalledSkill> {
-  return invoke('install_skill', { skill, target, currentApp });
+  return invoke('install_skill', { skill, target, initialApp });
 }
 
 export async function uninstallSkill(
@@ -78,10 +78,10 @@ export async function importSkillsFromApps(
 
 export async function installSkillsFromZip(
   filePath: string,
-  currentApp: AgentType,
+  initialApp: AgentType,
   target: ScopeTarget,
 ): Promise<InstalledSkill[]> {
-  return invoke('install_skills_from_zip', { filePath, currentApp, target });
+  return invoke('install_skills_from_zip', { filePath, initialApp, target });
 }
 
 export async function getSkillBackups(target: ScopeTarget): Promise<SkillBackupEntry[]> {
