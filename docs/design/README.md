@@ -4,6 +4,11 @@
 
 ## 当前设计稿
 
+- [全产品 UI 精细稿：页面索引、排版规范与验收记录](./agent-config-manager-ui/polished/README.md)
+- [精细稿 Pen 源文件](./agent-config-manager-ui/agent-config-manager-ui-polished.pen)
+
+## 现状与首轮目标基线
+
 - [Agent Config Manager 全产品 UI 现状与目标](./agent-config-manager-ui/ui-inventory.md)
 - [可编辑 Pen 源文件](./agent-config-manager-ui/agent-config-manager-ui-reconstruction.pen)
 - [完整 2× 预览](./agent-config-manager-ui/agent-config-manager-ui-reconstruction@2x.png)
