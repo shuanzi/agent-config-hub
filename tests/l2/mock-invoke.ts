@@ -1,3 +1,4 @@
+import { createNativeSubagentFixture } from './native-subagent-fixture';
 import type {
   AgentType,
   ConfigContext,
@@ -345,6 +346,7 @@ function projectRootUnavailableError(projectId: string): Error {
 }
 
 export function setupMockInvoke() {
+  const nativeSubagents = createNativeSubagentFixture();
   const visualFixture = hasVisualFixture();
   const state: MockState = {
     projects: visualFixture ? [...visualProjects] : [],
@@ -402,6 +404,7 @@ export function setupMockInvoke() {
   window.__ACM_MOCK_STATE__ = state;
 
   window.__ACM_MOCK_INVOKE__ = (cmd, args) => {
+    if (cmd.includes('native_subagent')) return nativeSubagents(cmd, args);
     switch (cmd) {
       case 'list_projects':
         return state.projects;

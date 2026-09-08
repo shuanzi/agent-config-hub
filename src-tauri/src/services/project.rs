@@ -126,9 +126,17 @@ impl ProjectService {
         project_id: &str,
         root_path: impl AsRef<Path>,
     ) -> Result<ProjectSummary, AppError> {
+        let _subagent_state_guard = subagent_state_read_guard();
         let project = db
             .get_project(project_id)?
             .ok_or_else(|| project_not_found(project_id))?;
+        if db.has_native_subagent_state_for_project(project_id)? {
+            return Err(project_error(
+                "PROJECT_HAS_NATIVE_SUBAGENT_STATE",
+                &[("projectId", project_id)],
+                Some("removeNativeSubagentsAndBackups"),
+            ));
+        }
         let canonical_root = canonical_existing_directory(root_path.as_ref())?;
         let root_path = canonical_root.display().to_string();
 
@@ -162,6 +170,13 @@ impl ProjectService {
         let _subagent_state_guard = subagent_state_read_guard();
         if db.get_project(project_id)?.is_none() {
             return Err(project_not_found(project_id));
+        }
+        if db.has_native_subagent_state_for_project(project_id)? {
+            return Err(project_error(
+                "PROJECT_HAS_NATIVE_SUBAGENT_STATE",
+                &[("projectId", project_id)],
+                Some("removeNativeSubagentsAndBackups"),
+            ));
         }
         if SkillService::has_backup_for_target(project_id)?
             || SubagentService::has_backup_for_target(project_id)?

@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
+import { open as openDirectoryDialog } from '@tauri-apps/plugin-dialog';
 import {
   Blocks,
   Bot,
   ChevronLeft,
   FileText,
+  FolderOpen,
   FolderPlus,
   Link2,
   Settings,
@@ -146,6 +148,12 @@ function contextFocusKey(context: ConfigContext): string {
   return context.kind === 'project' ? `project:${context.projectId}` : context.kind;
 }
 
+function directoryBaseName(path: string): string | undefined {
+  const normalized = path.trim().replace(/[\\/]+$/, '');
+  if (normalized === '') return undefined;
+  return normalized.split(/[\\/]/).at(-1) || undefined;
+}
+
 function ConfigContextRail({
   context,
   projects,
@@ -166,21 +174,27 @@ function ConfigContextRail({
   const [dialog, setDialog] = useState<ProjectDialog>(null);
   const [rootPath, setRootPath] = useState('');
   const [displayName, setDisplayName] = useState('');
+  const [isChoosingDirectory, setIsChoosingDirectory] = useState(false);
   const [feedback, setFeedback] = useState<{ kind: 'error' | 'success'; message: string } | null>(
     null,
   );
   const rootPathRef = useRef<HTMLInputElement>(null);
+  const directoryPickerRequestRef = useRef(0);
   const addProject = useAddProject();
   const relinkProjectRoot = useRelinkProjectRoot();
   const removeProject = useRemoveProject();
 
   const closeDialog = () => {
+    directoryPickerRequestRef.current += 1;
+    setIsChoosingDirectory(false);
     setDialog(null);
     setRootPath('');
     setDisplayName('');
   };
 
   const openAddDialog = () => {
+    directoryPickerRequestRef.current += 1;
+    setIsChoosingDirectory(false);
     setFeedback(null);
     setRootPath('');
     setDisplayName('');
@@ -188,6 +202,8 @@ function ConfigContextRail({
   };
 
   const openRelinkDialog = (project: ProjectSummary) => {
+    directoryPickerRequestRef.current += 1;
+    setIsChoosingDirectory(false);
     setFeedback(null);
     setRootPath(project.rootPath);
     setDialog({ kind: 'relink', project });
@@ -200,6 +216,40 @@ function ConfigContextRail({
 
   const reportError = (error: unknown) => {
     setFeedback({ kind: 'error', message: toUserError(error).message });
+  };
+
+  useEffect(
+    () => () => {
+      directoryPickerRequestRef.current += 1;
+    },
+    [],
+  );
+
+  const chooseProjectDirectory = async () => {
+    const requestId = directoryPickerRequestRef.current + 1;
+    directoryPickerRequestRef.current = requestId;
+    setFeedback(null);
+    setIsChoosingDirectory(true);
+
+    try {
+      const selected = await openDirectoryDialog({ multiple: false, directory: true });
+      if (directoryPickerRequestRef.current !== requestId) return;
+
+      const selectedPath = Array.isArray(selected) ? selected[0] : selected;
+      if (typeof selectedPath !== 'string' || selectedPath.trim() === '') return;
+
+      setRootPath(selectedPath);
+      if (dialog?.kind === 'add') {
+        const inferredName = directoryBaseName(selectedPath);
+        if (inferredName !== undefined) {
+          setDisplayName((currentName) => (currentName.trim() === '' ? inferredName : currentName));
+        }
+      }
+    } catch (error) {
+      if (directoryPickerRequestRef.current === requestId) reportError(error);
+    } finally {
+      if (directoryPickerRequestRef.current === requestId) setIsChoosingDirectory(false);
+    }
   };
 
   const submitAddProject = async (event: FormEvent<HTMLFormElement>) => {
@@ -373,7 +423,7 @@ function ConfigContextRail({
               type="submit"
               form="add-project-form"
               className="context-dialog-primary"
-              disabled={isMutating}
+              disabled={isMutating || isChoosingDirectory}
             >
               添加项目
             </button>
@@ -381,16 +431,29 @@ function ConfigContextRail({
         }
       >
         <form id="add-project-form" className="context-project-form" onSubmit={submitAddProject}>
-          <label>
-            项目目录
-            <input
-              ref={rootPathRef}
-              type="text"
-              value={rootPath}
-              onChange={(event) => setRootPath(event.target.value)}
-              required
-            />
-          </label>
+          <div className="context-project-field">
+            <label htmlFor="add-project-root">项目目录</label>
+            <div className="context-project-path-picker">
+              <input
+                id="add-project-root"
+                ref={rootPathRef}
+                type="text"
+                value={rootPath}
+                onChange={(event) => setRootPath(event.target.value)}
+                required
+              />
+              <button
+                type="button"
+                className="context-dialog-secondary context-directory-picker"
+                onClick={chooseProjectDirectory}
+                disabled={isMutating || isChoosingDirectory}
+                aria-label="选择项目文件夹"
+              >
+                <FolderOpen size={15} strokeWidth={1.8} aria-hidden="true" />
+                {isChoosingDirectory ? '正在选择…' : '选择文件夹'}
+              </button>
+            </div>
+          </div>
           <label>
             显示名称（可选）
             <input
@@ -417,7 +480,7 @@ function ConfigContextRail({
               type="submit"
               form="relink-project-form"
               className="context-dialog-primary"
-              disabled={isMutating}
+              disabled={isMutating || isChoosingDirectory}
             >
               重新关联
             </button>
@@ -429,16 +492,29 @@ function ConfigContextRail({
           className="context-project-form"
           onSubmit={submitRelinkProject}
         >
-          <label>
-            项目目录
-            <input
-              ref={rootPathRef}
-              type="text"
-              value={rootPath}
-              onChange={(event) => setRootPath(event.target.value)}
-              required
-            />
-          </label>
+          <div className="context-project-field">
+            <label htmlFor="relink-project-root">项目目录</label>
+            <div className="context-project-path-picker">
+              <input
+                id="relink-project-root"
+                ref={rootPathRef}
+                type="text"
+                value={rootPath}
+                onChange={(event) => setRootPath(event.target.value)}
+                required
+              />
+              <button
+                type="button"
+                className="context-dialog-secondary context-directory-picker"
+                onClick={chooseProjectDirectory}
+                disabled={isMutating || isChoosingDirectory}
+                aria-label="选择项目文件夹"
+              >
+                <FolderOpen size={15} strokeWidth={1.8} aria-hidden="true" />
+                {isChoosingDirectory ? '正在选择…' : '选择文件夹'}
+              </button>
+            </div>
+          </div>
           {feedback?.kind === 'error' && <p role="alert">{feedback.message}</p>}
         </form>
       </FocusedDialog>

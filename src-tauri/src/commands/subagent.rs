@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use crate::error::{format_subagent_error, is_structured_error_payload, AppError};
 use crate::services::project::{ConfigContext, ScopeTarget};
-use crate::services::skill::{AgentType, SkillService};
+use crate::services::skill::SkillService;
 use crate::services::subagent::{
     DiscoverableSubagent, InstalledSubagent, SubagentBackupEntry, SubagentRepo, SubagentService,
     SubagentUninstallResult, SubagentUpdateInfo,
@@ -22,14 +22,12 @@ fn map_err(err: AppError) -> String {
     format_subagent_error("SUBAGENT_INTERNAL", &[], Some("checkLogs"))
 }
 
-fn parse_app_type(app: &str) -> Result<AgentType, String> {
-    AgentType::from_str(app).map_err(|e| {
-        format_subagent_error(
-            "INVALID_APP_TYPE",
-            &[("app", app), ("message", &e.to_string())],
-            Some("checkAppType"),
-        )
-    })
+fn legacy_mutation_disabled() -> String {
+    format_subagent_error(
+        "LEGACY_SUBAGENT_REVIEW_REQUIRED",
+        &[],
+        Some("useNativeSubagentManagement"),
+    )
 }
 
 #[tauri::command]
@@ -62,13 +60,8 @@ pub async fn install_subagent(
     service: tauri::State<'_, SubagentServiceState>,
     app_state: tauri::State<'_, AppState>,
 ) -> Result<InstalledSubagent, String> {
-    let app_type = parse_app_type(&initial_app)?;
-
-    service
-        .0
-        .install_for_target(&app_state.db, &target, &subagent, &app_type)
-        .await
-        .map_err(map_err)
+    let _ = (subagent, target, initial_app, service, app_state);
+    Err(legacy_mutation_disabled())
 }
 
 #[tauri::command]
@@ -77,7 +70,8 @@ pub fn uninstall_subagent(
     target: ScopeTarget,
     app_state: tauri::State<'_, AppState>,
 ) -> Result<SubagentUninstallResult, String> {
-    SubagentService::uninstall_for_target(&app_state.db, &target, &id).map_err(map_err)
+    let _ = (id, target, app_state);
+    Err(legacy_mutation_disabled())
 }
 
 #[tauri::command]
@@ -88,9 +82,8 @@ pub fn toggle_subagent_app(
     enabled: bool,
     app_state: tauri::State<'_, AppState>,
 ) -> Result<(), String> {
-    let app_type = parse_app_type(&app)?;
-    SubagentService::toggle_app_for_target(&app_state.db, &target, &id, &app_type, enabled)
-        .map_err(map_err)
+    let _ = (id, target, app, enabled, app_state);
+    Err(legacy_mutation_disabled())
 }
 
 #[tauri::command]
@@ -113,11 +106,8 @@ pub async fn update_subagent(
     service: tauri::State<'_, SubagentServiceState>,
     app_state: tauri::State<'_, AppState>,
 ) -> Result<InstalledSubagent, String> {
-    service
-        .0
-        .update_subagent_for_target(&app_state.db, &target, &id)
-        .await
-        .map_err(map_err)
+    let _ = (id, target, service, app_state);
+    Err(legacy_mutation_disabled())
 }
 
 #[tauri::command]
@@ -159,13 +149,14 @@ pub fn restore_subagent_backup(
     target: ScopeTarget,
     app_state: tauri::State<'_, AppState>,
 ) -> Result<InstalledSubagent, String> {
-    SubagentService::restore_from_backup_for_target(&app_state.db, &backup_id, &target)
-        .map_err(map_err)
+    let _ = (backup_id, target, app_state);
+    Err(legacy_mutation_disabled())
 }
 
 #[tauri::command]
 pub fn delete_subagent_backup(backup_id: String, target: ScopeTarget) -> Result<(), String> {
-    SubagentService::delete_backup_for_target(&backup_id, &target).map_err(map_err)
+    let _ = (backup_id, target);
+    Err(legacy_mutation_disabled())
 }
 
 pub struct SubagentServiceState(pub Arc<SubagentService>);

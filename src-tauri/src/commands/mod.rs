@@ -1,9 +1,11 @@
+mod native_subagent;
 mod project;
 mod prompt;
 mod settings;
 pub mod skill;
 pub mod subagent;
 
+pub use native_subagent::*;
 pub use project::*;
 pub use prompt::*;
 pub use settings::*;

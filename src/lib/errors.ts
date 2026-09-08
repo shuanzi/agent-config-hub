@@ -33,7 +33,29 @@ const ERROR_MESSAGES: Record<string, string | ((ctx: Record<string, string>) => 
     ctx.rootPath
       ? `项目目录不可用：${ctx.rootPath}。`
       : '项目目录不可用，请重新关联项目目录后重试。',
+  PROJECT_HAS_NATIVE_SUBAGENT_STATE:
+    '项目仍有受管原生 Subagent 或其备份，暂不能移除或重新关联目录，以免原生文件和备份失去归属。',
   SUBAGENT_INTERNAL: 'Subagent 操作失败。',
+  NATIVE_SUBAGENT_INTERNAL: '原生 Subagent 操作失败，请检查配置路径与文件权限后重试。',
+  NATIVE_SUBAGENT_EXTERNAL_MODIFICATION:
+    '文件已被外部修改，本次操作未覆盖文件。请重新加载后再操作。',
+  NATIVE_SUBAGENT_REMOTE_CHANGED: '仓库内容在预览后发生变化，请重新检查更新并审阅差异。',
+  NATIVE_SUBAGENT_DESTINATION_CONFLICT: '目标路径已被占用，本次操作不会覆盖已有文件。',
+  NATIVE_SUBAGENT_RESTORE_CONFLICT: '恢复目标已变化或被其他文件占用，请刷新并核对目标后重试。',
+  NATIVE_SUBAGENT_DISABLED_DESTINATION_CONFLICT:
+    '该定义仍有停用副本，请先启用或备份并卸载后再恢复，避免产生两个版本。',
+  NATIVE_SUBAGENT_DISCOVERY_FAILED: '原生定义发现失败，请检查仓库配置与网络后重新刷新。',
+  NATIVE_SUBAGENT_SOURCE_OUTSIDE_CURRENT_SCOPE:
+    '配置目录已变更，原来源不再属于当前目标。本次操作未写入旧路径，请核对目录设置。',
+  NATIVE_SUBAGENT_NOT_MANAGED: '该定义尚未纳入管理，请先显式接管。',
+  NATIVE_SUBAGENT_INVALID: (ctx) => `原生格式校验失败：${ctx.message ?? '请检查必要字段和语法。'}`,
+  NATIVE_SUBAGENT_INCOMPATIBLE_AGENT: '该原生定义与所选 Agent 不兼容，不会进行格式转换。',
+  NATIVE_SUBAGENT_LEGACY_REVIEW_REQUIRED: '旧版记录需先核对原生文件，不会自动恢复跨 Agent 投影。',
+  NATIVE_SUBAGENT_SYMLINK_CONFIRMATION_REQUIRED: '请先核对并确认符号链接的实际目标。',
+  NATIVE_SUBAGENT_SYMLINK_READ_ONLY: '该来源是符号链接，不能隐式修改外部目标，请重新核对接管状态。',
+  NATIVE_SUBAGENT_ANCESTOR_SYMLINK_UNSAFE:
+    '来源的父目录是符号链接，目前仅允许只读查看。请使用普通配置目录后再纳入管理，避免修改外部目录。',
+  NATIVE_SUBAGENT_CONFIG_DOCUMENT_MISSING: '原生配置文件已不存在，请恢复配置文件后重试。',
   SETTINGS_INTERNAL: '设置操作失败。',
   MIGRATION_ABORTED: (ctx) => `迁移失败：${ctx.failures ?? ''}`,
   IMPORT_DUPLICATE_DIRECTORY: (ctx) => `同名 Skill 一次只能导入一个来源：${ctx.directory ?? ''}。`,

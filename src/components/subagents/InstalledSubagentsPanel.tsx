@@ -1,894 +1,751 @@
-import { useEffect, useMemo, useRef, useState, type RefObject } from 'react';
-import {
-  ArchiveRestore,
-  ChevronLeft,
-  ExternalLink,
-  Loader2,
-  RefreshCw,
-  Search,
-  Trash2,
-} from 'lucide-react';
-import type {
-  AgentType,
-  ConfigContext,
-  InstalledSubagent,
-  ProjectSummary,
-  ScopeTarget,
-  SubagentApps,
-  SubagentBackupEntry,
-} from '../../types';
-import {
-  useCheckSubagentUpdates,
-  useDeleteSubagentBackup,
-  useInstalledSubagents,
-  useRestoreSubagentBackup,
-  useSubagentBackups,
-  useToggleSubagentApp,
-  useUninstallSubagent,
-  useUpdateSubagent,
-} from '../../hooks/useSubagents';
+import { useEffect, useRef, useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { ArchiveRestore, ChevronLeft, RefreshCw, Search } from 'lucide-react';
+import type { ConfigContext, ProjectSummary, ScopeTarget } from '../../types';
+import * as api from '../../lib/api/nativeSubagents';
 import { toUserError } from '../../lib/errors';
 import { AgentBrandMark, agentLabels, WORKBENCH_AGENTS } from '../workbench/AgentBrandMark';
 import { FocusedDialog } from '../workbench/FocusedDialog';
+import { nativeDrafts } from './native-drafts';
 import './subagents.css';
+import './native-subagents.css';
 
-interface InstalledSubagentsPanelProps {
+interface Props {
   context: ConfigContext;
   projects: readonly ProjectSummary[];
 }
-
-type Notice = { tone: 'error' | 'status'; message: string } | null;
-
-function targetForContext(context: ConfigContext): ScopeTarget | null {
-  if (context.kind === 'global') return { scope: 'global' };
-  if (context.kind === 'project') return { scope: 'project', projectId: context.projectId };
-  return null;
+export const nativeStatusLabels: Record<api.NativeSubagentDefinition['managementStatus'], string> =
+  {
+    unmanaged: '本地未接管',
+    managed: '已管理',
+    disabled: '已停用',
+    invalid: '文件异常',
+    'legacy-review': '旧记录 · 待核对',
+  };
+function errorText(error: unknown) {
+  const parsed = toUserError(error);
+  return [parsed.message, parsed.suggestion].filter(Boolean).join(' ');
 }
-
-function contextKey(context: ConfigContext): string {
-  return context.kind === 'project' ? `project:${context.projectId}` : context.kind;
+function targetLabel(target: ScopeTarget, projects: readonly ProjectSummary[]) {
+  if (target.scope === 'global') return '全局配置';
+  const project = projects.find((item) => item.projectId === target.projectId);
+  return project ? `${project.displayName} · ${project.rootPath}` : `项目 ${target.projectId}`;
 }
-
-function sameTarget(left: ScopeTarget, right: ScopeTarget): boolean {
-  return (
-    left.scope === right.scope &&
-    (left.scope !== 'project' || (right.scope === 'project' && left.projectId === right.projectId))
+function Diagnostics({ items }: { items: readonly api.NativeSubagentDiagnostic[] }) {
+  return items.length ? (
+    <ul className="native-diagnostics" aria-label="配置诊断">
+      {items.map((item, index) => (
+        <li key={`${item.code}:${index}`} data-severity={item.severity}>
+          {item.message}
+        </li>
+      ))}
+    </ul>
+  ) : null;
+}
+/** 上下文变化时重置源码，禁止把上一目标的缓冲区用于新目标。 */
+export function InstalledSubagentsPanel(props: Props) {
+  return <NativePanel key={JSON.stringify(props.context)} {...props} />;
+}
+function NativePanel({ context, projects }: Props) {
+  const client = useQueryClient();
+  const [search, setSearch] = useState('');
+  const [selected, setSelected] = useState<string | null>(null);
+  const [notice, setNotice] = useState('');
+  const [showBackups, setShowBackups] = useState(false);
+  const scan = useQuery({
+    queryKey: ['subagents', 'native', context],
+    queryFn: () => api.scanNativeSubagents(context),
+    staleTime: 0,
+    refetchOnMount: 'always',
+    refetchOnWindowFocus: false,
+  });
+  const definitions = scan.data?.definitions ?? [];
+  const active = definitions.find((item) => item.identity === selected);
+  const visible = definitions.filter((item) =>
+    [
+      item.name,
+      item.description ?? '',
+      item.sourcePath,
+      agentLabels[item.agent],
+      targetLabel(item.target, projects),
+    ].some((text) => text.toLowerCase().includes(search.trim().toLowerCase())),
   );
-}
-
-function targetValue(target: ScopeTarget | null): string {
-  if (target === null) return '';
-  return target.scope === 'global' ? 'global' : `project:${target.projectId}`;
-}
-
-function targetFromValue(value: string): ScopeTarget | null {
-  if (value === 'global') return { scope: 'global' };
-  return value.startsWith('project:') ? { scope: 'project', projectId: value.slice(8) } : null;
-}
-
-function subagentSelectionId(subagent: InstalledSubagent): string {
-  return `${targetValue(subagent.target)}:${subagent.id}`;
-}
-
-function mapAppField(app: AgentType): keyof SubagentApps {
-  switch (app) {
-    case 'claude-code':
-      return 'claudeCode';
-    case 'codex':
-      return 'codex';
-    case 'gemini-cli':
-      return 'geminiCli';
-    case 'opencode':
-      return 'opencode';
-  }
-}
-
-function formatDate(unixSeconds: number): string {
-  if (unixSeconds <= 0) return '—';
-  const date = new Date(unixSeconds * 1000);
-  return Number.isNaN(date.getTime()) ? String(unixSeconds) : date.toLocaleString();
-}
-
-function messageFor(error: unknown): string {
-  const userError = toUserError(error);
-  return [userError.message, userError.suggestion].filter(Boolean).join('\n');
-}
-
-function SubagentNotice({ notice }: { notice: Notice }) {
-  if (notice === null) return null;
+  const refresh = async () => {
+    await client.invalidateQueries({ queryKey: ['subagents'] });
+  };
   return (
-    <div
-      className={notice.tone === 'error' ? 'subagent-error' : 'subagent-status-message'}
-      role={notice.tone === 'error' ? 'alert' : 'status'}
-      aria-live={notice.tone === 'error' ? 'assertive' : 'polite'}
-    >
-      {notice.message}
-    </div>
-  );
-}
-
-function AppToggleGroup({
-  apps,
-  target,
-  onToggle,
-  disabled,
-}: {
-  apps: SubagentApps;
-  target: ScopeTarget;
-  onToggle: (app: AgentType, enabled: boolean) => void;
-  disabled: boolean;
-}) {
-  return (
-    <fieldset className="subagent-toggle-group">
-      <legend>启用到 Agent</legend>
-      <div className="subagent-toggle-list">
-        {WORKBENCH_AGENTS.map((app) => {
-          const enabled = apps[mapAppField(app)];
-          const unsupported = target.scope === 'project' && app === 'codex';
-          const state = unsupported ? '项目配置不支持' : enabled ? '已启用' : '未启用';
-          return (
-            <label
-              key={app}
-              className={
-                unsupported
-                  ? 'subagent-agent-toggle is-unsupported'
-                  : enabled
-                    ? 'subagent-agent-toggle is-enabled'
-                    : 'subagent-agent-toggle'
+    <section className="subagent-panel native-panel" aria-label="Subagent 原生管理">
+      <div className="subagent-summary-row">
+        <span>本地定义 {definitions.filter((item) => item.sourceKind !== 'legacy').length} 个</span>
+        <div className="subagent-agent-counts" aria-label="四 Agent 定义数量">
+          {WORKBENCH_AGENTS.map((agent) => (
+            <span key={agent} title={agentLabels[agent]}>
+              <AgentBrandMark app={agent} size={16} />
+              <span className="subagent-visually-hidden">{agentLabels[agent]}：</span>
+              {
+                definitions.filter((item) => item.agent === agent && item.sourceKind !== 'legacy')
+                  .length
               }
-              title={`${agentLabels[app]}：${state}`}
-              data-subagent-agent-toggle={app}
-              data-subagent-agent-unsupported={unsupported || undefined}
-            >
-              <input
-                type="checkbox"
-                checked={enabled}
-                onChange={(event) => onToggle(app, event.target.checked)}
-                disabled={disabled || unsupported}
-                aria-label={`${agentLabels[app]}：${state}`}
-              />
-              <AgentBrandMark app={app} size={18} />
-              <span className="subagent-visually-hidden">
-                {agentLabels[app]}：{state}
-              </span>
-              {unsupported && (
-                <span className="subagent-toggle-unsupported" aria-hidden="true">
-                  不支持
-                </span>
-              )}
-            </label>
-          );
-        })}
+            </span>
+          ))}
+        </div>
       </div>
-    </fieldset>
-  );
-}
-
-function InstalledSubagentDetail({
-  subagent,
-  hasUpdate,
-  pending,
-  onBack,
-  backButtonRef,
-  onToggle,
-  onUpdate,
-  onUninstall,
-}: {
-  subagent: InstalledSubagent | null;
-  hasUpdate: boolean;
-  pending: boolean;
-  onBack: () => void;
-  backButtonRef: RefObject<HTMLButtonElement>;
-  onToggle: (app: AgentType, enabled: boolean) => void;
-  onUpdate: () => void;
-  onUninstall: () => void;
-}) {
-  if (subagent === null) {
-    return (
-      <aside className="subagent-detail-pane subagent-detail-empty" aria-label="Subagent 详情">
-        <p>选择左侧 Subagent 查看详情。</p>
-      </aside>
-    );
-  }
-
-  const repository =
-    subagent.repoOwner && subagent.repoName
-      ? `${subagent.repoOwner}/${subagent.repoName}`
-      : '本地安装';
-
-  return (
-    <aside
-      className="subagent-detail-pane"
-      aria-label={`${subagent.name} 详情`}
-      data-subagent-id={subagent.id}
-      data-subagent-detail-id={subagent.id}
-    >
-      <button ref={backButtonRef} type="button" className="subagent-detail-back" onClick={onBack}>
-        <ChevronLeft size={16} aria-hidden="true" />
-        返回列表
-      </button>
-      <header className="subagent-detail-header">
-        <div>
-          <p className="subagent-eyebrow">已安装 Subagent</p>
-          <h2 className="skill-card-title">{subagent.name}</h2>
-          {subagent.description && <p>{subagent.description}</p>}
-        </div>
-        {hasUpdate && <span className="subagent-status is-update">可更新</span>}
-      </header>
-
-      <dl className="subagent-detail-facts">
-        <div>
-          <dt>配置</dt>
-          <dd>{subagent.target.scope === 'global' ? '全局配置' : '项目配置'}</dd>
-        </div>
-        <div>
-          <dt>目录</dt>
-          <dd>{subagent.directory}</dd>
-        </div>
-        <div>
-          <dt>仓库</dt>
-          <dd>{repository}</dd>
-        </div>
-        <div>
-          <dt>安装时间</dt>
-          <dd>{formatDate(subagent.installedAt)}</dd>
-        </div>
-        <div>
-          <dt>更新时间</dt>
-          <dd>{formatDate(subagent.updatedAt)}</dd>
-        </div>
-      </dl>
-
-      <AppToggleGroup
-        apps={subagent.apps}
-        target={subagent.target}
-        onToggle={onToggle}
-        disabled={pending}
-      />
-
-      <div className="subagent-detail-actions">
-        {subagent.readmeUrl && (
-          <a className="subagent-button" href={subagent.readmeUrl} target="_blank" rel="noreferrer">
-            <ExternalLink size={14} aria-hidden="true" />
-            README
-          </a>
-        )}
-        {hasUpdate && (
-          <button
-            type="button"
-            className="subagent-button is-primary"
-            onClick={onUpdate}
-            disabled={pending}
-          >
-            <RefreshCw size={14} aria-hidden="true" />
-            更新
-          </button>
-        )}
+      <div className="subagent-toolbar">
+        <label className="subagent-search-field">
+          <Search size={16} aria-hidden="true" />
+          <input
+            aria-label="搜索本地 Subagent"
+            placeholder="搜索名称、Agent 或来源路径"
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            type="search"
+          />
+        </label>
         <button
-          type="button"
-          className="subagent-button is-danger"
-          onClick={onUninstall}
-          disabled={pending}
+          className="subagent-button"
+          onClick={() => void scan.refetch()}
+          disabled={scan.isFetching}
         >
-          {pending ? (
-            <Loader2 size={14} className="spin" aria-hidden="true" />
-          ) : (
-            <Trash2 size={14} aria-hidden="true" />
-          )}
-          {pending ? '卸载中…' : '卸载'}
+          <RefreshCw size={14} className={scan.isFetching ? 'spin' : ''} aria-hidden="true" />
+          {scan.isFetching ? '扫描中…' : '刷新扫描'}
+        </button>
+        <button className="subagent-button" onClick={() => setShowBackups(true)}>
+          <ArchiveRestore size={14} aria-hidden="true" />
+          备份恢复
         </button>
       </div>
+      <p className="native-help">
+        按各 Agent 原生格式管理。文件已配置不代表运行中的 Agent
+        已加载；本地定义需显式纳入管理后才能修改。
+      </p>
+      {notice && (
+        <p role="status" className="subagent-status-message">
+          {notice}
+        </p>
+      )}
+      {scan.isError && (
+        <p role="alert" className="subagent-error">
+          扫描失败：{errorText(scan.error)} 请刷新重试。
+        </p>
+      )}
+      <Diagnostics items={scan.data?.scanErrors ?? []} />
+      {!scan.isPending && !scan.isError && definitions.length === 0 && (
+        <div className="subagent-empty">
+          <h3>{scan.data?.scanErrors.length ? '扫描未完整完成' : '没有找到本地 Subagent 定义'}</h3>
+          <p>
+            {scan.data?.scanErrors.length
+              ? '请处理上方目录访问或配置错误，再刷新。'
+              : '可前往“发现”安装原生定义，或检查配置目录。这里只扫描全局配置及已登记项目。'}
+          </p>
+        </div>
+      )}
+      {definitions.length > 0 && (
+        <div className={`native-master-detail${active ? ' has-selection' : ''}`}>
+          <div className="native-list" aria-label="本地 Subagent 列表">
+            {visible.length === 0 && <p className="native-help">没有匹配的定义。</p>}
+            {visible.map((item) => (
+              <button
+                key={item.identity}
+                className={`native-row${item.identity === selected ? ' is-selected' : ''}`}
+                onClick={() => setSelected(item.identity)}
+                aria-current={item.identity === selected ? 'true' : undefined}
+                data-native-identity={item.identity}
+              >
+                <span className="native-row-title">
+                  <AgentBrandMark app={item.agent} size={18} />
+                  <strong>{item.name}</strong>
+                  <span className="native-state">{nativeStatusLabels[item.managementStatus]}</span>
+                </span>
+                <span>
+                  {agentLabels[item.agent]} · {targetLabel(item.target, projects)}
+                </span>
+                <span className="native-source" title={item.sourcePath}>
+                  {item.sourcePath}
+                  {item.sourceKey ? ` # ${item.sourceKey}` : ''}
+                </span>
+              </button>
+            ))}
+          </div>
+          {active ? (
+            <NativeDetail
+              key={active.identity}
+              definition={active}
+              projects={projects}
+              onBack={() => setSelected(null)}
+              onRestore={() => setShowBackups(true)}
+              onChanged={refresh}
+              onNotice={setNotice}
+            />
+          ) : (
+            <aside className="native-detail native-detail-empty">
+              选择左侧定义查看原生源码及管理状态。
+            </aside>
+          )}
+        </div>
+      )}
+      {showBackups && (
+        <NativeBackups
+          context={context}
+          definitions={definitions}
+          onClose={() => setShowBackups(false)}
+          onChanged={refresh}
+          onNotice={setNotice}
+        />
+      )}
+    </section>
+  );
+}
+function NativeDetail({
+  definition,
+  projects,
+  onBack,
+  onRestore,
+  onChanged,
+  onNotice,
+}: {
+  definition: api.NativeSubagentDefinition;
+  projects: readonly ProjectSummary[];
+  onBack: () => void;
+  onRestore: () => void;
+  onChanged: () => Promise<void>;
+  onNotice: (message: string) => void;
+}) {
+  const drafts = nativeDrafts(useQueryClient());
+  const [loaded, setLoaded] = useState<api.NativeSubagentContent | null>(
+    () => drafts.get(definition.identity)?.loaded ?? null,
+  );
+  const [draft, setDraft] = useState(() => drafts.get(definition.identity)?.text ?? '');
+  const [confirmation, setConfirmation] = useState<'adopt' | 'uninstall' | null>(null);
+  const [confirmSymlink, setConfirmSymlink] = useState(false);
+  const [failure, setFailure] = useState('');
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+  const run = useMutation({
+    mutationFn: async (task: () => Promise<void>) => {
+      setFailure('');
+      await task();
+    },
+    onError: (error) => {
+      if (mounted.current) setFailure(errorText(error));
+    },
+  });
+  const current = loaded?.definition ?? definition;
+  const isManaged = ['managed', 'disabled'].includes(current.managementStatus);
+  const isLegacy = current.sourceKind === 'legacy';
+  const dirty = loaded !== null && draft !== loaded.content;
+  const hash = loaded?.contentHash ?? current.contentHash;
+  const blocked = run.isPending || !hash;
+  const acceptContent = (result: api.NativeSubagentContent) => {
+    drafts.delete(result.definition.identity);
+    if (!mounted.current) return;
+    setLoaded(result);
+    setDraft(result.content);
+  };
+  return (
+    <aside className="native-detail" aria-label={`${current.name} 详情`}>
+      <button className="subagent-detail-back" onClick={onBack}>
+        <ChevronLeft size={16} />
+        返回列表
+      </button>
+      <header>
+        <p className="subagent-eyebrow">
+          {agentLabels[current.agent]} · {current.format}
+        </p>
+        <h2>{current.name}</h2>
+        <p className="native-help">{current.description}</p>
+      </header>
+      <dl className="native-facts">
+        <dt>目标</dt>
+        <dd>{targetLabel(current.target, projects)}</dd>
+        <dt>来源</dt>
+        <dd>
+          {current.sourcePath}
+          {current.sourceKey ? ` # ${current.sourceKey}` : ''}
+        </dd>
+        <dt>状态</dt>
+        <dd>
+          {nativeStatusLabels[current.managementStatus]} ·{' '}
+          {current.managementStatus === 'invalid' || isLegacy
+            ? '未确认可用'
+            : current.enabled
+              ? '文件已配置'
+              : '未启用'}
+        </dd>
+        {current.isSymlink && (
+          <>
+            <dt>链接目标</dt>
+            <dd>{current.symlinkTarget ?? '无法解析'}</dd>
+          </>
+        )}
+      </dl>
+      <Diagnostics items={current.diagnostics} />
+      {current.managementStatus === 'invalid' && (
+        <div className="native-actions">
+          <p className="native-help">
+            文件异常或已缺失。可从备份修复；无备份时请核对来源，或在发现页重新安装原生定义。
+          </p>
+          <button className="subagent-button" onClick={onRestore}>
+            从备份修复
+          </button>
+        </div>
+      )}
+      {failure && (
+        <p role="alert" className="subagent-error">
+          {failure}
+        </p>
+      )}
+      {isLegacy ? (
+        <p className="native-help">
+          保留的旧版记录，不代表有效原生定义。请核对实际文件，再从原生定义纳入管理；不会自动转换或恢复旧跨
+          Agent 投影。
+        </p>
+      ) : (
+        <>
+          <div className="native-actions">
+            <button
+              className="subagent-button"
+              disabled={run.isPending || dirty}
+              onClick={() =>
+                run.mutate(async () =>
+                  acceptContent(await api.readNativeSubagent(current.identity)),
+                )
+              }
+            >
+              {loaded ? '重新加载源码' : '查看原生源码'}
+            </button>
+            {current.managementStatus === 'unmanaged' && (
+              <button
+                className="subagent-button is-primary"
+                disabled={blocked}
+                onClick={() => setConfirmation('adopt')}
+              >
+                纳入管理
+              </button>
+            )}
+            {isManaged && (
+              <>
+                <button
+                  className="subagent-button"
+                  disabled={blocked || dirty}
+                  onClick={() =>
+                    run.mutate(async () => {
+                      await api.backupNativeSubagent(current.identity, hash!);
+                      await onChanged();
+                      onNotice('已创建原生定义备份。');
+                    })
+                  }
+                >
+                  备份
+                </button>
+                <button
+                  className="subagent-button"
+                  disabled={blocked || dirty}
+                  onClick={() =>
+                    run.mutate(async () => {
+                      await api.setNativeSubagentEnabled(current.identity, !current.enabled, hash!);
+                      acceptContent(await api.readNativeSubagent(current.identity));
+                      await onChanged();
+                      onNotice(current.enabled ? '已停用原生定义。' : '已恢复原生定义。');
+                    })
+                  }
+                >
+                  {current.enabled ? '停用' : '启用'}
+                </button>
+                <button
+                  className="subagent-button is-danger"
+                  disabled={blocked || dirty}
+                  onClick={() => setConfirmation('uninstall')}
+                >
+                  卸载
+                </button>
+              </>
+            )}
+          </div>
+          {loaded && (
+            <label className="native-editor">
+              原生源码（{current.format}）
+              <textarea
+                aria-label="Subagent 原生源码"
+                value={draft}
+                readOnly={!isManaged || run.isPending}
+                spellCheck={false}
+                onChange={(event) => {
+                  const text = event.target.value;
+                  setDraft(text);
+                  if (text === loaded.content) drafts.delete(current.identity);
+                  else drafts.set(current.identity, { loaded, text });
+                }}
+              />
+            </label>
+          )}
+          {loaded && isManaged && (
+            <div className="native-actions">
+              <button
+                className="subagent-button is-primary"
+                disabled={blocked || !dirty}
+                onClick={() =>
+                  run.mutate(async () => {
+                    acceptContent(
+                      await api.saveNativeSubagent(current.identity, draft, loaded.contentHash),
+                    );
+                    await onChanged();
+                    onNotice('已备份并保存原生定义。');
+                  })
+                }
+              >
+                保存原生源码
+              </button>
+              {dirty && (
+                <button
+                  className="subagent-button"
+                  disabled={run.isPending}
+                  onClick={() => {
+                    drafts.delete(current.identity);
+                    setDraft(loaded.content);
+                  }}
+                >
+                  放弃编辑
+                </button>
+              )}
+              <span className="native-help">
+                {dirty
+                  ? '未保存修改已暂存本次会话；再次选择此定义可继续编辑。关闭应用前请保存。'
+                  : '写入前备份并校验外部修改。'}
+              </span>
+            </div>
+          )}
+          <NativeUpdate
+            definition={current}
+            blocked={blocked || dirty || !isManaged}
+            onChanged={async () => {
+              setLoaded(null);
+              await onChanged();
+            }}
+            onNotice={onNotice}
+          />
+        </>
+      )}
+      <FocusedDialog
+        open={confirmation !== null}
+        title={confirmation === 'adopt' ? '纳入管理' : '确认卸载'}
+        onClose={() => {
+          if (!run.isPending) setConfirmation(null);
+        }}
+        footer={
+          <>
+            <button
+              className="subagent-button"
+              disabled={run.isPending}
+              onClick={() => setConfirmation(null)}
+            >
+              取消
+            </button>
+            <button
+              className="subagent-button is-primary"
+              disabled={
+                blocked || (confirmation === 'adopt' && current.isSymlink && !confirmSymlink)
+              }
+              onClick={() =>
+                run.mutate(async () => {
+                  if (confirmation === 'adopt') {
+                    await api.adoptNativeSubagent(current.identity, hash!, confirmSymlink);
+                    acceptContent(await api.readNativeSubagent(current.identity));
+                    onNotice('已备份并纳入管理，保留原生配置。');
+                  } else {
+                    await api.uninstallNativeSubagent(current.identity, hash!);
+                    onNotice('已备份并卸载，可从备份恢复。');
+                  }
+                  setConfirmation(null);
+                  await onChanged();
+                })
+              }
+            >
+              {run.isPending ? '处理中…' : confirmation === 'adopt' ? '确认纳入管理' : '备份并卸载'}
+            </button>
+          </>
+        }
+      >
+        <p>
+          {confirmation === 'adopt'
+            ? '先备份，再将这个目标下的原生定义交由应用管理。不转换到其他 Agent。'
+            : '只移除当前 Agent、当前目标的这个定义，其他配置不受影响。'}
+        </p>
+        <p className="native-source">{current.sourcePath}</p>
+        {confirmation === 'adopt' && current.isSymlink && (
+          <label className="native-symlink-confirm">
+            <input
+              type="checkbox"
+              checked={confirmSymlink}
+              onChange={(event) => setConfirmSymlink(event.target.checked)}
+            />
+            我已核对链接目标 {current.symlinkTarget}，同意以独立副本管理，不修改外部链接目标。
+          </label>
+        )}
+        {failure && (
+          <p role="alert" className="subagent-error">
+            {failure}
+          </p>
+        )}
+      </FocusedDialog>
     </aside>
   );
 }
 
-function BackupsDialog({
-  backups,
-  pending,
-  onRestore,
-  onDelete,
+function NativeBackups({
+  context,
+  definitions,
   onClose,
+  onChanged,
+  onNotice,
 }: {
-  backups: SubagentBackupEntry[];
-  pending: boolean;
-  onRestore: (backup: SubagentBackupEntry) => void;
-  onDelete: (backup: SubagentBackupEntry) => void;
+  context: ConfigContext;
+  definitions: api.NativeSubagentDefinition[];
   onClose: () => void;
+  onChanged: () => Promise<void>;
+  onNotice: (message: string) => void;
 }) {
+  const [selected, setSelected] = useState<api.NativeSubagentBackup | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const backups = useQuery({
+    queryKey: ['subagents', 'native-backups', context],
+    queryFn: () => api.getNativeSubagentBackups(context),
+    staleTime: 0,
+  });
+  const restore = useMutation({
+    mutationFn: async (backup: api.NativeSubagentBackup) => {
+      const current = definitions.find((item) => item.identity === backup.identity);
+      await api.restoreNativeSubagentBackup(backup.backupId, current?.contentHash);
+      await onChanged();
+      onNotice('已恢复原生定义备份。');
+      setSelected(null);
+    },
+  });
+  const remove = useMutation({
+    mutationFn: async (backup: api.NativeSubagentBackup) => {
+      if (backup.legacy || !backup.contentHash) throw new Error('备份不可删除');
+      await api.deleteNativeSubagentBackup(backup.backupId, backup.contentHash);
+      setSelected(null);
+      setConfirmDelete(false);
+      await backups.refetch();
+      onNotice('已删除所选原生备份，此备份不可恢复；原生定义文件未修改。');
+    },
+  });
+  const busy = restore.isPending || remove.isPending;
   return (
     <FocusedDialog
       open
-      title="Subagent 备份"
-      onClose={onClose}
+      title="Subagent 备份恢复"
+      onClose={() => {
+        if (!busy) onClose();
+      }}
       footer={
-        <button type="button" className="subagent-button" onClick={onClose}>
-          关闭
-        </button>
+        <>
+          <button className="subagent-button" onClick={onClose} disabled={busy}>
+            关闭
+          </button>
+          {selected && !confirmDelete && (
+            <button
+              className="subagent-button is-danger"
+              disabled={busy || !selected.contentHash || selected.legacy}
+              onClick={() => setConfirmDelete(true)}
+            >
+              删除所选备份
+            </button>
+          )}
+          {selected && !confirmDelete && (
+            <button
+              className="subagent-button is-primary"
+              disabled={busy}
+              onClick={() => restore.mutate(selected)}
+            >
+              {restore.isPending ? '恢复中…' : '确认恢复所选备份'}
+            </button>
+          )}
+          {selected && confirmDelete && (
+            <>
+              <button
+                className="subagent-button"
+                disabled={busy}
+                onClick={() => setConfirmDelete(false)}
+              >
+                保留备份
+              </button>
+              <button
+                className="subagent-button is-danger"
+                disabled={busy}
+                onClick={() => remove.mutate(selected)}
+              >
+                {remove.isPending ? '删除中…' : '确认永久删除此备份'}
+              </button>
+            </>
+          )}
+        </>
       }
     >
-      {backups.length === 0 ? (
-        <p className="subagent-dialog-empty">暂无备份。</p>
-      ) : (
-        <div className="subagent-backup-list">
-          {backups.map((backup) => (
-            <div key={backup.backupId} className="subagent-backup-row">
-              <div>
-                <strong>{backup.subagent.name}</strong>
-                <span>{backup.backupPath}</span>
-                <time dateTime={new Date(backup.createdAt * 1000).toISOString()}>
-                  {formatDate(backup.createdAt)}
-                </time>
-              </div>
-              <div className="subagent-backup-actions">
-                <button
-                  type="button"
-                  className="subagent-button is-primary"
-                  onClick={() => onRestore(backup)}
-                  disabled={pending}
-                >
-                  恢复
-                </button>
-                <button
-                  type="button"
-                  className="subagent-icon-button is-danger"
-                  onClick={() => onDelete(backup)}
-                  disabled={pending}
-                  aria-label={`删除 ${backup.subagent.name} 的备份`}
-                >
-                  <Trash2 size={15} aria-hidden="true" />
-                </button>
-              </div>
-            </div>
-          ))}
-        </div>
+      <p className="native-help">
+        恢复只作用于备份记录的 Agent 和目标。目标发生外部修改或被其他文件占用时不会覆盖。
+      </p>
+      {backups.isPending && <p role="status">正在读取备份…</p>}
+      {(backups.isError || restore.isError || remove.isError) && (
+        <p role="alert" className="subagent-error">
+          {errorText(backups.error ?? restore.error ?? remove.error)}
+        </p>
+      )}
+      {backups.data?.length === 0 && <p>当前上下文暂无备份。</p>}
+      {backups.data?.map((backup) => (
+        <label key={backup.backupId} className="native-backup-item">
+          <span>
+            <input
+              type="radio"
+              name="native-backup"
+              checked={selected?.backupId === backup.backupId}
+              disabled={backup.legacy || busy || confirmDelete}
+              onChange={() => {
+                setSelected(backup);
+                setConfirmDelete(false);
+              }}
+            />{' '}
+            {backup.name} · {agentLabels[backup.agent]}
+          </span>
+          <span className="native-source">{backup.sourcePath}</span>
+          <span>
+            {new Date(backup.createdAt * 1000).toLocaleString()} · {backup.reason}
+          </span>
+          {backup.legacy && <span>旧版备份保留待核对，不自动恢复跨 Agent 投影。</span>}
+        </label>
+      ))}
+      {selected && !confirmDelete && (
+        <p role="status">将恢复 {selected.name} 至原目标。恢复前会校验当前文件并备份。</p>
+      )}
+      {selected && confirmDelete && (
+        <p role="alert">
+          将永久删除 {selected.name} 的所选备份（{selected.backupId}
+          ）。此操作不可撤销，不删除定义文件或其他备份。
+        </p>
       )}
     </FocusedDialog>
   );
 }
 
-export function InstalledSubagentsPanel({ context, projects }: InstalledSubagentsPanelProps) {
-  const [searchQuery, setSearchQuery] = useState('');
-  const [notice, setNotice] = useState<Notice>(null);
-  const [backupsDialogOpen, setBackupsDialogOpen] = useState(false);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [uninstallTarget, setUninstallTarget] = useState<InstalledSubagent | null>(null);
-  const [detailOpen, setDetailOpen] = useState(false);
-  const [allOperationTarget, setAllOperationTarget] = useState<ScopeTarget | null>(null);
-  const initializedSelectionRef = useRef(false);
-  const selectedRowRef = useRef<HTMLButtonElement>(null);
-  const detailBackButtonRef = useRef<HTMLButtonElement>(null);
-  const panelRef = useRef<HTMLElement>(null);
-  const previousContextKeyRef = useRef(contextKey(context));
-  const scopedTarget = targetForContext(context);
-  const operationTarget = scopedTarget ?? allOperationTarget;
-  const operationTargetValue = targetValue(operationTarget);
-  const previousOperationTargetRef = useRef(operationTargetValue);
-
-  const {
-    data: subagents,
-    isLoading,
-    error: installedSubagentsError,
-  } = useInstalledSubagents(context);
-  const toggleAppMutation = useToggleSubagentApp();
-  const uninstallMutation = useUninstallSubagent();
-  const {
-    data: updates,
-    refetch: checkUpdates,
-    isFetching: isCheckingUpdates,
-  } = useCheckSubagentUpdates(operationTarget);
-  const updateSubagentMutation = useUpdateSubagent();
-  const { data: backups, refetch: refetchBackups } = useSubagentBackups(operationTarget);
-  const restoreMutation = useRestoreSubagentBackup();
-  const deleteBackupMutation = useDeleteSubagentBackup();
-
-  const updatesMap = useMemo(() => {
-    const map = new Map<string, string>();
-    for (const update of updates ?? []) map.set(update.id, update.remoteHash);
-    return map;
-  }, [updates]);
-
-  const enabledCounts = useMemo(() => {
-    const counts: Record<AgentType, number> = {
-      'claude-code': 0,
-      codex: 0,
-      'gemini-cli': 0,
-      opencode: 0,
-    };
-    for (const subagent of subagents ?? []) {
-      for (const app of WORKBENCH_AGENTS) {
-        if (subagent.apps[mapAppField(app)]) counts[app] += 1;
+function NativeUpdate({
+  definition,
+  blocked,
+  onChanged,
+  onNotice,
+}: {
+  definition: api.NativeSubagentDefinition;
+  blocked: boolean;
+  onChanged: () => Promise<void>;
+  onNotice: (message: string) => void;
+}) {
+  const [preview, setPreview] = useState<api.NativeSubagentUpdatePreview | null>(null);
+  const [confirmedLocalEdits, setConfirmedLocalEdits] = useState(false);
+  const check = useMutation({
+    mutationFn: () => api.previewNativeSubagentUpdate(definition.identity),
+    onSuccess: (result) => {
+      if (result.currentHash === result.remoteHash)
+        onNotice('当前定义与仓库一致，没有可更新内容。');
+      else {
+        setPreview(result);
+        setConfirmedLocalEdits(false);
       }
-    }
-    return counts;
-  }, [subagents]);
-
-  const filteredSubagents = useMemo(() => {
-    if (subagents === undefined) return [];
-    const query = searchQuery.trim().toLowerCase();
-    if (!query) return subagents;
-    return subagents.filter((subagent) =>
-      [
-        subagent.name,
-        subagent.id,
-        subagent.description,
-        subagent.directory,
-        subagent.repoOwner,
-        subagent.repoName,
-      ].some((value) => value?.toLowerCase().includes(query)),
-    );
-  }, [searchQuery, subagents]);
-
-  useEffect(() => {
-    if (subagents === undefined) return;
-    if (!initializedSelectionRef.current) {
-      initializedSelectionRef.current = true;
-      if (filteredSubagents.length > 0) setSelectedId(subagentSelectionId(filteredSubagents[0]));
-      return;
-    }
-    if (
-      selectedId !== null &&
-      !filteredSubagents.some((subagent) => subagentSelectionId(subagent) === selectedId)
-    ) {
-      setSelectedId(null);
-      setDetailOpen(false);
-    }
-  }, [filteredSubagents, selectedId, subagents]);
-
-  const selectedSubagent = useMemo(
-    () =>
-      filteredSubagents.find((subagent) => subagentSelectionId(subagent) === selectedId) ?? null,
-    [filteredSubagents, selectedId],
-  );
-
-  useEffect(() => {
-    if (
-      uninstallTarget !== null &&
-      !(subagents ?? []).some(
-        (subagent) =>
-          subagent.id === uninstallTarget.id && sameTarget(subagent.target, uninstallTarget.target),
-      )
-    ) {
-      setUninstallTarget(null);
-    }
-  }, [subagents, uninstallTarget]);
-
-  useEffect(() => {
-    if (detailOpen && selectedSubagent !== null) detailBackButtonRef.current?.focus();
-  }, [detailOpen, selectedSubagent]);
-
-  useEffect(() => {
-    const nextContextKey = contextKey(context);
-    if (previousContextKeyRef.current === nextContextKey) return;
-
-    previousContextKeyRef.current = nextContextKey;
-    setAllOperationTarget(null);
-    setSelectedId(null);
-    setDetailOpen(false);
-    setUninstallTarget(null);
-    setBackupsDialogOpen(false);
-    window.setTimeout(() => panelRef.current?.focus(), 0);
-  }, [context]);
-
-  useEffect(() => {
-    if (
-      allOperationTarget?.scope === 'project' &&
-      !projects.some((project) => project.projectId === allOperationTarget.projectId)
-    ) {
-      setAllOperationTarget(null);
-    }
-  }, [allOperationTarget, projects]);
-
-  useEffect(() => {
-    if (previousOperationTargetRef.current === operationTargetValue) return;
-
-    previousOperationTargetRef.current = operationTargetValue;
-    setSelectedId(null);
-    setDetailOpen(false);
-    setUninstallTarget(null);
-    setBackupsDialogOpen(false);
-    window.setTimeout(() => panelRef.current?.focus(), 0);
-  }, [operationTargetValue]);
-
-  const pending =
-    toggleAppMutation.isPending ||
-    uninstallMutation.isPending ||
-    updateSubagentMutation.isPending ||
-    restoreMutation.isPending ||
-    deleteBackupMutation.isPending;
-
-  const requireOperationTarget = (): ScopeTarget | null => {
-    if (operationTarget !== null) return operationTarget;
-    setNotice({ tone: 'error', message: '请先选择全局配置或一个项目配置作为操作目标。' });
-    return null;
-  };
-
-  const selectSubagent = (subagent: InstalledSubagent) => {
-    setNotice(null);
-    setSelectedId(subagentSelectionId(subagent));
-    setDetailOpen(true);
-  };
-
-  const closeDetail = () => {
-    setDetailOpen(false);
-    window.setTimeout(() => selectedRowRef.current?.focus(), 0);
-  };
-
-  const handleToggleApp = async (subagent: InstalledSubagent, app: AgentType, enabled: boolean) => {
-    if (subagent.target.scope === 'project' && app === 'codex') return;
-    setNotice(null);
-    try {
-      await toggleAppMutation.mutateAsync({
-        id: subagent.id,
-        target: subagent.target,
-        app,
-        enabled,
-      });
-      setNotice({
-        tone: 'status',
-        message: `已${enabled ? '启用' : '停用'} ${agentLabels[app]}。`,
-      });
-    } catch (error) {
-      setNotice({ tone: 'error', message: messageFor(error) });
-    }
-  };
-
-  const requestUninstall = (subagent: InstalledSubagent) => {
-    if (
-      !(subagents ?? []).some(
-        (candidate) =>
-          candidate.id === subagent.id && sameTarget(candidate.target, subagent.target),
-      )
-    ) {
-      return;
-    }
-    setNotice(null);
-    setUninstallTarget(subagent);
-  };
-
-  const handleConfirmUninstall = async () => {
-    if (uninstallTarget === null) return;
-    const { id, name, target } = uninstallTarget;
-    setUninstallTarget(null);
-    setNotice(null);
-    try {
-      await uninstallMutation.mutateAsync({ id, target });
-      if (selectedId === subagentSelectionId(uninstallTarget)) setSelectedId(null);
-      setNotice({ tone: 'status', message: `已卸载 ${name}。` });
-    } catch (error) {
-      setNotice({ tone: 'error', message: messageFor(error) });
-    }
-  };
-
-  const handleCheckUpdates = async () => {
-    setNotice(null);
-    if (requireOperationTarget() === null) return;
-    try {
-      const result = await checkUpdates();
-      const count = result.data?.length ?? 0;
-      setNotice({
-        tone: 'status',
-        message:
-          count === 0 ? '当前没有可更新的 Subagent。' : `发现 ${count} 个可更新的 Subagent。`,
-      });
-    } catch (error) {
-      setNotice({ tone: 'error', message: messageFor(error) });
-    }
-  };
-
-  const handleUpdateSubagent = async (subagent: InstalledSubagent) => {
-    setNotice(null);
-    try {
-      await updateSubagentMutation.mutateAsync({ id: subagent.id, target: subagent.target });
-      setNotice({ tone: 'status', message: `已更新 ${subagent.name}。` });
-    } catch (error) {
-      setNotice({ tone: 'error', message: messageFor(error) });
-    }
-  };
-
-  const handleUpdateAll = async () => {
-    setNotice(null);
-    const target = requireOperationTarget();
-    if (target === null) return;
-    const applicable = (updates ?? [])
-      .map((update) => ({
-        update,
-        subagent: (subagents ?? []).find(
-          (candidate) => candidate.id === update.id && sameTarget(candidate.target, target),
-        ),
-      }))
-      .filter(
-        (
-          entry,
-        ): entry is { update: NonNullable<typeof updates>[number]; subagent: InstalledSubagent } =>
-          entry.subagent !== undefined,
+    },
+  });
+  const apply = useMutation({
+    mutationFn: async () => {
+      if (!preview) return;
+      await api.applyNativeSubagentUpdate(
+        definition.identity,
+        preview.currentHash,
+        preview.remoteHash,
       );
-    if (applicable.length === 0) return;
-
-    let success = 0;
-    const failures: string[] = [];
-    for (const { update, subagent } of applicable) {
-      try {
-        await updateSubagentMutation.mutateAsync({ id: subagent.id, target: subagent.target });
-        success += 1;
-      } catch (error) {
-        failures.push(`${update.name}: ${messageFor(error)}`);
-      }
-    }
-
-    const message = [
-      ...(success > 0 ? [`成功更新 ${success} 个 Subagent。`] : []),
-      ...failures,
-    ].join('\n');
-    if (message) setNotice({ tone: failures.length > 0 ? 'error' : 'status', message });
-  };
-
-  const handleOpenBackups = async () => {
-    setNotice(null);
-    if (requireOperationTarget() === null) return;
-    setBackupsDialogOpen(true);
-    try {
-      await refetchBackups();
-    } catch (error) {
-      setNotice({ tone: 'error', message: messageFor(error) });
-    }
-  };
-
-  const handleRestore = async (backup: SubagentBackupEntry) => {
-    setNotice(null);
-    try {
-      await restoreMutation.mutateAsync({
-        backupId: backup.backupId,
-        target: backup.subagent.target,
-      });
-      setBackupsDialogOpen(false);
-      setNotice({ tone: 'status', message: '已恢复 Subagent 备份。' });
-    } catch (error) {
-      setNotice({ tone: 'error', message: messageFor(error) });
-    }
-  };
-
-  const handleDeleteBackup = async (backup: SubagentBackupEntry) => {
-    setNotice(null);
-    try {
-      await deleteBackupMutation.mutateAsync({
-        backupId: backup.backupId,
-        target: backup.subagent.target,
-      });
-      await refetchBackups();
-      setNotice({ tone: 'status', message: '已删除备份。' });
-    } catch (error) {
-      setNotice({ tone: 'error', message: messageFor(error) });
-    }
-  };
-
-  const hasUpdate = (subagent: InstalledSubagent) =>
-    operationTarget !== null &&
-    sameTarget(subagent.target, operationTarget) &&
-    updatesMap.has(subagent.id);
-
+      await onChanged();
+      onNotice('已备份并应用审阅过的更新。');
+      setPreview(null);
+    },
+  });
+  if (!definition.repoOwner || !definition.repoName)
+    return <p className="native-help">本地定义无仓库来源，不检查远端更新。</p>;
   return (
-    <section
-      ref={panelRef}
-      className="subagent-panel"
-      aria-label="已安装 Subagents"
-      data-subagent-panel="installed"
-      tabIndex={-1}
-    >
-      <div className="subagent-summary-row">
-        <span>已安装 {subagents?.length ?? 0} 个</span>
-        <div className="subagent-agent-counts" aria-label="各 Agent 启用数量">
-          {WORKBENCH_AGENTS.map((app) => (
-            <span key={app} title={`${agentLabels[app]}：${enabledCounts[app]} 个`}>
-              <AgentBrandMark app={app} size={16} />
-              {enabledCounts[app]}
-            </span>
-          ))}
-        </div>
+    <>
+      <div className="native-actions">
+        <button
+          className="subagent-button"
+          disabled={blocked || check.isPending}
+          onClick={() => check.mutate()}
+        >
+          {check.isPending ? '检查中…' : '检查更新'}
+        </button>
+        <span className="native-help">
+          {definition.repoOwner}/{definition.repoName}
+        </span>
       </div>
-
-      <div className="subagent-toolbar">
-        <label className="subagent-search-field" htmlFor="subagent-installed-search">
-          <Search size={15} aria-hidden="true" />
-          <span className="subagent-visually-hidden">搜索已安装 Subagent</span>
-          <input
-            id="subagent-installed-search"
-            type="search"
-            placeholder="搜索已安装 Subagent"
-            value={searchQuery}
-            onChange={(event) => setSearchQuery(event.target.value)}
-          />
-        </label>
-        <div className="subagent-toolbar-actions">
-          <button
-            type="button"
-            className="subagent-button"
-            onClick={handleCheckUpdates}
-            disabled={isCheckingUpdates || pending}
-          >
-            {isCheckingUpdates ? (
-              <Loader2 size={14} className="spin" aria-hidden="true" />
-            ) : (
-              <RefreshCw size={14} aria-hidden="true" />
-            )}
-            检查更新
-          </button>
-          {(updates ?? []).length > 0 && (
-            <button
-              type="button"
-              className="subagent-button is-primary"
-              onClick={handleUpdateAll}
-              disabled={pending}
-            >
-              <RefreshCw size={14} aria-hidden="true" />
-              全部更新 ({updates!.length})
-            </button>
-          )}
-          <button
-            type="button"
-            className="subagent-button"
-            onClick={handleOpenBackups}
-            disabled={pending || operationTarget === null}
-          >
-            <ArchiveRestore size={14} aria-hidden="true" />
-            备份
-          </button>
-        </div>
-        {context.kind === 'all' && (
-          <label className="subagent-target-field" htmlFor="subagent-installed-target">
-            <span>操作目标</span>
-            <select
-              id="subagent-installed-target"
-              aria-label="选择 Subagent 操作目标"
-              value={targetValue(allOperationTarget)}
-              onChange={(event) => setAllOperationTarget(targetFromValue(event.target.value))}
-            >
-              <option value="">选择全局或项目配置</option>
-              <option value="global">全局配置</option>
-              {projects.map((project) => (
-                <option key={project.projectId} value={`project:${project.projectId}`}>
-                  项目配置：{project.displayName}
-                </option>
-              ))}
-            </select>
-          </label>
-        )}
-      </div>
-
-      <SubagentNotice
-        notice={
-          installedSubagentsError === null
-            ? notice
-            : { tone: 'error', message: messageFor(installedSubagentsError) }
-        }
-      />
-
-      {isLoading ? (
-        <div className="subagent-empty" role="status">
-          <Loader2 size={24} className="spin" aria-hidden="true" />
-          <p>正在加载…</p>
-        </div>
-      ) : subagents === undefined || subagents.length === 0 ? (
-        <div className="subagent-empty">
-          <h3>尚未安装任何 Subagent</h3>
-          <p>切换到“发现”页签浏览并安装 Subagent。</p>
-        </div>
-      ) : filteredSubagents.length === 0 ? (
-        <div className="subagent-empty">
-          <h3>没有匹配的 Subagent</h3>
-        </div>
-      ) : (
-        <div className="subagent-master-detail" data-detail-open={detailOpen || undefined}>
-          <div className="subagent-list-pane" aria-label="已安装 Subagent 列表">
-            <div className="subagent-list">
-              {filteredSubagents.map((subagent) => {
-                const selected = subagentSelectionId(subagent) === selectedId;
-                const enabledApps = WORKBENCH_AGENTS.filter(
-                  (app) => subagent.apps[mapAppField(app)],
-                );
-                return (
-                  <article
-                    key={subagentSelectionId(subagent)}
-                    className={selected ? 'subagent-list-row is-selected' : 'subagent-list-row'}
-                    data-subagent-list-id={subagent.id}
-                    data-subagent-target={targetValue(subagent.target)}
-                    data-subagent-selection-id={subagentSelectionId(subagent)}
-                  >
-                    <button
-                      type="button"
-                      className="subagent-list-row-select"
-                      ref={selected ? selectedRowRef : undefined}
-                      onClick={() => selectSubagent(subagent)}
-                      aria-current={selected ? 'true' : undefined}
-                    >
-                      <span className="subagent-list-row-copy">
-                        <span className="skill-card-title">{subagent.name}</span>
-                        <span className="subagent-list-row-meta">
-                          {subagent.directory} ·{' '}
-                          {subagent.repoOwner && subagent.repoName
-                            ? `${subagent.repoOwner}/${subagent.repoName}`
-                            : '本地'}
-                        </span>
-                      </span>
-                      <span
-                        className="subagent-list-row-marks"
-                        aria-label={`已启用 ${enabledApps.length} 个 Agent`}
-                      >
-                        <span className="subagent-target-badge">
-                          {subagent.target.scope === 'global' ? '全局' : '项目'}
-                        </span>
-                        {enabledApps.map((app) => (
-                          <AgentBrandMark key={app} app={app} size={15} />
-                        ))}
-                        {hasUpdate(subagent) && (
-                          <span className="subagent-status is-update">可更新</span>
-                        )}
-                      </span>
-                    </button>
-                  </article>
-                );
-              })}
-            </div>
-          </div>
-          <InstalledSubagentDetail
-            subagent={selectedSubagent}
-            hasUpdate={selectedSubagent !== null && hasUpdate(selectedSubagent)}
-            pending={pending}
-            onBack={closeDetail}
-            backButtonRef={detailBackButtonRef}
-            onToggle={(app, enabled) => {
-              if (selectedSubagent !== null) void handleToggleApp(selectedSubagent, app, enabled);
-            }}
-            onUpdate={() => {
-              if (selectedSubagent !== null) void handleUpdateSubagent(selectedSubagent);
-            }}
-            onUninstall={() => {
-              if (selectedSubagent !== null) requestUninstall(selectedSubagent);
-            }}
-          />
-        </div>
+      {check.isError && (
+        <p role="alert" className="subagent-error">
+          {errorText(check.error)}
+        </p>
       )}
-
       <FocusedDialog
-        open={uninstallTarget !== null}
-        title="确认卸载"
-        onClose={() => setUninstallTarget(null)}
-        closeLabel="关闭确认卸载对话框"
+        open={preview !== null}
+        title="审阅 Subagent 更新"
+        onClose={() => {
+          if (!apply.isPending) setPreview(null);
+        }}
         footer={
           <>
             <button
-              type="button"
               className="subagent-button"
-              onClick={() => setUninstallTarget(null)}
+              disabled={apply.isPending}
+              onClick={() => setPreview(null)}
             >
               取消
             </button>
             <button
-              type="button"
-              className="subagent-button is-danger"
-              onClick={() => void handleConfirmUninstall()}
-              disabled={pending}
+              className="subagent-button is-primary"
+              disabled={
+                apply.isPending || Boolean(preview?.locallyModified && !confirmedLocalEdits)
+              }
+              onClick={() => apply.mutate()}
             >
-              卸载
+              备份并应用更新
             </button>
           </>
         }
       >
-        {uninstallTarget !== null && (
-          <p className="subagent-dialog-empty">
-            确定要卸载 {uninstallTarget.name} 吗？该 Subagent 将从该配置目标的所有 Agent 移除。
+        <p className="native-help">仅更新当前 Agent 的原生定义。应用前再次校验本地和远端摘要。</p>
+        {preview && (
+          <div className="native-diff">
+            <div>
+              <h3>当前源码</h3>
+              <pre>{preview.currentContent}</pre>
+            </div>
+            <div>
+              <h3>仓库源码</h3>
+              <pre>{preview.nextContent}</pre>
+            </div>
+          </div>
+        )}
+        {preview?.locallyModified && (
+          <label>
+            <input
+              type="checkbox"
+              checked={confirmedLocalEdits}
+              onChange={(event) => setConfirmedLocalEdits(event.target.checked)}
+            />
+            我已审阅本地修改，同意先备份再替换。
+          </label>
+        )}
+        {apply.isError && (
+          <p role="alert" className="subagent-error">
+            {errorText(apply.error)}
           </p>
         )}
       </FocusedDialog>
-
-      {backupsDialogOpen && (
-        <BackupsDialog
-          backups={backups ?? []}
-          pending={pending}
-          onRestore={(backup) => void handleRestore(backup)}
-          onDelete={(backup) => void handleDeleteBackup(backup)}
-          onClose={() => setBackupsDialogOpen(false)}
-        />
-      )}
-    </section>
+    </>
   );
 }

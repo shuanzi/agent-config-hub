@@ -227,10 +227,6 @@ pub(crate) fn migrate_storage_combined(
                 log::warn!("迁移后重建 {} 的 Skill 投影失败: {e}", app.as_str());
                 projection_errors.push(format!("skills/{}", app.as_str()));
             }
-            if let Err(e) = SubagentService::sync_to_app_unlocked(db, &app) {
-                log::warn!("迁移后重建 {} 的 Subagent 投影失败: {e}", app.as_str());
-                projection_errors.push(format!("subagents/{}", app.as_str()));
-            }
         }
         for project in ProjectService::list_projects(db).unwrap_or_else(|error| {
             log::warn!("迁移后读取项目 registry 失败: {error}");
@@ -244,10 +240,6 @@ pub(crate) fn migrate_storage_combined(
                 if let Err(e) = SkillService::sync_target_to_app_unlocked(db, &target, &app) {
                     log::warn!("迁移后重建项目 Skill 的 {} 投影失败: {e}", app.as_str());
                     projection_errors.push(format!("skills/project/{}", app.as_str()));
-                }
-                if let Err(e) = SubagentService::sync_target_to_app_unlocked(db, &target, &app) {
-                    log::warn!("迁移后重建项目 Subagent 的 {} 投影失败: {e}", app.as_str());
-                    projection_errors.push(format!("subagents/project/{}", app.as_str()));
                 }
             }
         }
@@ -495,7 +487,12 @@ pub(crate) fn set_agent_override_dir_inner(
 
     // Agent override 仅重投影 global Skills；项目 Skills 永远使用项目根下固定路径。
     let skills = db.get_all_installed_skills_for_target(&ScopeTarget::Global)?;
-    let subagents = db.get_all_installed_subagents()?;
+    // The native model treats the old cross-Agent Subagent table as read-only legacy data.
+    // Config-dir changes must not remove or rebuild those incompatible Markdown
+    // projections, because a same-name path may now be an independently managed
+    // native definition.
+    let subagents =
+        indexmap::IndexMap::<String, crate::services::subagent::InstalledSubagent>::new();
     let previous_override = current_override_for(&agent);
 
     let new_config_dir = dir
@@ -1086,7 +1083,7 @@ mod tests {
 
     #[test]
     #[serial]
-    fn set_agent_override_dir_relocates_managed_projections() {
+    fn set_agent_override_dir_relocates_skills_but_leaves_legacy_subagent_projection_untouched() {
         let tmp = tempdir().unwrap();
         let _guard = TestHomeGuard::set(tmp.path());
         let db = Arc::new(Database::memory().unwrap());
@@ -1116,11 +1113,13 @@ mod tests {
         set_agent_override_dir_inner("claude-code", Some(custom_str.clone()), &db)
             .expect("set override");
 
-        // 旧目录中的受管投影被移除，新目录中重建
+        // Skills follow the override. Legacy cross-Agent Subagent rows are
+        // review-only under the native model, so neither their old path nor a new projection is
+        // touched by the settings command.
         assert!(!old_skill_projection.exists());
-        assert!(!old_subagent_projection.exists());
+        assert!(old_subagent_projection.exists());
         assert!(custom_dir.join("skills").join("reloc-skill").exists());
-        assert!(custom_dir.join("agents").join("reloc-agent.md").exists());
+        assert!(!custom_dir.join("agents").join("reloc-agent.md").exists());
 
         assert_eq!(
             crate::settings::get_settings()
@@ -1384,7 +1383,7 @@ mod tests {
 
     #[test]
     #[serial]
-    fn set_agent_override_dir_restores_removed_projections_on_removal_failure() {
+    fn set_agent_override_dir_ignores_readonly_legacy_projection_and_leaves_it_unchanged() {
         let tmp = tempdir().unwrap();
         let _guard = TestHomeGuard::set(tmp.path());
         let db = Arc::new(Database::memory().unwrap());
@@ -1407,6 +1406,7 @@ mod tests {
         let old_subagent_projection = config::get_claude_agents_dir().join("rest-agent.md");
         assert!(old_skill_projection.exists());
         assert!(old_subagent_projection.exists());
+        let old_subagent_bytes = fs::read(&old_subagent_projection).unwrap();
 
         // 故障注入：旧 agents 目录只读，subagent 投影移除在 skill 移除之后失败
         let old_agents_dir = config::get_claude_agents_dir();
@@ -1415,16 +1415,24 @@ mod tests {
         fs::set_permissions(&old_agents_dir, permissions).unwrap();
 
         let custom_dir = tmp.path().join("custom-claude");
-        let result = set_agent_override_dir_inner(
+        set_agent_override_dir_inner(
             "claude-code",
             Some(custom_dir.to_string_lossy().to_string()),
             &db,
-        );
-        assert!(result.is_err(), "removal failure must abort the command");
+        )
+        .expect("legacy agents directory must not participate in override migration");
 
-        // 已移除的 skill 投影被恢复；设置未变更
-        assert!(old_skill_projection.exists());
-        assert_eq!(crate::settings::get_settings().claude_code_config_dir, None);
+        assert!(!old_skill_projection.exists());
+        assert!(custom_dir.join("skills/rest-skill").exists());
+        assert_eq!(
+            fs::read(&old_subagent_projection).unwrap(),
+            old_subagent_bytes
+        );
+        assert!(!custom_dir.join("agents/rest-agent.md").exists());
+        assert_eq!(
+            crate::settings::get_settings().claude_code_config_dir,
+            Some(custom_dir.display().to_string())
+        );
 
         // 恢复写权限以便临时目录清理
         #[cfg(unix)]
@@ -1501,7 +1509,7 @@ mod tests {
 
     #[test]
     #[serial]
-    fn set_agent_override_dir_rolls_back_new_dir_projections_on_sync_failure() {
+    fn set_agent_override_dir_does_not_sync_legacy_subagents_into_new_dir() {
         let tmp = tempdir().unwrap();
         let _guard = TestHomeGuard::set(tmp.path());
         let db = Arc::new(Database::memory().unwrap());
@@ -1536,6 +1544,7 @@ mod tests {
                 && old_fresh_skill.exists()
                 && old_subagent.exists()
         );
+        let old_subagent_bytes = fs::read(&old_subagent).unwrap();
 
         // 新目录预置一个普通目录与一个 symlink：二者都会被重建覆盖。
         let custom_dir = tmp.path().join("custom-claude");
@@ -1550,21 +1559,19 @@ mod tests {
         SkillService::create_symlink(&user_skill_dir, &new_snap_skill, false).unwrap();
         let original_link_target = fs::read_link(&new_snap_skill).unwrap();
 
-        // 故障注入：新目录的 agents 只读，第二次 sync（subagent 文件）必然失败，
-        // 此时三个 skill 投影已在新目录重建完成
+        // 新目录 agents 即使只读也不影响迁移，因为 legacy Subagent 不再重投影。
         let new_agents_dir = custom_dir.join("agents");
         fs::create_dir_all(&new_agents_dir).unwrap();
         let mut permissions = fs::metadata(&new_agents_dir).unwrap().permissions();
         permissions.set_readonly(true);
         fs::set_permissions(&new_agents_dir, permissions).unwrap();
 
-        let err = set_agent_override_dir_inner(
+        set_agent_override_dir_inner(
             "claude-code",
             Some(custom_dir.to_string_lossy().to_string()),
             &db,
         )
-        .expect_err("sync failure in the new dir must abort the command");
-        let _ = err;
+        .expect("legacy Subagent projection must be excluded from override sync");
 
         // 恢复写权限以便临时目录清理
         #[cfg(unix)]
@@ -1575,50 +1582,21 @@ mod tests {
             let _ = fs::set_permissions(&new_agents_dir, permissions);
         }
 
-        // 新目录无残留投影：本次新建的 fresh-skill 被删除、失败目标未留下文件。
-        assert!(!custom_dir.join("skills").join("fresh-skill").exists());
-        assert!(!SkillService::is_symlink(
-            &custom_dir.join("skills").join("fresh-skill")
-        ));
+        // Skills 正常迁移；legacy Subagent 的旧文件字节不变，新目录不生成投影。
+        assert!(custom_dir.join("skills").join("fresh-skill").exists());
         assert!(!custom_dir.join("agents").join("fail-agent.md").exists());
-
-        // 被 sync 覆盖的普通目录内容已按快照恢复。
-        assert!(new_dir_skill.is_dir());
-        assert!(!SkillService::is_symlink(&new_dir_skill));
+        assert_eq!(fs::read(&old_subagent).unwrap(), old_subagent_bytes);
+        assert!(!old_dir_skill.exists() && !old_snap_skill.exists() && !old_fresh_skill.exists());
         assert_eq!(
-            fs::read_to_string(new_dir_skill.join("USER.md")).unwrap(),
-            "user directory content"
-        );
-        assert!(
-            !new_dir_skill.join("SKILL.md").exists(),
-            "restored directory snapshot must not retain the synced projection"
+            crate::settings::get_settings().claude_code_config_dir,
+            Some(custom_dir.display().to_string())
         );
 
-        // 被 sync 覆盖的用户自有 symlink 与其 link target 已按快照恢复。
-        assert!(
-            SkillService::is_symlink(&new_snap_skill),
-            "rollback must restore the top-level symlink rather than a copied directory"
+        let _ = (
+            new_dir_skill,
+            new_snap_skill,
+            original_link_target,
+            user_skill_dir,
         );
-        assert_eq!(
-            fs::read_link(&new_snap_skill).unwrap(),
-            original_link_target
-        );
-        assert_eq!(
-            fs::read_to_string(user_skill_dir.join("USER.md")).unwrap(),
-            "user skill content"
-        );
-        assert!(
-            !user_skill_dir.join("SKILL.md").exists(),
-            "restored snapshot must not retain the synced projection"
-        );
-
-        // 旧目录投影被重建，设置已还原
-        assert!(
-            old_dir_skill.exists()
-                && old_snap_skill.exists()
-                && old_fresh_skill.exists()
-                && old_subagent.exists()
-        );
-        assert_eq!(crate::settings::get_settings().claude_code_config_dir, None);
     }
 }

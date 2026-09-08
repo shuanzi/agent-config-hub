@@ -631,6 +631,8 @@ textarea {
   justify-content: center;
   width: 20px;
   height: 20px;
+  line-height: 0;
+  vertical-align: middle;
 }
 
 .agent-brand-mark img {
@@ -783,6 +785,11 @@ textarea {
   font-size: 13px;
 }
 
+.context-project-field {
+  display: grid;
+  gap: 6px;
+}
+
 .context-project-form input {
   width: 100%;
   min-width: 0;
@@ -792,6 +799,21 @@ textarea {
   border-radius: 6px;
   color: var(--wb-ink);
   background: var(--wb-panel);
+}
+
+.context-project-path-picker {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}
+
+.context-directory-picker {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 116px;
+  white-space: nowrap;
 }
 
 .context-project-form p {
@@ -829,8 +851,9 @@ textarea {
 }
 
 .context-dialog-primary:disabled,
+.context-dialog-secondary:disabled,
 .context-dialog-danger:disabled {
-  cursor: wait;
+  cursor: not-allowed;
   opacity: 0.65;
 }
 
@@ -1083,5 +1106,16 @@ textarea {
 
   .focused-dialog-backdrop {
     padding: 12px;
+  }
+
+  .context-project-path-picker {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .context-directory-picker,
+  .context-project-form input,
+  .context-dialog-secondary,
+  .context-dialog-primary {
+    min-height: 44px;
   }
 }

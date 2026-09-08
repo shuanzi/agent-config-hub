@@ -41,11 +41,11 @@ global `AGENTS.md` 是同一逻辑文档，保存时将同一内容投影到 Cod
 
 ### 2.3 Subagents
 
-Subagents 保留仓库发现、安装、更新、卸载、备份恢复及 per-Agent 即时投影语义。仓库发现安装必须在操作内显式选择一个 `initialApp`；完整 ownership target 与“全部”中的显式 target 规则和 Skills 相同。项目级 Codex Subagent 路径未获支持，因此对应安装和 toggle 入口禁用并说明原因。
+2026-09-08 更新：Subagents 按各 Agent 原生格式识别与管理，不再沿用四 Agent 即时投影。支持本地定义显式接管、原生源码编辑、启停、备份恢复、卸载与仓库更新；安装选择单个兼容 Agent 和完整 target。Codex 项目 `.codex/agents/*.toml` 已纳入支持范围。旧记录与备份保留待核对，不自动转换。完整现行约束见 [ADR-0021](../architecture/adr/0021-native-subagent-management.md)。
 
 ## 3. UI 与响应式基线
 
-宽屏采用 selected B2 的 `资产类型 rail → 配置上下文 rail → 主工作区`。第一栏固定为 Skills、长期指令、Subagents，设置位于底部；第二栏固定为“全部／全局配置／真实项目列表”。不提供全局 Agent 选择控件；四个 Agent 的启用状态继续显示在资产行中，安装面板显式收集 `initialApp`，不占用第二栏，也不影响长期指令的两种固定文档。
+宽屏采用 selected B2 的 `资产类型 rail → 配置上下文 rail → 主工作区`。第一栏固定为 Skills、长期指令、Subagents，设置位于底部；第二栏固定为“全部／全局配置／真实项目列表”。不提供全局 Agent 选择控件；Skills 保留四 Agent 行状态和显式 `initialApp`，Subagents 显示单一所属 Agent 及原生状态并显式选择兼容 Agent 安装，不占用第二栏，也不影响长期指令的两种固定文档。
 
 `1200px` 以下使用“类型 → 配置上下文 → 列表 → 详情”的单表面栈，设置跳过配置上下文。390px 不产生横向溢出，列表与详情往返恢复原触发项焦点。
 

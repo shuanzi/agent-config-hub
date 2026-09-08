@@ -142,6 +142,14 @@ impl Database {
                         Self::migrate_v1_to_v2(conn)?;
                         Self::set_user_version(conn, 2)?;
                     }
+                    2 => {
+                        Self::create_native_subagent_tables(conn)?;
+                        Self::set_user_version(conn, 3)?;
+                    }
+                    3 => {
+                        Self::migrate_v3_to_v4(conn)?;
+                        Self::set_user_version(conn, 4)?;
+                    }
                     _ => {
                         return Err(AppError::Database(format!(
                             "未知的数据库版本 {version}，无法迁移到 {SCHEMA_VERSION}"
@@ -267,6 +275,80 @@ impl Database {
 
         Ok(())
     }
+
+    /// v3 keeps the legacy cross-Agent projection rows intact and adds a native,
+    /// per-Agent registry. Legacy rows are surfaced as `legacy-review` by the
+    /// native service; migration never rewrites or deletes their files/backups.
+    fn create_native_subagent_tables(conn: &Connection) -> Result<(), AppError> {
+        conn.execute_batch(
+            "
+            CREATE TABLE IF NOT EXISTS native_subagents (
+                identity TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                description TEXT,
+                agent TEXT NOT NULL CHECK (agent IN ('claude-code', 'codex', 'gemini-cli', 'opencode')),
+                format TEXT NOT NULL CHECK (format IN ('markdown', 'toml', 'json', 'jsonc-entry')),
+                source_kind TEXT NOT NULL CHECK (source_kind IN ('file', 'config-entry')),
+                source_path TEXT NOT NULL,
+                source_key TEXT,
+                scope TEXT NOT NULL CHECK (scope IN ('global', 'project')),
+                project_id TEXT,
+                enabled BOOLEAN NOT NULL DEFAULT 1,
+                content_hash TEXT,
+                upstream_hash TEXT,
+                disabled_path TEXT,
+                adopted_symlink BOOLEAN NOT NULL DEFAULT 0,
+                repo_owner TEXT,
+                repo_name TEXT,
+                repo_branch TEXT,
+                repo_path TEXT,
+                installed_at INTEGER NOT NULL DEFAULT 0,
+                updated_at INTEGER NOT NULL DEFAULT 0,
+                CHECK (
+                    (scope = 'global' AND project_id IS NULL)
+                    OR (scope = 'project' AND project_id IS NOT NULL AND length(project_id) > 0)
+                ),
+                CHECK (
+                    (source_kind = 'file' AND source_key IS NULL)
+                    OR (source_kind = 'config-entry' AND source_key IS NOT NULL)
+                ),
+                FOREIGN KEY (project_id) REFERENCES projects(project_id)
+            );
+            CREATE INDEX IF NOT EXISTS native_subagents_target
+                ON native_subagents (scope, project_id, agent, name);
+
+            CREATE TABLE IF NOT EXISTS native_subagent_backups (
+                backup_id TEXT PRIMARY KEY,
+                identity TEXT NOT NULL,
+                metadata_json TEXT NOT NULL,
+                content BLOB NOT NULL,
+                content_hash TEXT NOT NULL,
+                source_document_hash TEXT NOT NULL,
+                unix_mode INTEGER,
+                created_at INTEGER NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS native_subagent_backups_identity
+                ON native_subagent_backups (identity, created_at DESC);
+            ",
+        )
+        .map_err(|e| AppError::Database(format!("创建原生 Subagent 表失败: {e}")))?;
+        Ok(())
+    }
+
+    /// v4 persists native backup intent so restore guards and legacy safety can
+    /// be represented without overloading definition metadata.
+    fn migrate_v3_to_v4(conn: &Connection) -> Result<(), AppError> {
+        conn.execute_batch(
+            "
+            ALTER TABLE native_subagent_backups
+                ADD COLUMN reason TEXT NOT NULL DEFAULT 'native-backup';
+            ALTER TABLE native_subagent_backups
+                ADD COLUMN legacy BOOLEAN NOT NULL DEFAULT 0;
+            ",
+        )
+        .map_err(|e| AppError::Database(format!("升级原生 Subagent 备份表失败: {e}")))?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -313,7 +395,7 @@ mod tests {
 
         Database::apply_schema_migrations_on_conn(&conn).unwrap();
 
-        assert_eq!(Database::get_user_version(&conn).unwrap(), 2);
+        assert_eq!(Database::get_user_version(&conn).unwrap(), SCHEMA_VERSION);
         let (scope, project_id): (String, Option<String>) = conn
             .query_row(
                 "SELECT scope, project_id FROM skills WHERE id = ?1",
@@ -396,6 +478,75 @@ mod tests {
             )
             .unwrap();
         assert_eq!(shared_subagent_count, 2);
+    }
+
+    #[test]
+    fn v3_to_v4_preserves_legacy_rows_and_native_backup_bytes() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute("PRAGMA foreign_keys = ON", []).unwrap();
+        Database::create_tables_on_conn(&conn).unwrap();
+        Database::migrate_v1_to_v2(&conn).unwrap();
+        Database::create_native_subagent_tables(&conn).unwrap();
+        Database::set_user_version(&conn, 3).unwrap();
+        conn.execute(
+            "INSERT INTO subagents (
+                id, name, directory, enabled_codex, scope, project_id
+             ) VALUES (?1, ?2, ?3, 1, 'global', NULL)",
+            params!["legacy-codex", "Legacy Codex", "legacy-codex"],
+        )
+        .unwrap();
+        let metadata = serde_json::json!({
+            "identity": "native:old",
+            "name": "old",
+            "agent": "codex",
+            "target": { "scope": "global" },
+            "format": "toml",
+            "sourceKind": "file",
+            "sourcePath": "/tmp/old.toml",
+            "managementStatus": "managed",
+            "enabled": true,
+            "isSymlink": false,
+            "diagnostics": []
+        })
+        .to_string();
+        let backup_bytes = b"name = \"old\"\n".to_vec();
+        conn.execute(
+            "INSERT INTO native_subagent_backups (
+                backup_id, identity, metadata_json, content, content_hash,
+                source_document_hash, unix_mode, created_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, NULL, 1)",
+            params![
+                "old-backup",
+                "native:old",
+                metadata,
+                backup_bytes,
+                "entry-hash",
+                "document-hash"
+            ],
+        )
+        .unwrap();
+
+        Database::apply_schema_migrations_on_conn(&conn).unwrap();
+
+        assert_eq!(Database::get_user_version(&conn).unwrap(), SCHEMA_VERSION);
+        let legacy_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM subagents WHERE id = 'legacy-codex' AND enabled_codex = 1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(legacy_count, 1);
+        let (content, reason, legacy): (Vec<u8>, String, bool) = conn
+            .query_row(
+                "SELECT content, reason, legacy FROM native_subagent_backups WHERE backup_id = 'old-backup'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(content, b"name = \"old\"\n");
+        assert_eq!(reason, "native-backup");
+        assert!(!legacy);
     }
 
     #[test]

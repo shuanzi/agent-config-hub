@@ -12,7 +12,7 @@ use rusqlite::Connection;
 use crate::config::get_db_path;
 use crate::error::AppError;
 
-pub const SCHEMA_VERSION: i32 = 2;
+pub const SCHEMA_VERSION: i32 = 4;
 
 macro_rules! lock_conn {
     ($mutex:expr) => {
@@ -37,9 +37,11 @@ impl Database {
 
         if let Some(parent) = db_path.parent() {
             std::fs::create_dir_all(parent).map_err(|e| AppError::io(parent, e))?;
+            set_private_permissions(parent, 0o700)?;
         }
 
         let conn = Connection::open(&db_path).map_err(|e| AppError::Database(e.to_string()))?;
+        set_private_permissions(&db_path, 0o600)?;
 
         conn.execute("PRAGMA foreign_keys = ON;", [])
             .map_err(|e| AppError::Database(e.to_string()))?;
@@ -100,6 +102,18 @@ impl Database {
         tx.commit().map_err(|e| AppError::Database(e.to_string()))?;
         Ok(result)
     }
+}
+
+#[cfg(unix)]
+fn set_private_permissions(path: &std::path::Path, mode: u32) -> Result<(), AppError> {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode))
+        .map_err(|error| AppError::io(path, error))
+}
+
+#[cfg(not(unix))]
+fn set_private_permissions(_path: &std::path::Path, _mode: u32) -> Result<(), AppError> {
+    Ok(())
 }
 
 #[cfg(test)]
