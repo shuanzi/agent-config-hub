@@ -2,6 +2,8 @@
 
 > 状态：Accepted
 >
+> Subagent 原生管理部分于 2026-09-08 由 [ADR-0021](0021-native-subagent-management.md) 更新；不再把统一 Markdown 跨 Agent 投放。
+>
 > 决策日期：2026-08-22
 >
 > 取代：ADR-0003、ADR-0004、ADR-0011（均标记 Superseded）

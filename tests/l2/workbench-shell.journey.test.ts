@@ -280,6 +280,7 @@ describe('Workbench shell and visual fixture', () => {
     );
     await subagents.click();
     await $('.subagent-panel').waitForDisplayed();
-    expect(await $$('.subagent-list [data-subagent-list-id]').length).toBe(2);
+    await $('.native-row').waitForDisplayed();
+    expect(await $$('.native-row').length).toBe(8);
   });
 });

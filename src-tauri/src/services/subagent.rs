@@ -1324,6 +1324,7 @@ impl SubagentService {
 
     /// 在外部已持有 Subagent 写锁时，重建一个明确 target 的单个 Agent 投影。
     /// Codex 项目 Subagent 不参与重建；它没有可投影的受支持路径。
+    #[allow(dead_code)]
     pub(crate) fn sync_target_to_app_unlocked(
         db: &Arc<Database>,
         target: &ScopeTarget,
@@ -3250,7 +3251,7 @@ mod tests {
 
     #[test]
     #[serial]
-    fn migrate_storage_moves_project_subagent_sibling_and_rebuilds_projection() {
+    fn migrate_storage_moves_project_legacy_ssot_without_rebuilding_projection() {
         let home = tempdir().expect("home");
         let _home_guard = TestHomeGuard::set(home.path());
         let db = Arc::new(Database::memory().expect("memory db"));
@@ -3281,6 +3282,8 @@ mod tests {
             .join("agents")
             .join("project-agent.md");
         assert!(project_projection.is_file());
+        let original_projection_target =
+            fs::read_link(&project_projection).expect("projection link");
         let backup_marker = config::get_hub_subagent_backups_dir().join("fixed-marker");
         fs::create_dir_all(backup_marker.parent().expect("backup parent")).expect("backup root");
         fs::write(&backup_marker, "keep").expect("backup marker");
@@ -3296,8 +3299,12 @@ mod tests {
         assert!(new_project_ssot.join("project-agent.md").is_file());
         assert!(!old_project_ssot.exists());
         assert!(
-            project_projection.is_file(),
-            "project projection must be rebuilt against the moved sibling"
+            SkillService::is_symlink(&project_projection),
+            "legacy project projection entry must not be rewritten"
+        );
+        assert_eq!(
+            fs::read_link(&project_projection).expect("unchanged projection link"),
+            original_projection_target
         );
         assert!(
             backup_marker.is_file(),
@@ -3307,7 +3314,7 @@ mod tests {
 
     #[test]
     #[serial]
-    fn migrate_storage_rolls_back_project_subagent_sibling_when_projection_rebuild_fails() {
+    fn migrate_storage_ignores_legacy_project_projection_failure_injection() {
         let home = tempdir().expect("home");
         let _home_guard = TestHomeGuard::set(home.path());
         let db = Arc::new(Database::memory().expect("memory db"));
@@ -3330,19 +3337,23 @@ mod tests {
         fs::create_dir_all(&claude_dir).expect("claude parent");
         fs::write(claude_dir.join("agents"), "not a directory").expect("block project projection");
 
-        let error = crate::commands::migrate_storage_combined(&db, StorageLocation::Unified)
-            .expect_err("project projection failure must roll back Subagent sibling");
-        assert!(error.to_string().contains("MIGRATION_ABORTED"));
-        assert!(old_project_ssot.join("project-agent.md").is_file());
-        assert!(!config::get_home_dir()
+        crate::commands::migrate_storage_combined(&db, StorageLocation::Unified)
+            .expect("legacy project projection is excluded from rebuild");
+        assert!(!old_project_ssot.exists());
+        assert!(config::get_home_dir()
             .join(".agents")
             .join("projects")
             .join(&project.project_id)
             .join("subagents")
-            .exists());
+            .join("project-agent.md")
+            .is_file());
+        assert_eq!(
+            fs::read_to_string(claude_dir.join("agents")).unwrap(),
+            "not a directory"
+        );
         assert_eq!(
             crate::settings::get_settings().storage_location,
-            StorageLocation::Hub
+            StorageLocation::Unified
         );
     }
 
@@ -4042,7 +4053,7 @@ mod tests {
 
     #[test]
     #[serial]
-    fn migrate_storage_moves_ssot_and_refreshes_projections() {
+    fn migrate_storage_moves_legacy_ssot_without_refreshing_projection() {
         let tmp = tempdir().unwrap();
         let _guard = TestHomeGuard::set(tmp.path());
         crate::settings::set_sync_method(SyncMethod::Symlink).unwrap();
@@ -4071,6 +4082,8 @@ mod tests {
         };
         db.save_subagent(&subagent).unwrap();
         SubagentService::sync_to_app_dir("migrate-agent", &AgentType::ClaudeCode).unwrap();
+        let projection = config::get_claude_agents_dir().join("migrate-agent.md");
+        let original_projection_target = fs::read_link(&projection).unwrap();
 
         let result = crate::commands::migrate_storage_combined(&db, StorageLocation::Unified)
             .expect("migrate");
@@ -4083,9 +4096,11 @@ mod tests {
             .join("migrate-agent.md");
         assert!(new_ssot.exists());
 
-        let projection = config::get_claude_agents_dir().join("migrate-agent.md");
-        assert!(projection.exists());
         assert!(SkillService::is_symlink(&projection));
+        assert_eq!(
+            fs::read_link(&projection).unwrap(),
+            original_projection_target
+        );
 
         assert_eq!(
             crate::settings::get_settings().storage_location,

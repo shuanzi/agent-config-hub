@@ -1,3 +1,4 @@
+mod native_subagents;
 mod projects;
 mod prompts;
 mod settings;

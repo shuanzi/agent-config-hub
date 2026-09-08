@@ -1,5 +1,7 @@
 # subagent-management Specification
 
+> 2026-09-08：下列统一 Markdown / 四 Agent 投影、项目 Codex 不支持及 SSOT 重投影条款已被用户批准的 [ADR-0021：原生管理](../../../docs/architecture/adr/0021-native-subagent-management.md) 取代。本文保留旧版本验收依据，不再作为新原生接口的实现约束。现行支持全局及项目 Codex TOML、单 Agent 定义身份、只读识别后显式接管、摘要保护的源码保存、原生启停、条目级备份恢复和更新预览；旧记录与旧备份保留待核对。Skills 与长期指令不受此替代影响。
+
 ## Purpose
 
 Subagent 定义文件的全生命周期管理：从 GitHub 仓库发现 subagent（带 frontmatter 的 Markdown 文件），集中安装到 SSOT 目录，并按用户开关以 symlink 或 copy 方式投影到各 Agent 的 subagent 目录。

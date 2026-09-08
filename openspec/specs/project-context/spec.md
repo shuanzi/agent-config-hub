@@ -46,6 +46,8 @@
 
 ### Requirement: 重新关联项目 root 与重复登记保护
 
+> 2026-09-08 原生 Subagent 补充：原生记录与备份携带明确来源位置，因此存在这些状态时拒绝直接改绑，防止旧来源越界。用户可先显式卸载并逐条确认清理原生备份，再重新关联；此保护不自动迁移或删除文件。详见 [ADR-0021](../../../docs/architecture/adr/0021-native-subagent-management.md)。下述原 SSOT resolver 重关联行为仍适用于未受此原生状态保护的项目。
+
 `add_project` 和 `relink_project_root` SHALL 只接受现存目录，并在该时点规范化 root 以拒绝另一个 `projectId` 已登记的同一规范化 root。规范化 root 仅用于重复登记保护和 resolver 输入，SHALL NOT 成为项目 identity、合并同名项目或触发自动发现。`relink_project_root(projectId, rootPath)` SHALL 保持既有 `projectId`、资产 ownership 和以该 `projectId` 隔离的项目 SSOT sibling 不变，只更新 registry root；它 SHALL NOT 扫描、移动、复制或删除资产或项目文件。
 
 #### Scenario: 重新关联有资产的项目

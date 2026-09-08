@@ -1,131 +1,129 @@
 import { describe, it } from 'mocha';
 import { $, $$, browser, expect } from '@wdio/globals';
+import { mkdir } from 'node:fs/promises';
 
 const ENTRY = '/tests/l2/workbench.html';
-
-async function waitForStable(): Promise<void> {
-  await browser.waitUntil(async () => {
-    const loaders = await $$('.spin');
-    return (await loaders.length) === 0;
-  });
+async function openSubagents() {
+  await browser.url(ENTRY);
+  const navigation = $(
+    "//*[@data-workbench-rail='asset-type']//button[normalize-space()='Subagents']",
+  );
+  await navigation.waitForDisplayed();
+  await navigation.click();
+  if (await $('[data-narrow-step="context"]').isExisting()) {
+    await $("//nav[@aria-label='配置上下文']//button[normalize-space()='全局配置']").click();
+  }
+  await $('.native-row').waitForDisplayed();
 }
 
-describe('Subagent management journey', () => {
-  it('navigates to subagents, discovers, installs, toggles agent and uninstalls', async () => {
+describe('原生 Subagent 管理旅程', () => {
+  it('发现已有定义，接管、编辑、停用、启用、卸载并从备份恢复', async () => {
     await browser.setWindowSize(1280, 900);
-    await browser.url(ENTRY);
-
-    // 切换到 Subagents 视图
-    const subagentsTab = await $(
-      "//*[@data-workbench-rail='asset-type']//button[normalize-space()='Subagents']",
-    );
-    await subagentsTab.waitForDisplayed();
-    await subagentsTab.click();
-    await waitForStable();
-
-    // 「全部」不能作为 mutation target；先选择全局配置执行安装旅程。
-    await $("//nav[@aria-label='配置上下文']//button[normalize-space()='全局配置']").click();
-    await waitForStable();
-
-    expect(await $('.sub-tab.active').getText()).toContain('已安装');
-
-    // 切换到发现页签
-    const discoveryTab = await $("//button[contains(@class,'sub-tab')][normalize-space()='发现']");
-    await discoveryTab.click();
-    await waitForStable();
-
-    // 搜索并安装
-    const searchInput = await $('#subagent-discovery-search');
-    await searchInput.setValue('pr');
-
-    const discoveryRow = await $("[data-subagent-key='anthropics/subagents:pr-reviewer']");
-    await discoveryRow.$('.subagent-list-row-select').click();
-    const discoveryDetail = await $(
-      "[data-subagent-detail-key='anthropics/subagents:pr-reviewer']",
-    );
-    await discoveryDetail.waitForDisplayed();
-    const installButton = await discoveryDetail.$(".//button[normalize-space()='安装']");
-    await installButton.waitForDisplayed();
-    await installButton.click();
-    const installDialog = await $("[role='dialog']");
-    await installDialog.waitForDisplayed();
-    await installDialog.$(".//input[@type='radio' and @value='codex']").click();
-    await installDialog.$(".//button[normalize-space()='确认安装']").click();
-
-    // 等待安装完成并切换回已安装视图
-    await browser.waitUntil(async () => (await (await $$('.spin')).length) === 0);
-    const installedTab = await $(
-      "//button[contains(@class,'sub-tab')][normalize-space()='已安装']",
-    );
-    await installedTab.click();
-    await waitForStable();
-
-    const installedCard = await $("[data-subagent-list-id='anthropics/subagents:pr-reviewer']");
-    await installedCard.waitForDisplayed();
-    expect(await installedCard.$('.skill-card-title').getText()).toContain('PR Reviewer');
-    await installedCard.$('.subagent-list-row-select').click();
-
-    const installedDetail = await $("[data-subagent-detail-id='anthropics/subagents:pr-reviewer']");
-    await installedDetail.waitForDisplayed();
-
-    // 切换 Codex 启用开关
-    const codexToggle = await installedDetail.$(".//label[contains(@title,'Codex')]//input");
-    const wasChecked = await codexToggle.isSelected();
-    await codexToggle.click();
-    await browser.waitUntil(async () => (await codexToggle.isSelected()) === !wasChecked);
-
-    // 卸载
-    const uninstallButton = await installedDetail.$(".//button[normalize-space()='卸载']");
-    await uninstallButton.click();
-    const uninstallDialog = await $("[role='dialog']");
-    await uninstallDialog.waitForDisplayed();
-    expect(await uninstallDialog.$('h2').getText()).toBe('确认卸载');
-    await uninstallDialog.$(".//button[normalize-space()='卸载']").click();
+    await openSubagents();
+    expect(await $$('.native-row').length).toBe(8);
+    await $('[data-native-identity="codex:reviewer"]').click();
+    const detail = $('[aria-label="reviewer 详情"]');
+    await detail.$(".//button[normalize-space()='查看原生源码']").click();
+    const editor = $('[aria-label="Subagent 原生源码"]');
+    await editor.waitForDisplayed();
+    expect(await editor.getAttribute('readonly')).not.toBeNull();
+    await detail.$(".//button[normalize-space()='纳入管理']").click();
+    await $("//*[@role='dialog']//button[normalize-space()='确认纳入管理']").click();
+    await browser.waitUntil(async () => !(await editor.getAttribute('readonly')));
+    const content = await editor.getValue();
+    await editor.setValue(`${content}\n# Preserved native edit\n`);
+    await detail.$(".//button[normalize-space()='保存原生源码']").click();
     await browser.waitUntil(
-      async () =>
-        (await $("[data-subagent-list-id='anthropics/subagents:pr-reviewer']").isExisting()) ===
-        false,
+      async () => !(await detail.$(".//button[normalize-space()='保存原生源码']").isEnabled()),
     );
-
-    // 验证回到空状态提示
-    expect(await $('.subagent-empty h3').getText()).toContain('尚未安装');
+    await detail.$(".//button[normalize-space()='停用']").click();
+    await detail.$(".//button[normalize-space()='启用']").waitForDisplayed();
+    await detail.$(".//button[normalize-space()='启用']").click();
+    await detail.$(".//button[normalize-space()='停用']").waitForDisplayed();
+    expect(await detail.$$('input[type="checkbox"]').length).toBe(0);
+    await detail.$(".//button[normalize-space()='卸载']").click();
+    await $("//*[@role='dialog']//button[normalize-space()='备份并卸载']").click();
+    await browser.waitUntil(async () => (await $$('.native-row').length) === 7);
+    await $("//button[normalize-space()='备份恢复']").click();
+    const radio = $('.native-backup-item input[type="radio"]');
+    await radio.waitForDisplayed();
+    await radio.click();
+    await $("//button[normalize-space()='确认恢复所选备份']").click();
+    await browser.waitUntil(async () => (await $$('.native-row').length) === 8);
+    await $("//*[@role='dialog']//button[normalize-space()='关闭']").click();
   });
 
-  it('uses the visual fixture for installed detail update', async () => {
-    await browser.setWindowSize(1280, 900);
-    await browser.url(`${ENTRY}?fixture=visual`);
-    await waitForStable();
-
-    const subagentsTab = await $(
-      "//*[@data-workbench-rail='asset-type']//button[normalize-space()='Subagents']",
-    );
-    await subagentsTab.click();
-    await waitForStable();
-
-    // fixture 中 PR Reviewer 是全局记录，更新前先具备明确操作目标。
-    await $("//nav[@aria-label='配置上下文']//button[normalize-space()='全局配置']").click();
-    await waitForStable();
-
-    const checkUpdates = await $("//button[normalize-space()='检查更新']");
-    await checkUpdates.click();
-    await browser.waitUntil(async () =>
-      (await $('.subagent-status-message').getText()).includes('发现 1 个可更新的 Subagent。'),
-    );
-
-    const installedRow = await $("[data-subagent-list-id='anthropics/subagents:pr-reviewer']");
-    await installedRow.$('.subagent-list-row-select').click();
-    const detail = await $("[data-subagent-detail-id='anthropics/subagents:pr-reviewer']");
-    await detail.waitForDisplayed();
-
-    const updateButton = await detail.$(".//button[normalize-space()='更新']");
-    await updateButton.waitForDisplayed();
-    await updateButton.click();
-
-    await browser.waitUntil(async () =>
-      (await $('.subagent-status-message').getText()).includes('已更新 PR Reviewer。'),
-    );
-    expect(
-      await browser.execute(() => window.__ACM_MOCK_STATE__?.subagentUpdates.length ?? -1),
-    ).toBe(0);
+  it('原生 Codex TOML 安装要求明确目标和 Agent', async () => {
+    await browser.setWindowSize(1280, 800);
+    await openSubagents();
+    await $("//button[contains(@class,'sub-tab')][normalize-space()='发现']").click();
+    expect(await $('.subagent-empty').getText()).toContain('先选择发现目标');
+    await $('[aria-label="选择 Subagent 发现目标"]').selectByAttribute('value', 'global');
+    const row = $('[data-subagent-key="example/agents:reviewer.toml"]');
+    await row.waitForDisplayed();
+    await row.click();
+    await $("//button[normalize-space()='安装']").click();
+    const confirm = $("//*[@role='dialog']//button[normalize-space()='确认安装']");
+    expect(await confirm.isEnabled()).toBe(false);
+    await $("//*[@role='dialog']//input[@value='codex']").click();
+    await confirm.click();
+    await $('[role="status"]').waitForDisplayed();
+    expect(await $('[role="status"]').getText()).toContain('已为 Codex 安装');
   });
+
+  for (const [width, height] of [
+    [1586, 992],
+    [1280, 800],
+    [390, 844],
+  ]) {
+    it(`${width} 宽度四品牌可见、无横向溢出`, async () => {
+      await browser.setViewport({ width, height, devicePixelRatio: 1 });
+      await openSubagents();
+      if (!(await $('.native-row').isDisplayed())) {
+        await $("//button[normalize-space()='全局配置']").click();
+      }
+      const result = await browser.execute(() => ({
+        viewportWidth: window.innerWidth,
+        viewportHeight: window.innerHeight,
+        overflow: document.documentElement.scrollWidth > window.innerWidth,
+        logos: [...document.querySelectorAll<HTMLImageElement>('.subagent-agent-counts img')].map(
+          (image) => ({
+            complete: image.complete && image.naturalWidth > 0,
+            width: image.getBoundingClientRect().width,
+          }),
+        ),
+      }));
+      expect(result.viewportWidth).toBe(width);
+      expect(result.viewportHeight).toBe(height);
+      expect(result.overflow).toBe(false);
+      expect(result.logos.length).toBe(4);
+      expect(result.logos.every((logo) => logo.complete && logo.width > 0)).toBe(true);
+      await mkdir('output/playwright', { recursive: true });
+      await browser.saveScreenshot(`output/playwright/native-subagents-${width}.png`);
+      await $('[data-native-identity="codex:reviewer"]').click();
+      await $("//button[normalize-space()='查看原生源码']").click();
+      await $('[aria-label="Subagent 原生源码"]').waitForDisplayed();
+      await browser.saveScreenshot(`output/playwright/native-subagent-detail-${width}.png`);
+      await $("//button[contains(@class,'sub-tab')][normalize-space()='发现']").click();
+      const target = $('[aria-label="选择 Subagent 发现目标"]');
+      if (await target.isExisting()) await target.selectByAttribute('value', 'global');
+      await $('[data-subagent-key="example/agents:reviewer.toml"]').waitForDisplayed();
+      await $('[data-subagent-key="example/agents:reviewer.toml"]').click();
+      await $("//button[normalize-space()='安装']").click();
+      const dialogMetrics = await browser.execute(() => ({
+        overflow: document.documentElement.scrollWidth > window.innerWidth,
+        logos: document.querySelectorAll('.focused-dialog .agent-brand-mark img').length,
+        targets: [
+          ...document.querySelectorAll('.focused-dialog .initial-agent-radio-options label'),
+        ].map((label) => label.getBoundingClientRect().height),
+        closeHeight: document.querySelector('.focused-dialog-close')?.getBoundingClientRect()
+          .height,
+      }));
+      expect(dialogMetrics.overflow).toBe(false);
+      expect(dialogMetrics.targets.length).toBe(4);
+      if (width === 390) expect(dialogMetrics.targets.every((height) => height >= 44)).toBe(true);
+      if (width === 390) expect(dialogMetrics.closeHeight).toBeGreaterThanOrEqual(44);
+      await browser.saveScreenshot(`output/playwright/native-subagent-install-${width}.png`);
+    });
+  }
 });

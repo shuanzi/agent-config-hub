@@ -6,6 +6,12 @@ import type { ReactNode } from 'react';
 import type { ConfigContext } from '../../../src/types';
 import { App } from '../../../src/App';
 
+const { mockOpenDirectoryDialog } = vi.hoisted(() => ({
+  mockOpenDirectoryDialog: vi.fn(),
+}));
+
+vi.mock('@tauri-apps/plugin-dialog', () => ({ open: mockOpenDirectoryDialog }));
+
 vi.mock('../../../src/components/skills/InstalledSkillsPanel', () => ({
   InstalledSkillsPanel: ({ context }: { context: ConfigContext }) => (
     <div data-testid="installed-skills-panel">
@@ -103,6 +109,7 @@ interface ProjectSummaryFixture {
 
 describe('App selected B2 shell', () => {
   beforeEach(() => {
+    mockOpenDirectoryDialog.mockReset();
     installMatchMedia(false);
     (window as unknown as Record<string, unknown>).__ACM_MOCK_INVOKE__ = (command: string) =>
       command === 'list_projects' ? [] : undefined;
@@ -268,6 +275,110 @@ describe('App selected B2 shell', () => {
       }),
     );
     expect(screen.getByRole('status').textContent).toContain('已添加项目「新项目」');
+  });
+
+  it('selects an add-project directory and infers a name without overwriting user input', async () => {
+    renderApp();
+
+    fireEvent.click(screen.getByRole('button', { name: '添加项目' }));
+    const dialog = screen.getByRole('dialog', { name: '添加项目' });
+    const rootInput = within(dialog).getByLabelText('项目目录') as HTMLInputElement;
+    const nameInput = within(dialog).getByLabelText('显示名称（可选）') as HTMLInputElement;
+
+    mockOpenDirectoryDialog.mockResolvedValueOnce(null);
+    fireEvent.click(within(dialog).getByRole('button', { name: '选择项目文件夹' }));
+    await waitFor(() => expect(mockOpenDirectoryDialog).toHaveBeenCalledTimes(1));
+    expect(mockOpenDirectoryDialog).toHaveBeenLastCalledWith({
+      multiple: false,
+      directory: true,
+    });
+    expect(rootInput.value).toBe('');
+    expect(nameInput.value).toBe('');
+
+    mockOpenDirectoryDialog.mockResolvedValueOnce('/workspaces/中文 路径/my-project/');
+    fireEvent.click(within(dialog).getByRole('button', { name: '选择项目文件夹' }));
+    await waitFor(() => expect(rootInput.value).toBe('/workspaces/中文 路径/my-project/'));
+    expect(nameInput.value).toBe('my-project');
+
+    fireEvent.change(nameInput, { target: { value: '我的项目' } });
+    mockOpenDirectoryDialog.mockResolvedValueOnce('/workspaces/another-project');
+    fireEvent.click(within(dialog).getByRole('button', { name: '选择项目文件夹' }));
+    await waitFor(() => expect(rootInput.value).toBe('/workspaces/another-project'));
+    expect(nameInput.value).toBe('我的项目');
+  });
+
+  it('reports directory picker failures inside the active dialog', async () => {
+    renderApp();
+
+    fireEvent.click(screen.getByRole('button', { name: '添加项目' }));
+    const dialog = screen.getByRole('dialog', { name: '添加项目' });
+    mockOpenDirectoryDialog.mockRejectedValueOnce(new Error('native dialog unavailable'));
+    fireEvent.click(within(dialog).getByRole('button', { name: '选择项目文件夹' }));
+
+    expect((await within(dialog).findByRole('alert')).textContent).toContain(
+      '操作失败，请稍后重试。',
+    );
+    expect(within(dialog).getByRole('button', { name: '选择项目文件夹' })).toHaveProperty(
+      'disabled',
+      false,
+    );
+  });
+
+  it('ignores a stale directory result after the project dialog closes', async () => {
+    let resolvePicker: (path: string) => void = () => undefined;
+    mockOpenDirectoryDialog.mockImplementationOnce(
+      () =>
+        new Promise<string>((resolve) => {
+          resolvePicker = resolve;
+        }),
+    );
+    renderApp();
+
+    fireEvent.click(screen.getByRole('button', { name: '添加项目' }));
+    let dialog = screen.getByRole('dialog', { name: '添加项目' });
+    fireEvent.click(within(dialog).getByRole('button', { name: '选择项目文件夹' }));
+    expect(await within(dialog).findByText('正在选择…')).toBeTruthy();
+    expect(within(dialog).getByRole('button', { name: '添加项目' })).toHaveProperty(
+      'disabled',
+      true,
+    );
+
+    fireEvent.click(within(dialog).getByRole('button', { name: '关闭对话框' }));
+    fireEvent.click(screen.getByRole('button', { name: '添加项目' }));
+    dialog = screen.getByRole('dialog', { name: '添加项目' });
+    resolvePicker('/workspaces/stale-project');
+
+    await act(async () => undefined);
+    expect((within(dialog).getByLabelText('项目目录') as HTMLInputElement).value).toBe('');
+    expect((within(dialog).getByLabelText('显示名称（可选）') as HTMLInputElement).value).toBe('');
+  });
+
+  it('uses the same directory picker when relinking a project', async () => {
+    (window as unknown as Record<string, unknown>).__ACM_MOCK_INVOKE__ = (command: string) =>
+      command === 'list_projects'
+        ? [
+            {
+              projectId: 'project-alpha',
+              displayName: '项目 Alpha',
+              rootPath: '/workspaces/alpha',
+            },
+          ]
+        : undefined;
+    renderApp();
+
+    const relink = await screen.findByRole('button', {
+      name: '重新关联 项目 Alpha（/workspaces/alpha）',
+    });
+    fireEvent.click(relink);
+    const dialog = screen.getByRole('dialog', { name: '重新关联项目目录' });
+    mockOpenDirectoryDialog.mockResolvedValueOnce('/workspaces/relinked');
+    fireEvent.click(within(dialog).getByRole('button', { name: '选择项目文件夹' }));
+
+    await waitFor(() =>
+      expect((within(dialog).getByLabelText('项目目录') as HTMLInputElement).value).toBe(
+        '/workspaces/relinked',
+      ),
+    );
   });
 
   it('uses the type-to-context-to-content stack below the B2 breakpoint and skips context for settings', () => {
