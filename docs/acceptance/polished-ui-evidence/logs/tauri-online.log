@@ -1,0 +1,519 @@
+
+> agent-config-manager@0.1.0 test:tauri
+> node scripts/orchestrator/test-tauri.mjs
+
+
+=== L3 tsc -b
+PASS  L3 tsc -b  exit 0 (6636ms)
+
+=== L3 vite build（vite.l3.config.ts，含 contract 测试入口）
+vite v6.4.3 building for production...
+transforming...
+✓ 1893 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/tests/l3/app.html                            0.54 kB │ gzip:  0.33 kB
+dist/tests/l3/smoke.html                          0.62 kB │ gzip:  0.34 kB
+dist/index.html                                   0.92 kB │ gzip:  0.52 kB
+dist/assets/InterVariable-DiVDrmQJ.woff2        352.24 kB
+dist/assets/main-BE_xen-q.css                    84.93 kB │ gzip: 13.92 kB
+dist/assets/app-D70iTU4F.js                       0.33 kB │ gzip:  0.25 kB
+dist/assets/modulepreload-polyfill-B5Qt9EMX.js    0.71 kB │ gzip:  0.40 kB
+dist/assets/event-BK_86lmQ.js                     1.41 kB │ gzip:  0.68 kB
+dist/assets/core-DhEqZVGG.js                      2.44 kB │ gzip:  0.98 kB
+dist/assets/smoke-D7qk-lGc.js                     5.16 kB │ gzip:  2.02 kB
+dist/assets/index-B0VrNelQ.js                    15.47 kB │ gzip:  4.67 kB
+dist/assets/projects-BeYAgOMd.js                145.63 kB │ gzip: 46.55 kB
+dist/assets/main-7WWu65iL.js                    173.30 kB │ gzip: 47.20 kB
+✓ built in 1.13s
+PASS  L3 vite build（vite.l3.config.ts，含 contract 测试入口）  exit 0 (2125ms)
+
+=== L3 harness debug build
+        Info Looking up installed tauri packages to check mismatched versions...
+   Compiling agent-config-manager v0.1.0 (<repo>/src-tauri)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 7.02s
+       Built application at: <repo>/src-tauri/target/debug/agent-config-manager
+PASS  L3 harness debug build  exit 0 (8419ms)
+
+harness 构建完成；artifact identity: com.agentconfigmanager.testharness (debug)
+
+=== L3 wdio（tests/l3：tracer + contract）
+
+Execution of 1 workers started at 2026-09-27T05:05:19.516Z
+
+[0-0] RUNNING in undefined - file:///tests/l3/smoke.test.ts
+[0-0] 2026-09-27T05:05:20.290Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:20.292Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:20.312Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:20.312Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:20.349Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:20.349Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:20.367Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:20.367Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:20.390Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:20.390Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:20.405Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:20.405Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:20.427Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:20.427Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:20.441Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:20.441Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:20.462Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:20.462Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:20.476Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:20.476Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:20.494Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:20.494Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:20.506Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:20.506Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:20.526Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:20.526Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:20.539Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:20.539Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:20.557Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:20.557Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:20.570Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:20.570Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:20.588Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:20.588Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:20.600Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:20.600Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:20.616Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:20.616Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:20.628Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:20.628Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:20.646Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:20.646Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:20.658Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:20.658Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:20.674Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:20.674Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:20.686Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:20.686Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:20.700Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:20.700Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:20.713Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:20.713Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:20.744Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:20.744Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:20.785Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:20.785Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:20.846Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:20.846Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:20.859Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:20.859Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:20.877Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:20.877Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:20.888Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:20.888Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:20.961Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:20.961Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:20.972Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:20.972Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] UI checkpoint: production App mounted
+[0-0] 2026-09-27T05:05:20.990Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:20.990Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:21.002Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:21.002Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:21.017Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:21.017Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:21.028Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:21.028Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:21.036Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:21.036Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:21.060Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:21.060Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:21.070Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:21.070Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:21.093Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:21.093Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:21.107Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:21.107Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:21.120Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:21.120Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:21.136Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:21.136Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:21.148Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:21.148Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] UI checkpoint: settings saved
+[0-0] 2026-09-27T05:05:21.166Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:21.166Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:21.176Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:21.176Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:21.192Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:21.192Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:21.203Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:21.203Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:21.216Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:21.216Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:21.238Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:21.238Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:21.251Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:21.251Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:21.265Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:21.265Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:21.277Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:21.277Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:21.288Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:21.288Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:21.307Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:21.307Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:21.319Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:21.319Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:21.332Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:21.332Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:21.345Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:21.345Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:21.354Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:21.354Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:21.376Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:21.376Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:21.394Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:21.394Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] UI checkpoint: import dialog opened
+[0-0] 2026-09-27T05:05:21.439Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:21.439Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:21.457Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:21.457Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:21.473Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:21.473Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:21.488Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:21.488Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:21.498Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:21.498Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:21.509Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:21.509Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:21.525Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:21.525Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:21.539Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:21.539Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:21.550Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:21.550Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:21.561Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:21.561Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:21.574Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:21.574Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:21.588Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:21.588Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:21.599Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:21.599Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:21.607Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:21.607Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:21.628Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:21.628Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:21.641Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:21.641Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:21.654Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:21.654Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:21.663Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:21.663Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] UI checkpoint: import committed
+[0-0] 2026-09-27T05:05:21.788Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:21.788Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:21.798Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:21.798Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:21.818Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:21.818Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:21.829Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:21.829Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:21.841Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:21.841Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:21.867Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:21.867Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:21.879Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:21.879Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:21.890Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:21.890Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:21.918Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:21.918Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:21.929Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:21.929Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:21.943Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:21.943Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:21.956Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:21.956Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:21.973Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:21.973Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:22.061Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:22.061Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:22.081Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:22.081Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:22.101Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:22.101Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:22.111Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:22.111Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:22.129Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:22.129Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:22.143Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:22.143Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:22.158Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:22.158Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:22.171Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:22.171Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:22.192Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:22.192Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:22.233Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:22.233Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:22.255Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:22.255Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:22.292Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:22.292Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:22.304Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:22.304Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:22.321Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:22.321Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:22.335Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:22.335Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:22.346Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:22.346Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:22.362Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:22.363Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:22.374Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:22.374Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:22.396Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:22.396Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:22.408Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:22.408Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:22.423Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:22.423Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:22.435Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:22.435Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:22.447Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:22.447Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:22.465Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:22.465Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:22.476Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:22.476Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:22.491Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:22.491Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:22.502Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:22.502Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:22.513Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:22.513Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:22.529Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:22.529Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:22.542Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:22.542Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:22.556Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:22.556Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:22.567Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:22.567Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:22.579Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:22.579Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:22.596Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:22.596Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:22.608Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:22.608Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:22.628Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:22.628Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:22.640Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:22.640Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:22.654Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:22.654Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:22.666Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:22.666Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:22.677Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:22.677Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:22.696Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:22.697Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:22.712Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:22.712Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:22.726Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:22.726Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:22.738Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:22.738Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:22.751Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:22.751Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:22.782Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:22.782Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:22.794Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:22.794Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:22.807Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:22.807Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:22.818Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:22.818Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:22.830Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:22.830Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:22.849Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:22.849Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:22.861Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:22.861Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:22.935Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:22.936Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:22.947Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:22.947Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:22.958Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:22.958Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:22.971Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:22.971Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:22.982Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:22.982Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:23.002Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:23.002Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:23.014Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:23.014Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:23.033Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:23.033Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:23.046Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:23.046Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:23.119Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:23.119Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:23.133Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:23.133Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] ONLINE_ACCEPTANCE {"directory":"frontend-design","discovered":20,"installed":"anthropics/skills:skills/frontend-design","updated":"anthropics/skills:skills/frontend-design","updates":0}
+[0-0] 2026-09-27T05:05:51.137Z WARN tauri-service:service: Failed to clear mock store: Error: A sessionId is required for this command
+[0-0]     at FetchRequest.createOptions (file://<repo>/node_modules/webdriver/build/node.js:2162:15)
+[0-0]     at FetchRequest.createOptions (file://<repo>/node_modules/webdriver/build/node.js:2325:49)
+[0-0]     at FetchRequest.makeRequest (file://<repo>/node_modules/webdriver/build/node.js:2137:48)
+[0-0]     at Browser.protocolCommand (file://<repo>/node_modules/webdriver/build/node.js:1695:20)
+[0-0]     at Browser.wrapCommandFn (<repo>/node_modules/@wdio/utils/build/index.js:982:32)
+[0-0]     at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+[0-0]     at async Browser.wrapCommandFn (<repo>/node_modules/@wdio/utils/build/index.js:982:23)
+[0-0]     at async Object.restoreAllMocks (<repo>/node_modules/@wdio/tauri-service/dist/esm/index.js:3680:5)
+[0-0]     at async TauriWorkerService.afterSession (<repo>/node_modules/@wdio/tauri-service/dist/esm/index.js:3941:17)
+[0-0]     at async Promise.all (index 0)
+[0-0] PASSED in undefined - file:///tests/l3/smoke.test.ts
+
+ "spec" Reporter:
+------------------------------------------------------------------
+[webkit 605.1.15 macos #0-0] Running: webkit (v605.1.15) on macos
+[webkit 605.1.15 macos #0-0] Session ID: 1266806c-2248-4216-a91b-c76fe6014e2b
+[webkit 605.1.15 macos #0-0]
+[webkit 605.1.15 macos #0-0] » tests/l3/smoke.test.ts
+[webkit 605.1.15 macos #0-0] Tauri real-IPC smoke
+[webkit 605.1.15 macos #0-0]    ✓ reads seeded settings and runs skill/instruction/subagent/migration write sequences
+[webkit 605.1.15 macos #0-0]    ✓ uses opaque project IDs for same-name projects and preserves one through relink
+[webkit 605.1.15 macos #0-0]
+[webkit 605.1.15 macos #0-0] Polished production UI with isolated filesystem
+[webkit 605.1.15 macos #0-0]    ✓ imports, places, withdraws and detects a changed projection through the real UI
+[webkit 605.1.15 macos #0-0]    ✓ saves AGENTS.md and native definitions with disk readback after reload
+[webkit 605.1.15 macos #0-0]
+[webkit 605.1.15 macos #0-0] 第二次进程启动持久化回读
+[webkit 605.1.15 macos #0-0]    - 重新启动后保留 Skills 冲突状态、AGENTS.md、原生源码和同步设置
+[webkit 605.1.15 macos #0-0]
+[webkit 605.1.15 macos #0-0] 在线真实命令（独立于模拟验收）
+[webkit 605.1.15 macos #0-0]    ✓ 从公共仓库发现、安装、检查并应用同源更新
+[webkit 605.1.15 macos #0-0]
+[webkit 605.1.15 macos #0-0] 5 passing (30.9s)
+[webkit 605.1.15 macos #0-0] 1 skipped
+
+
+Spec Files:	 1 passed, 1 total (100% completed) in 00:00:31
+
+PASS L3 写入旅程 exit 0
+
+Execution of 1 workers started at 2026-09-27T05:05:53.870Z
+
+[0-0] RUNNING in undefined - file:///tests/l3/smoke.test.ts
+[0-0] 2026-09-27T05:05:54.621Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:54.622Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:54.635Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:54.635Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:54.656Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:54.656Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:54.666Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:54.666Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:54.681Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:54.681Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:54.692Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:54.692Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:54.702Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:54.702Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:54.722Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:54.722Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:54.734Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:54.734Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:54.756Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:54.756Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:54.765Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:54.765Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:54.779Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:54.779Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:54.790Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:54.790Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:54.804Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:54.804Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:54.814Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:54.814Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:54.824Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:54.824Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:54.839Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:54.839Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:54.851Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:54.851Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:54.863Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:54.863Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:54.874Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:54.874Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:54.884Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:54.884Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:54.899Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:54.899Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:54.910Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:54.910Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:54.925Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:54.925Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:54.936Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:54.936Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:54.949Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:54.949Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:55.001Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:55.001Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:55.032Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:55.032Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:55.053Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:55.053Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:55.065Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:55.065Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:55.081Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:55.081Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:55.093Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:55.093Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:55.104Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:55.104Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:55.127Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:55.127Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:55.142Z WARN tauri-service:window: Could not find window with title containing "Agent Config Manager (Test Harness)"
+[0-0] 2026-09-27T05:05:55.142Z WARN tauri-service:window: [SERVICE] Failed to switch to active window: Agent Config Manager (Test Harness)
+[0-0] 2026-09-27T05:05:55.161Z WARN tauri-service:service: Failed to clear mock store: Error: A sessionId is required for this command
+[0-0]     at FetchRequest.createOptions (file://<repo>/node_modules/webdriver/build/node.js:2162:15)
+[0-0]     at FetchRequest.createOptions (file://<repo>/node_modules/webdriver/build/node.js:2325:49)
+[0-0]     at FetchRequest.makeRequest (file://<repo>/node_modules/webdriver/build/node.js:2137:48)
+[0-0]     at Browser.protocolCommand (file://<repo>/node_modules/webdriver/build/node.js:1695:20)
+[0-0]     at Browser.wrapCommandFn (<repo>/node_modules/@wdio/utils/build/index.js:982:32)
+[0-0]     at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+[0-0]     at async Browser.wrapCommandFn (<repo>/node_modules/@wdio/utils/build/index.js:982:23)
+[0-0]     at async Object.restoreAllMocks (<repo>/node_modules/@wdio/tauri-service/dist/esm/index.js:3680:5)
+[0-0]     at async TauriWorkerService.afterSession (<repo>/node_modules/@wdio/tauri-service/dist/esm/index.js:3941:17)
+[0-0]     at async Promise.all (index 0)
+[0-0] PASSED in undefined - file:///tests/l3/smoke.test.ts
+
+ "spec" Reporter:
+------------------------------------------------------------------
+[webkit 605.1.15 macos #0-0] Running: webkit (v605.1.15) on macos
+[webkit 605.1.15 macos #0-0] Session ID: 965d7af3-0800-4ab1-8efd-cd6754798845
+[webkit 605.1.15 macos #0-0]
+[webkit 605.1.15 macos #0-0] » tests/l3/smoke.test.ts
+[webkit 605.1.15 macos #0-0] Tauri real-IPC smoke
+[webkit 605.1.15 macos #0-0]    - reads seeded settings and runs skill/instruction/subagent/migration write sequences
+[webkit 605.1.15 macos #0-0]    - uses opaque project IDs for same-name projects and preserves one through relink
+[webkit 605.1.15 macos #0-0]
+[webkit 605.1.15 macos #0-0] Polished production UI with isolated filesystem
+[webkit 605.1.15 macos #0-0]    - imports, places, withdraws and detects a changed projection through the real UI
+[webkit 605.1.15 macos #0-0]    - saves AGENTS.md and native definitions with disk readback after reload
+[webkit 605.1.15 macos #0-0]
+[webkit 605.1.15 macos #0-0] 第二次进程启动持久化回读
+[webkit 605.1.15 macos #0-0]    ✓ 重新启动后保留 Skills 冲突状态、AGENTS.md、原生源码和同步设置
+[webkit 605.1.15 macos #0-0]
+[webkit 605.1.15 macos #0-0] 在线真实命令（独立于模拟验收）
+[webkit 605.1.15 macos #0-0]    - 从公共仓库发现、安装、检查并应用同源更新
+[webkit 605.1.15 macos #0-0]
+[webkit 605.1.15 macos #0-0] 1 passing (601ms)
+[webkit 605.1.15 macos #0-0] 5 skipped
+
+
+Spec Files:	 1 passed, 1 total (100% completed) in 00:00:01
+
+PASS L3 进程重启回读 exit 0
+
+test:tauri OK

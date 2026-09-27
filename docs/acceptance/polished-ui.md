@@ -1,0 +1,101 @@
+# Polished UI 操作验收
+
+本次实现以 [polished 清单](../design/agent-config-manager-ui/polished/README.md)及对应可编辑 Pen 为视觉基准。Skills 保留 cc-switch 式五列、64px 紧凑行和横排投放位置；共享目录是目录位置，不是第五种 Agent。浏览器和桌面均使用正式 `App` 与组件，旧 `prototype=full-ui` 不作为验收入口。
+
+[本地测试结果与实际截图](./polished-ui-results.md)。
+
+## 启动
+
+工具链：Node 24.18.0、npm 11.16.0、Rust；依赖按 `package-lock.json` 执行 `npm ci`。使用 Corepack 时可把下列 `npm` 替换为 `corepack npm`。
+
+```sh
+npm run accept:ui
+```
+
+打开 <http://127.0.0.1:1421/tests/acceptance/>。端口被占用时可用 `npm run accept:ui -- --port 1422`。页面标明模拟数据，刷新恢复样例；操作仅更新内存。文件选择有独立的「模拟文件选择」弹窗，支持选择和取消。
+
+```sh
+npm run accept:app
+```
+
+构建后启动独立的「Agent Config Manager · 隔离验收」窗口。macOS 使用本地调试 `.app`，不生成分发安装包或正式签名。应用启动配置也保存当前 `ACM_HOME`，从 macOS 直接重开仍保持隔离。首次构建可能需要数分钟，终端打印实际路径。默认目录为仓库内 `.artifacts/acceptance/home`，数据库和 Agent 配置都通过 `ACM_HOME` 指向该目录；前端与 Cargo 构建分别位于 `.artifacts/acceptance/frontend` 和 `.artifacts/acceptance/target`，均与自动化测试产物分离。此入口不包含测试驱动和模拟命令。
+
+重复启动保留数据。`npm run accept:app -- --fresh` 另建时间戳目录，不删除旧数据。继续某次验收使用 `npm run accept:app -- --home /完整/验收目录`；已构建且代码未变时可加 `--no-build`。关闭窗口退出应用。
+
+以下用 **验收根目录** 指终端打印的 `ACM_HOME`。不要将路径覆盖或项目位置指向自己的工作目录；要验证真实写入，请选择根目录内的样例。
+
+## 浏览器验收
+
+入口提供页面、空态、持续加载、读取错误和窄屏导航。窗口尺寸分别使用 1586×992、1280×800、390×844。
+
+| 入口与操作 | 预期结果 |
+| --- | --- |
+| Skills 紧凑列表 | 5 个受管 Skill、9 处投放；桌面五列、行高 64px、图标 32px；窄屏行高 140px、图标 44px，保持横排 |
+| 行内 Codex 图标点击两次 | 投放、撤回依次反馈；仅该行所属目标变化 |
+| 对 `react-best-practices` 点击 Gemini CLI 图标 → 详情 → 接管 → 预览 → 确认 | 展示来源与投放路径，接管后位置变为已投放 |
+| 对同一 Skill 点击红色 OpenCode 图标，或键盘聚焦后按 Enter | 显示冲突原因，禁止写入；Esc 关闭提示，完整路径可被辅助技术读取 |
+| 顶部选择项目目标，然后操作全局 Skill 的行内图标 | 行内操作仍作用于全局；顶部目标仅控制导入、ZIP、检查更新与备份等操作 |
+| 导入已有 → 选择 local-helper → 勾选共享目录 → 预览 → 确认 | 展示将执行的文件动作，确认后列表出现新条目 |
+| 从 ZIP 安装 → 选择文件 → 取消选择 | 返回安装弹窗，不产生安装；重新选择样例和初始位置后可安装 |
+| 行内更多操作 → 卸载 → 确认 → 从备份恢复 | 存在备份记录，可恢复到记录所属目标 |
+| 发现 → 选择目标 → 安装 | 显式选择初始投放位置后才可提交；共享目录仅全局可选 |
+| 长期指令 → 全局或同名项目文档 → 编辑 → 保存 → 切换回来 | 内容分别回读，两个同名项目由实际路径区分 |
+| Subagents → 选择定义 → 查看原生源码 | Codex TOML、Markdown 保留原生形式；未托管内容需接管后编辑 |
+| repo-reviewer → 编辑／备份／停用／启用／检查更新／备份恢复 | 相应反馈与列表状态变化；更新先展示当前和候选源码 |
+| 设置 → 填覆盖路径但不保存 → 切换同步方式 | 同步方式即时生效，路径草稿保留且未随之提交 |
+| 设置 → 保存覆盖路径／选择存储迁移 | 覆盖路径显式保存；存在 Skill 时迁移需确认 |
+| 错误状态入口 → 重新读取投放状态 | 错误恢复为正常列表；空态和加载态分别可进入 |
+| 窄屏列表 → 详情 → 返回列表 → 顶部返回 | 逐层退回列表、配置上下文、资产类型；弹窗 Tab 焦点循环，Esc 返回触发位置 |
+
+模拟数据的 `?scenario=isolation` 额外包含一个与全局同名同 ID 的项目 Skill，用于验证完整目标身份。正常视觉样例仍为 5 行。
+
+## 隔离桌面验收
+
+首次启动 Skills 是空列表，磁盘样例尚未接管。这样可以从真实的扫描、选择和接管流程开始验收。
+
+| 流程 | 操作 | 界面及文件结果 |
+| --- | --- | --- |
+| 准备同步方式 | 设置 → 复制 | 立即反馈保存成功，后续投放生成独立副本，便于观察外部修改冲突 |
+| Skills 接管 | 全局配置 → Skills → 导入已有；选择 `code-review` 的 Claude Code 来源，勾选 Claude Code 与 Codex，预览后确认 | 来源为 `根目录/.claude/skills/code-review`；预览列出主资产、原路径处理和投放动作；确认后两个位置受管，内容保持。未勾选的来源不会接管或替换 |
+| 投放／撤回 | 点击 code-review 的 Gemini CLI 或共享目录图标，再点击撤回 | 对应 `根目录/.gemini/skills/code-review` 或 `.agents/skills/code-review` 出现／消失；其他位置保持 |
+| revision 冲突 | 对已投放的复制副本修改 `SKILL.md`，点击重新读取；也可在接管预览打开后修改来源再确认 | 显示冲突或预览过期；外部修改保留，不覆盖。请在隔离样例内操作 |
+| ZIP 安装 | 从 ZIP 安装，选 `根目录/fixtures/acceptance-skill.zip`，选初始位置 | 安装 `acceptance-skill`；取消文件选择或未选位置不能产生写入 |
+| 项目隔离 | 加号 → 选择 `根目录/projects/visual-alpha`，再添加 `visual-beta`；可将两个显示名都设为同名项目 | registry 为两项目保留不同 ID；目标路径区分两者。alpha 下已有项目 Skill 与根 `AGENTS.md` |
+| AGENTS.md | 长期指令 → 全局 → 编辑保存 | 同一内容写入 `根目录/.codex/AGENTS.md` 和 `.config/opencode/AGENTS.md`；`.claude/CLAUDE.md` 保护样例不变 |
+| AGENTS.md 冲突 | 将上述两份全局文件写成不同内容，重新读取页面 | 显示冲突；不会静默以其中一份覆盖另一份。恢复两份一致后继续 |
+| 原生接管与编辑 | Subagents → security-reviewer 或 repo-reviewer → 查看源码 → 纳入管理 → 编辑 → 保存 | 原生 `.claude/agents/security-reviewer.md` 或 `.codex/agents/repo-reviewer.toml` 被保存；接管和写入前生成原生备份，保留原生字段 |
+| 启停与恢复 | 已托管定义 → 停用 → 启用 → 备份／卸载 → 备份恢复 | 列表反馈启停状态；备份记录绑定原 Agent 与目标，恢复前校验目标是否被外部修改 |
+| 设置三种提交 | 改同步方式；分别编辑覆盖路径并保存；选择存储迁移并确认 | 即时设置、路径草稿和迁移分开提交。覆盖路径务必选择验收根目录内新目录 |
+| 进程重启 | 关闭窗口，再执行相同 `accept:app` 命令 | Skills、冲突、AGENTS.md、原生源码与设置从原验收目录回读；不是重置样例 |
+| 在线命令 | Skills → 发现 → 选目标 → 添加或使用真实 GitHub 仓库 → 安装 → 检查更新 | 使用真实后端命令与网络；在线失败与模拟验收分别判断，不把加载动画当成功 |
+
+## 自动验证及证据
+
+```sh
+npm run verify:static
+npm run test:frontend
+npm run test:rust
+npm run test:ui
+npm run test:tauri
+npm run build:frontend
+```
+
+`test:tauri` 先跑真实 IPC 和 UI 写入，再退出进程、以同一隔离目录重新启动回读。完成后清理测试自建目录，不清理 `accept:app` 的验收数据。它还比较宿主八个关键配置文件的前后哈希；该检查不声称遍历了整个用户目录。
+
+在线验收单独开启，普通测试不依赖外网：
+
+```sh
+ACM_ONLINE_ACCEPTANCE=1 npm run test:tauri
+```
+
+已执行的在线样例：`anthropics/skills` 发现 20 项，安装 `frontend-design` 到 Codex、检查更新（0 项新版本）、调用同源更新并读取实际 `SKILL.md`。这证明本次真实命令链路，不代表未来网络或远端版本始终可用。
+
+`tests/l2/polished.journey.test.ts` 保存与清单对应的 25 个页面状态、8 个弹窗及额外异常状态截图到 `/tmp/acm-polished-evidence`。测试对行高、按钮尺寸、横向溢出、焦点、错误重试、目标隔离和草稿提交进行断言；截图用于人工对照，不以截图存在代替视觉审核。
+
+本次没有改写 Pen 或精细稿预览来适配实现，保留原有设计修改；`b25a` 原工作区保持不变。没有发布、部署、合并或签名打包。
+
+## 2026-09-27 桌面补验
+
+已通过真实系统 ZIP 和项目文件夹选择／取消；ZIP 安装后磁盘内容与样例一致，项目登记持久化。关闭后从 macOS 直接重开，仍读取同一隔离目录；宿主八个关键配置文件哈希未变。默认验收目录现在保留 `acceptance-skill` 和 `visual-alpha`，可继续操作；要从空列表重新验收，请使用 `--fresh`。
+
+全仓 `verify:static` 已通过 8/8。三个本地设计 Skill 仅整理格式，Markdown 结构与标准化代码块核对一致；整理前的副本保存在 `.artifacts/acceptance/format-review`。

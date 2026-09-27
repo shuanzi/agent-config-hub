@@ -1,0 +1,48 @@
+
+> agent-config-manager@0.1.0 test:frontend
+> vitest run
+
+
+ RUN  v2.1.9 <repo>
+
+ ✓ tests/l1/l3-fixture-path.test.ts (3 tests) 6ms
+ ✓ tests/l1/sensitive-masking.test.ts (11 tests) 4ms
+ ✓ tests/l1/skills/errors.test.ts (12 tests) 5ms
+ ✓ tests/l1/prompts/api.test.ts (2 tests) 63ms
+ ✓ tests/l1/subagents/api.test.ts (5 tests) 59ms
+ ✓ tests/l1/subagents/native-api.test.ts (4 tests) 5ms
+ ✓ tests/l1/full-ui-mock-b2-list.test.ts (15 tests) 18ms
+ ✓ tests/l1/skills/api.test.ts (8 tests) 104ms
+ ✓ tests/l1/settings/api.test.ts (1 test) 15ms
+ ✓ tests/l1/full-ui-mock-context.test.ts (64 tests) 344ms
+ ✓ tests/l1/skills/useSkills.test.tsx (3 tests) 449ms
+ ✓ tests/l1/subagents/useSubagents.test.tsx (3 tests) 381ms
+ ✓ tests/l1/prompts/InstructionsPanel.test.tsx (8 tests) 1372ms
+   ✓ InstructionsPanel document management > 在 global target 只展示 AGENTS.md，且未创建文件仍可选择 802ms
+ ✓ tests/l1/subagents/SubagentsDiscoveryPage.test.tsx (7 tests) 1562ms
+   ✓ SubagentsDiscoveryPage 原生安装契约 > 全部上下文未选目标时不请求发现，也无法触发安装 646ms
+   ✓ SubagentsDiscoveryPage 原生安装契约 > 项目级 Codex TOML 可以安装，但必须显式选择 Codex 375ms
+ ✓ tests/l1/settings/SettingsView.test.tsx (2 tests) 977ms
+   ✓ SettingsView sync method change > saves via the single-field command without persisting unsaved override edits 890ms
+ ✓ tests/l1/workbench/AppShell.test.tsx (11 tests) 2119ms
+   ✓ App selected B2 shell > uses real configuration contexts instead of an Agent rail on desktop 433ms
+   ✓ App selected B2 shell > uses named project actions with dialog feedback instead of a separate project page 393ms
+   ✓ App selected B2 shell > restores the originating narrow navigation trigger after returning 336ms
+ ✓ tests/l1/skills/SkillsDiscoveryPage.test.tsx (9 tests) 2773ms
+   ✓ SkillsDiscoveryPage 配置目标合同 > 全部上下文未选目标时不发现或安装；选择全局与项目后传入完整 target 1115ms
+   ✓ SkillsDiscoveryPage 配置目标合同 > 卸载发现项时从已安装记录派生 target 314ms
+   ✓ SkillsDiscoveryPage 列表与上下文切换 > 详情按完整 key 选择，筛选或上下文切换后退出详情 391ms
+ ✓ tests/l1/prompts/usePrompts.test.tsx (2 tests) 172ms
+ ✓ tests/l1/workbench/useProjects.test.tsx (3 tests) 30ms
+ ✓ tests/l1/subagents/InstalledSubagentsPanel.test.tsx (16 tests) 3003ms
+   ✓ InstalledSubagentsPanel 原生定义管理 > 展示本机 4 个 Codex 与 4 个 OpenCode 定义，并按 Agent 统计 905ms
+ ✓ tests/l1/workbench/AgentBrandMark.test.tsx (2 tests) 125ms
+ ✓ tests/l1/workbench/FocusedDialog.test.tsx (1 test) 208ms
+ ✓ tests/l1/skills/InstalledSkillsPanel.test.tsx (21 tests) 3507ms
+   ✓ InstalledSkillsPanel 导入同目录不同来源的本地 Skill > 同 directory 的来源默认都不接管，并提示一次只能选择一个来源 769ms
+   ✓ InstalledSkillsPanel 导入同目录不同来源的本地 Skill > 明确选择来源和目录后先预览，再携带 revision 接管 443ms
+
+ Test Files  23 passed (23)
+      Tests  213 passed (213)
+   Start at  13:22:34
+   Duration  6.56s (transform 2.09s, setup 0ms, collect 6.94s, tests 17.30s, environment 17.40s, prepare 2.79s)

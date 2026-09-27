@@ -1,0 +1,30 @@
+
+> agent-config-manager@0.1.0 verify:static
+> node scripts/orchestrator/verify-static.mjs
+
+
+=== tsc -b: corepack npm exec -- tsc -b
+PASS  tsc -b  exit 0 (2639ms)
+
+=== eslint .: corepack npm exec -- eslint .
+PASS  eslint .  exit 0 (1320ms)
+
+=== prettier --check .: corepack npm exec -- prettier --check .
+Checking formatting...
+All matched files use Prettier code style!
+PASS  prettier --check .  exit 0 (1999ms)
+
+=== cargo fmt --check: cargo fmt --check
+PASS  cargo fmt --check  exit 0 (343ms)
+
+=== cargo clippy（默认 feature）: cargo clippy --all-targets -- -D warnings
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.58s
+PASS  cargo clippy（默认 feature）  exit 0 (641ms)
+
+=== cargo clippy（test-harness）: cargo clippy --all-targets --features test-harness -- -D warnings
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.24s
+PASS  cargo clippy（test-harness）  exit 0 (305ms)
+PASS  禁止依赖守卫
+PASS  敏感占位值守卫（FX-01 占位明文不出现在 fixture 之外）  已扫描 160 个源文件
+
+verify:static OK（8 项）

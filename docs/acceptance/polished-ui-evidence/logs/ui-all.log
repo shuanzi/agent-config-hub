@@ -1,0 +1,178 @@
+
+> agent-config-manager@0.1.0 test:ui
+> wdio run tests/l2/wdio.conf.ts
+
+
+Execution of 7 workers started at 2026-09-27T05:09:25.723Z
+
+[0-0] RUNNING in chrome - file:///tests/l2/brand-surfaces.journey.test.ts
+[0-0] PASSED in chrome - file:///tests/l2/brand-surfaces.journey.test.ts
+[0-1] RUNNING in chrome - file:///tests/l2/full-ui-mock-b2.journey.test.ts
+[0-1] 2026-09-27T05:10:47.299Z WARN webdriver: WebDriverError: element click intercepted: Element <button class="b2-row-primary" type="button" aria-label="查看 Skill：security-review">...</button> is not clickable at point (412, 245). Other element would receive the click: <span>...</span>
+[0-1]   (Session info: chrome=153.0.8010.53) when running "element/f.DE000808AF94F3FA6E3D90309F9941B1.d.0E9B08F8060FB51456CA6EA6CDAAE911.e.4922/click" with method "POST"
+[0-1] 2026-09-27T05:10:48.826Z WARN webdriver: WebDriverError: element click intercepted: Element <button class="b2-row-primary" type="button" aria-label="查看 Skill：security-review">...</button> is not clickable at point (412, 245). Other element would receive the click: <span>...</span>
+[0-1]   (Session info: chrome=153.0.8010.53) when running "element/f.DE000808AF94F3FA6E3D90309F9941B1.d.0E9B08F8060FB51456CA6EA6CDAAE911.e.4922/click" with method "POST"
+[0-1] 2026-09-27T05:10:50.895Z WARN webdriver: WebDriverError: element click intercepted: Element <button class="b2-row-primary" type="button" aria-label="查看 Skill：security-review">...</button> is not clickable at point (412, 245). Other element would receive the click: <span>...</span>
+[0-1]   (Session info: chrome=153.0.8010.53) when running "element/f.DE000808AF94F3FA6E3D90309F9941B1.d.0E9B08F8060FB51456CA6EA6CDAAE911.e.4922/click" with method "POST"
+[0-1] 2026-09-27T05:10:51.928Z ERROR webdriver: WebDriverError: element click intercepted: Element <button class="b2-row-primary" type="button" aria-label="查看 Skill：security-review">...</button> is not clickable at point (412, 245). Other element would receive the click: <span>...</span>
+[0-1]   (Session info: chrome=153.0.8010.53) when running "element/f.DE000808AF94F3FA6E3D90309F9941B1.d.0E9B08F8060FB51456CA6EA6CDAAE911.e.4922/click" with method "POST"
+[0-1] 2026-09-27T05:10:51.973Z WARN webdriverio: Failed to execute "scrollIntoView" using WebDriver Actions API: WebDriverError: move target out of bounds
+[0-1]   (Session info: chrome=153.0.8010.53) when running "actions" with method "POST"!
+[0-1] Re-attempting using `Element.scrollIntoView` via Web API.
+[0-1] PASSED in chrome - file:///tests/l2/full-ui-mock-b2.journey.test.ts
+[0-2] RUNNING in chrome - file:///tests/l2/polished.journey.test.ts
+[0-2] PASSED in chrome - file:///tests/l2/polished.journey.test.ts
+[0-3] RUNNING in chrome - file:///tests/l2/prompts.journey.test.ts
+[0-3] 2026-09-27T05:11:34.962Z WARN webdriverio: Failed to execute browser.browsingContextLocateNodes({ ... }) due to Error: WebDriver Bidi command "browsingContext.locateNodes" failed with error: unknown error - Cannot find context with specified id, falling back to regular WebDriver Classic command
+[0-3] 2026-09-27T05:11:35.878Z WARN webdriverio: Failed to execute "scrollIntoView" using WebDriver Actions API: WebDriverError: move target out of bounds
+[0-3]   (Session info: chrome=153.0.8010.53) when running "actions" with method "POST"!
+[0-3] Re-attempting using `Element.scrollIntoView` via Web API.
+[0-3] PASSED in chrome - file:///tests/l2/prompts.journey.test.ts
+[0-4] RUNNING in chrome - file:///tests/l2/skills.journey.test.ts
+[0-4] PASSED in chrome - file:///tests/l2/skills.journey.test.ts
+[0-5] RUNNING in chrome - file:///tests/l2/subagents.journey.test.ts
+[0-5] PASSED in chrome - file:///tests/l2/subagents.journey.test.ts
+[0-6] RUNNING in chrome - file:///tests/l2/workbench-shell.journey.test.ts
+[0-6] PASSED in chrome - file:///tests/l2/workbench-shell.journey.test.ts
+
+ "spec" Reporter:
+------------------------------------------------------------------
+[chrome 153.0.8010.53 mac #0-0] Running: chrome (v153.0.8010.53) on mac
+[chrome 153.0.8010.53 mac #0-0] Session ID: 2dc91f3b7a5cf6c8892031ede0401f12
+[chrome 153.0.8010.53 mac #0-0]
+[chrome 153.0.8010.53 mac #0-0] » tests/l2/brand-surfaces.journey.test.ts
+[chrome 153.0.8010.53 mac #0-0] 共享品牌入口视觉回归
+[chrome 153.0.8010.53 mac #0-0]    ✓ 1586 Skills、长期指令与添加项目
+[chrome 153.0.8010.53 mac #0-0]    ✓ 1280 Skills、长期指令与添加项目
+[chrome 153.0.8010.53 mac #0-0]    ✓ 390 Skills、长期指令与添加项目
+[chrome 153.0.8010.53 mac #0-0]
+[chrome 153.0.8010.53 mac #0-0] 3 passing (9.9s)
+------------------------------------------------------------------
+[chrome 153.0.8010.53 mac #0-1] Running: chrome (v153.0.8010.53) on mac
+[chrome 153.0.8010.53 mac #0-1] Session ID: 00094d12b01af2a2bad90ef9728320b5
+[chrome 153.0.8010.53 mac #0-1]
+[chrome 153.0.8010.53 mac #0-1] » tests/l2/full-ui-mock-b2.journey.test.ts
+[chrome 153.0.8010.53 mac #0-1] selected B2 Skill browse boundary
+[chrome 153.0.8010.53 mac #0-1]    ✓ renders Agent logos as lit, gray, or blocked list toggles
+[chrome 153.0.8010.53 mac #0-1]    ✓ keeps a Skill in structured view and exposes keyboard-operable session toggles
+[chrome 153.0.8010.53 mac #0-1]    ✓ keeps a blocked Skill target unavailable and avoids old Skill transaction CTAs
+[chrome 153.0.8010.53 mac #0-1]    ✓ blocks readonly and incompatible Management entry, direct URL, and controller routes
+[chrome 153.0.8010.53 mac #0-1]
+[chrome 153.0.8010.53 mac #0-1] selected B2 Skill write-route boundary
+[chrome 153.0.8010.53 mac #0-1]    ✓ fails closed from Skill write-route links and controller resets
+[chrome 153.0.8010.53 mac #0-1]    ✓ keeps global Skills in structured view without old installation CTAs
+[chrome 153.0.8010.53 mac #0-1]    ✓ restores project-owned and applicable global Skills after clearing project filters
+[chrome 153.0.8010.53 mac #0-1]
+[chrome 153.0.8010.53 mac #0-1] selected B2 long-term instruction boundary
+[chrome 153.0.8010.53 mac #0-1]    ✓ shows editable Markdown and display-only Agent status without conversion actions
+[chrome 153.0.8010.53 mac #0-1]    ✓ fails closed when the prototype controller requests conversion
+[chrome 153.0.8010.53 mac #0-1]
+[chrome 153.0.8010.53 mac #0-1] selected B2 state isolation and destination truthfulness
+[chrome 153.0.8010.53 mac #0-1]    ✓ resets shared filters across selected and every legacy visual system boundary
+[chrome 153.0.8010.53 mac #0-1]    ✓ resets selected filters when Alt+Arrow crosses into legacy
+[chrome 153.0.8010.53 mac #0-1]
+[chrome 153.0.8010.53 mac #0-1] selected B2 incompatible status and list accessibility
+[chrome 153.0.8010.53 mac #0-1]    ✓ shows one visible block reason and keeps every interactive list control as a button
+[chrome 153.0.8010.53 mac #0-1]
+[chrome 153.0.8010.53 mac #0-1] selected B2 rendered pagination focus
+[chrome 153.0.8010.53 mac #0-1]    ✓ scrolls page two to the top and focuses its first row with a multi-page fixture
+[chrome 153.0.8010.53 mac #0-1]
+[chrome 153.0.8010.53 mac #0-1] selected B2 responsive Agent target geometry
+[chrome 153.0.8010.53 mac #0-1]    ✓ keeps chips and target rows uncut across the compact/wide boundary
+[chrome 153.0.8010.53 mac #0-1]    ✓ aligns every Agent column header logo with its first-row toggle on the wide layout
+[chrome 153.0.8010.53 mac #0-1]
+[chrome 153.0.8010.53 mac #0-1] selected B2 browser QA correction contracts
+[chrome 153.0.8010.53 mac #0-1]    ✓ keeps critical reachable text at 12px or above
+[chrome 153.0.8010.53 mac #0-1]    ✓ keeps 1280 three-column and sends 840 and 760 through the existing narrow steps
+[chrome 153.0.8010.53 mac #0-1]    ✓ restores filter focus on Escape and keeps one nonvisual accessible list heading
+[chrome 153.0.8010.53 mac #0-1]
+[chrome 153.0.8010.53 mac #0-1] selected B2 content master-detail
+[chrome 153.0.8010.53 mac #0-1]    ✓ selects instruction rows in place and guards the dirty draft across selection
+[chrome 153.0.8010.53 mac #0-1]    ✓ shows Subagents structured info with a read-only body in master-detail
+[chrome 153.0.8010.53 mac #0-1]    ✓ falls back to the single-surface stack below the narrow breakpoint
+[chrome 153.0.8010.53 mac #0-1]
+[chrome 153.0.8010.53 mac #0-1] legacy A/B/C keyboard and dirty-guard behavior
+[chrome 153.0.8010.53 mac #0-1]    ✓ preserves A search, Escape, focus restoration, and Continue Editing
+[chrome 153.0.8010.53 mac #0-1]    ✓ preserves B search, Escape, focus restoration, and Continue Editing
+[chrome 153.0.8010.53 mac #0-1]    ✓ preserves C search, Escape, focus restoration, and Continue Editing
+[chrome 153.0.8010.53 mac #0-1]
+[chrome 153.0.8010.53 mac #0-1] selected B2 all-source aggregation
+[chrome 153.0.8010.53 mac #0-1]    ✓ lands on Skills + 全部 with fixed sections, sticky aligned head, and aggregate pagination
+[chrome 153.0.8010.53 mac #0-1]    ✓ narrows to a project scope and restores the aggregate with type and sort kept
+[chrome 153.0.8010.53 mac #0-1]
+[chrome 153.0.8010.53 mac #0-1] selected B2 narrow type-first stack
+[chrome 153.0.8010.53 mac #0-1]    ✓ walks type → context → list → detail and back with focus landing on each step
+[chrome 153.0.8010.53 mac #0-1]
+[chrome 153.0.8010.53 mac #0-1] selected B2 all-scope master-detail
+[chrome 153.0.8010.53 mac #0-1]    ✓ shows each instruction its own source and guards drafts across cross-source selection
+[chrome 153.0.8010.53 mac #0-1]
+[chrome 153.0.8010.53 mac #0-1] 28 passing (1m 15.6s)
+------------------------------------------------------------------
+[chrome 153.0.8010.53 mac #0-2] Running: chrome (v153.0.8010.53) on mac
+[chrome 153.0.8010.53 mac #0-2] Session ID: 9d0215ba63c903f7fe799d8b7bcf4cbf
+[chrome 153.0.8010.53 mac #0-2]
+[chrome 153.0.8010.53 mac #0-2] » tests/l2/polished.journey.test.ts
+[chrome 153.0.8010.53 mac #0-2] Polished 实际 App 页面与交互验收
+[chrome 153.0.8010.53 mac #0-2]    ✓ 1586 页面清单、行高和位置按钮
+[chrome 153.0.8010.53 mac #0-2]    ✓ 1280 页面清单、行高和位置按钮
+[chrome 153.0.8010.53 mac #0-2]    ✓ 390 页面清单、行高和位置按钮
+[chrome 153.0.8010.53 mac #0-2]    ✓ 8 个弹窗、焦点循环、导入预览与文件选择取消
+[chrome 153.0.8010.53 mac #0-2]    ✓ 设置的即时保存保留覆盖草稿，显式保存后回读
+[chrome 153.0.8010.53 mac #0-2]    ✓ 错误重试、空与加载状态、冲突禁止写入及行目标隔离
+[chrome 153.0.8010.53 mac #0-2]
+[chrome 153.0.8010.53 mac #0-2] 6 passing (32.5s)
+------------------------------------------------------------------
+[chrome 153.0.8010.53 mac #0-3] Running: chrome (v153.0.8010.53) on mac
+[chrome 153.0.8010.53 mac #0-3] Session ID: 4fbdee9a49bc5b304bffac600ccdaac4
+[chrome 153.0.8010.53 mac #0-3]
+[chrome 153.0.8010.53 mac #0-3] » tests/l2/prompts.journey.test.ts
+[chrome 153.0.8010.53 mac #0-3] 长期指令文档管理旅程
+[chrome 153.0.8010.53 mac #0-3]    ✓ 全局只显示一个 AGENTS.md，展示双路径并可创建、保存和重新读取
+[chrome 153.0.8010.53 mac #0-3]    ✓ 项目上下文只保存项目 AGENTS.md，并展示项目路径
+[chrome 153.0.8010.53 mac #0-3]    ✓ 不显示旧的预设、Agent enable 或 Gemini 控件
+[chrome 153.0.8010.53 mac #0-3]    ✓ 390px 窄屏完整展示路径、编辑和保存操作
+[chrome 153.0.8010.53 mac #0-3]
+[chrome 153.0.8010.53 mac #0-3] 4 passing (5.2s)
+------------------------------------------------------------------
+[chrome 153.0.8010.53 mac #0-4] Running: chrome (v153.0.8010.53) on mac
+[chrome 153.0.8010.53 mac #0-4] Session ID: 2c5d36887cf2637b63d8c88151c29bcf
+[chrome 153.0.8010.53 mac #0-4]
+[chrome 153.0.8010.53 mac #0-4] » tests/l2/skills.journey.test.ts
+[chrome 153.0.8010.53 mac #0-4] Skill management journey
+[chrome 153.0.8010.53 mac #0-4]    ✓ lands on installed view, discovers, installs, withdraws one placement and uninstalls
+[chrome 153.0.8010.53 mac #0-4]    ✓ uses the visual fixture for installed detail update, placement and uninstall paths
+[chrome 153.0.8010.53 mac #0-4]    ✓ shows all five global placement directories without horizontal clipping on a narrow viewport
+[chrome 153.0.8010.53 mac #0-4]
+[chrome 153.0.8010.53 mac #0-4] 3 passing (4.1s)
+------------------------------------------------------------------
+[chrome 153.0.8010.53 mac #0-5] Running: chrome (v153.0.8010.53) on mac
+[chrome 153.0.8010.53 mac #0-5] Session ID: b39505e1857d70861b5f05a2a1b44dae
+[chrome 153.0.8010.53 mac #0-5]
+[chrome 153.0.8010.53 mac #0-5] » tests/l2/subagents.journey.test.ts
+[chrome 153.0.8010.53 mac #0-5] 原生 Subagent 管理旅程
+[chrome 153.0.8010.53 mac #0-5]    ✓ 发现已有定义，接管、编辑、停用、启用、卸载并从备份恢复
+[chrome 153.0.8010.53 mac #0-5]    ✓ 原生 Codex TOML 安装要求明确目标和 Agent
+[chrome 153.0.8010.53 mac #0-5]    ✓ 1586 宽度原生品牌可见、无横向溢出
+[chrome 153.0.8010.53 mac #0-5]    ✓ 1280 宽度原生品牌可见、无横向溢出
+[chrome 153.0.8010.53 mac #0-5]    ✓ 390 宽度原生品牌可见、无横向溢出
+[chrome 153.0.8010.53 mac #0-5]
+[chrome 153.0.8010.53 mac #0-5] 5 passing (11s)
+------------------------------------------------------------------
+[chrome 153.0.8010.53 mac #0-6] Running: chrome (v153.0.8010.53) on mac
+[chrome 153.0.8010.53 mac #0-6] Session ID: cf6f06178411546e3dc16e1a081a9c46
+[chrome 153.0.8010.53 mac #0-6]
+[chrome 153.0.8010.53 mac #0-6] » tests/l2/workbench-shell.journey.test.ts
+[chrome 153.0.8010.53 mac #0-6] Workbench shell and visual fixture
+[chrome 153.0.8010.53 mac #0-6]    ✓ shows the type rail, configuration-context rail and workspace at the desktop breakpoint
+[chrome 153.0.8010.53 mac #0-6]    ✓ skips the context rail and places settings next to the type rail on desktop
+[chrome 153.0.8010.53 mac #0-6]    ✓ switches between all and real same-name project contexts by stable projectId on desktop
+[chrome 153.0.8010.53 mac #0-6]    ✓ manages an empty project from the rail by its opaque projectId
+[chrome 153.0.8010.53 mac #0-6]    ✓ shows a structured unavailable-project-root error as an alert
+[chrome 153.0.8010.53 mac #0-6]    ✓ uses a type, context, content stack below the desktop breakpoint
+[chrome 153.0.8010.53 mac #0-6]    ✓ does not overflow horizontally at 390px through the narrow navigation path
+[chrome 153.0.8010.53 mac #0-6]    ✓ keeps the default fixture empty and enables visual data only with its query parameter
+[chrome 153.0.8010.53 mac #0-6]
+[chrome 153.0.8010.53 mac #0-6] 8 passing (9.2s)
+
+
+Spec Files:	 7 passed, 7 total (100% completed) in 00:02:40

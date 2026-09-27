@@ -1,0 +1,266 @@
+[
+  {
+    "file": "desktop-1586-skills-installed.png",
+    "node_id": "jDYK3",
+    "logical_width": "1586",
+    "logical_height": "992",
+    "actual_width": 1586,
+    "actual_height": 992
+  },
+  {
+    "file": "desktop-1586-skill-detail.png",
+    "node_id": "fTYXd",
+    "logical_width": "1586",
+    "logical_height": "992",
+    "actual_width": 1586,
+    "actual_height": 992
+  },
+  {
+    "file": "desktop-1586-skills-discovery.png",
+    "node_id": "n3HwT3",
+    "logical_width": "1586",
+    "logical_height": "992",
+    "actual_width": 1586,
+    "actual_height": 992
+  },
+  {
+    "file": "desktop-1586-instructions.png",
+    "node_id": "Kf5mn",
+    "logical_width": "1586",
+    "logical_height": "992",
+    "actual_width": 1586,
+    "actual_height": 992
+  },
+  {
+    "file": "desktop-1586-subagents-installed.png",
+    "node_id": "jnkiL",
+    "logical_width": "1586",
+    "logical_height": "992",
+    "actual_width": 1586,
+    "actual_height": 992
+  },
+  {
+    "file": "desktop-1586-subagents-discovery.png",
+    "node_id": "iehBb",
+    "logical_width": "1586",
+    "logical_height": "992",
+    "actual_width": 1586,
+    "actual_height": 992
+  },
+  {
+    "file": "desktop-1586-settings.png",
+    "node_id": "hQYBt",
+    "logical_width": "1586",
+    "logical_height": "992",
+    "actual_width": 1586,
+    "actual_height": 992
+  },
+  {
+    "file": "desktop-1280-skills-installed.png",
+    "node_id": "v5WGtu",
+    "logical_width": "1280",
+    "logical_height": "800",
+    "actual_width": 1280,
+    "actual_height": 800
+  },
+  {
+    "file": "desktop-1280-skill-detail.png",
+    "node_id": "is3jO",
+    "logical_width": "1280",
+    "logical_height": "800",
+    "actual_width": 1280,
+    "actual_height": 800
+  },
+  {
+    "file": "desktop-1280-skills-discovery.png",
+    "node_id": "CgNbx",
+    "logical_width": "1280",
+    "logical_height": "800",
+    "actual_width": 1280,
+    "actual_height": 800
+  },
+  {
+    "file": "desktop-1280-instructions.png",
+    "node_id": "U0VocL",
+    "logical_width": "1280",
+    "logical_height": "800",
+    "actual_width": 1280,
+    "actual_height": 800
+  },
+  {
+    "file": "desktop-1280-subagents-installed.png",
+    "node_id": "mWYdV",
+    "logical_width": "1280",
+    "logical_height": "800",
+    "actual_width": 1280,
+    "actual_height": 800
+  },
+  {
+    "file": "desktop-1280-subagents-discovery.png",
+    "node_id": "Ykfzl",
+    "logical_width": "1280",
+    "logical_height": "800",
+    "actual_width": 1280,
+    "actual_height": 800
+  },
+  {
+    "file": "desktop-1280-settings.png",
+    "node_id": "Y7fLKL",
+    "logical_width": "1280",
+    "logical_height": "800",
+    "actual_width": 1280,
+    "actual_height": 800
+  },
+  {
+    "file": "mobile-390-asset-types.png",
+    "node_id": "yO5HX",
+    "logical_width": "390",
+    "logical_height": "844",
+    "actual_width": 390,
+    "actual_height": 844
+  },
+  {
+    "file": "mobile-390-contexts.png",
+    "node_id": "SDwr0",
+    "logical_width": "390",
+    "logical_height": "844",
+    "actual_width": 390,
+    "actual_height": 844
+  },
+  {
+    "file": "mobile-390-skills-installed.png",
+    "node_id": "CMdbh",
+    "logical_width": "390",
+    "logical_height": "844",
+    "actual_width": 390,
+    "actual_height": 844
+  },
+  {
+    "file": "mobile-390-skill-detail.png",
+    "node_id": "s1nGfU",
+    "logical_width": "390",
+    "logical_height": "844",
+    "actual_width": 390,
+    "actual_height": 844
+  },
+  {
+    "file": "mobile-390-install-dialog.png",
+    "node_id": "Z3j6l",
+    "logical_width": "390",
+    "logical_height": "844",
+    "actual_width": 390,
+    "actual_height": 844
+  },
+  {
+    "file": "mobile-390-settings.png",
+    "node_id": "VmYqY",
+    "logical_width": "390",
+    "logical_height": "844",
+    "actual_width": 390,
+    "actual_height": 844
+  },
+  {
+    "file": "dialog-skill-install.png",
+    "node_id": "ARBv7",
+    "logical_width": "620",
+    "logical_height": "627",
+    "actual_width": 1280,
+    "actual_height": 800
+  },
+  {
+    "file": "dialog-project-subagent-install.png",
+    "node_id": "lSPVk",
+    "logical_width": "620",
+    "logical_height": "574",
+    "actual_width": 1280,
+    "actual_height": 800
+  },
+  {
+    "file": "dialog-zip-install.png",
+    "node_id": "voIeN",
+    "logical_width": "620",
+    "logical_height": "671",
+    "actual_width": 1280,
+    "actual_height": 800
+  },
+  {
+    "file": "dialog-import-existing.png",
+    "node_id": "jT0eI",
+    "logical_width": "620",
+    "logical_height": "661",
+    "actual_width": 1280,
+    "actual_height": 800
+  },
+  {
+    "file": "dialog-backup-restore.png",
+    "node_id": "cBnTx",
+    "logical_width": "620",
+    "logical_height": "599",
+    "actual_width": 1280,
+    "actual_height": 800
+  },
+  {
+    "file": "mobile-390-instructions.png",
+    "node_id": "x0em3A",
+    "logical_width": "390",
+    "logical_height": "844",
+    "actual_width": 390,
+    "actual_height": 844
+  },
+  {
+    "file": "mobile-390-instruction-detail.png",
+    "node_id": "J6dPZ",
+    "logical_width": "390",
+    "logical_height": "844",
+    "actual_width": 390,
+    "actual_height": 844
+  },
+  {
+    "file": "mobile-390-subagents-installed.png",
+    "node_id": "ffOcC",
+    "logical_width": "390",
+    "logical_height": "844",
+    "actual_width": 390,
+    "actual_height": 844
+  },
+  {
+    "file": "mobile-390-subagent-detail.png",
+    "node_id": "zP3xY",
+    "logical_width": "390",
+    "logical_height": "844",
+    "actual_width": 390,
+    "actual_height": 844
+  },
+  {
+    "file": "mobile-390-skills-actions.png",
+    "node_id": "ZpOgV",
+    "logical_width": "390",
+    "logical_height": "844",
+    "actual_width": 390,
+    "actual_height": 844
+  },
+  {
+    "file": "dialog-import-preview.png",
+    "node_id": "Q89aqy",
+    "logical_width": "620",
+    "logical_height": "655",
+    "actual_width": 1280,
+    "actual_height": 800
+  },
+  {
+    "file": "dialog-subagent-update.png",
+    "node_id": "VaiMD",
+    "logical_width": "740",
+    "logical_height": "578",
+    "actual_width": 1280,
+    "actual_height": 800
+  },
+  {
+    "file": "dialog-subagent-backup.png",
+    "node_id": "v2QXZ",
+    "logical_width": "740",
+    "logical_height": "421",
+    "actual_width": 1280,
+    "actual_height": 800
+  }
+]

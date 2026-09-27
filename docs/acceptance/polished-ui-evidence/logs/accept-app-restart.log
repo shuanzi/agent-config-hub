@@ -1,0 +1,10 @@
+
+> agent-config-manager@0.1.0 accept:app
+> node scripts/acceptance/app.mjs --no-build
+
+
+隔离桌面验收
+ACM_HOME=<repo>/.artifacts/acceptance/home
+项目目录：<repo>/.artifacts/acceptance/home/projects
+ZIP：<repo>/.artifacts/acceptance/home/fixtures/acceptance-skill.zip
+重复启动保留数据；--fresh 另建目录。退出后可使用 --home 指定本次目录。

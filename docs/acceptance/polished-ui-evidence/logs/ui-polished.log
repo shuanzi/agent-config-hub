@@ -1,0 +1,28 @@
+
+> agent-config-manager@0.1.0 test:ui
+> wdio run tests/l2/wdio.conf.ts --spec tests/l2/polished.journey.test.ts
+
+
+Execution of 1 workers started at 2026-09-27T05:22:23.443Z
+
+[0-0] RUNNING in chrome - file:///tests/l2/polished.journey.test.ts
+[0-0] PASSED in chrome - file:///tests/l2/polished.journey.test.ts
+
+ "spec" Reporter:
+------------------------------------------------------------------
+[chrome 153.0.8010.53 mac #0-0] Running: chrome (v153.0.8010.53) on mac
+[chrome 153.0.8010.53 mac #0-0] Session ID: 5333892e9c1a2260ea170883f1b5338e
+[chrome 153.0.8010.53 mac #0-0]
+[chrome 153.0.8010.53 mac #0-0] » tests/l2/polished.journey.test.ts
+[chrome 153.0.8010.53 mac #0-0] Polished 实际 App 页面与交互验收
+[chrome 153.0.8010.53 mac #0-0]    ✓ 1586 页面清单、行高和位置按钮
+[chrome 153.0.8010.53 mac #0-0]    ✓ 1280 页面清单、行高和位置按钮
+[chrome 153.0.8010.53 mac #0-0]    ✓ 390 页面清单、行高和位置按钮
+[chrome 153.0.8010.53 mac #0-0]    ✓ 8 个弹窗、焦点循环、导入预览与文件选择取消
+[chrome 153.0.8010.53 mac #0-0]    ✓ 设置的即时保存保留覆盖草稿，显式保存后回读
+[chrome 153.0.8010.53 mac #0-0]    ✓ 错误重试、空与加载状态、冲突禁止写入及行目标隔离
+[chrome 153.0.8010.53 mac #0-0]
+[chrome 153.0.8010.53 mac #0-0] 6 passing (36.8s)
+
+
+Spec Files:	 1 passed, 1 total (100% completed) in 00:00:38
