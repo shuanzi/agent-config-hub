@@ -9,12 +9,14 @@ import type {
   InstalledSkill,
   ProjectSummary,
   ScopeTarget,
+  SkillPlacementTarget,
 } from '../../../src/types';
 
 const mockApi = {
   getInstalledSkills: vi.fn(),
   discoverAvailableSkills: vi.fn(),
   getSkillRepos: vi.fn(),
+  getSkillPlacementTargets: vi.fn(),
   installSkill: vi.fn(),
   uninstallSkill: vi.fn(),
   addSkillRepo: vi.fn(),
@@ -55,6 +57,47 @@ const installed = (target: ScopeTarget = globalTarget): InstalledSkill => ({
   target,
 });
 
+function placementTargets(target: ScopeTarget): SkillPlacementTarget[] {
+  const prefix = target.scope === 'global' ? '/home/user' : `/workspaces/${target.projectId}`;
+  const codexPath =
+    target.scope === 'global' ? `${prefix}/.codex/skills` : `${prefix}/.agents/skills`;
+  const opencodePath =
+    target.scope === 'global' ? `${prefix}/.config/opencode/skills` : `${prefix}/.opencode/skills`;
+  const agents: SkillPlacementTarget[] = [
+    {
+      location: 'claude-code',
+      aliases: [],
+      path: `${prefix}/.claude/skills`,
+      physicalPath: `${prefix}/.claude/skills`,
+    },
+    { location: 'codex', aliases: [], path: codexPath, physicalPath: codexPath },
+    {
+      location: 'gemini-cli',
+      aliases: [],
+      path: `${prefix}/.gemini/skills`,
+      physicalPath: `${prefix}/.gemini/skills`,
+    },
+    { location: 'opencode', aliases: [], path: opencodePath, physicalPath: opencodePath },
+  ];
+  return target.scope === 'global'
+    ? [
+        {
+          location: 'shared',
+          aliases: [],
+          path: `${prefix}/.agents/skills`,
+          physicalPath: `${prefix}/.agents/skills`,
+        },
+        ...agents,
+      ]
+    : agents;
+}
+
+function setupPlacementTargets() {
+  mockApi.getSkillPlacementTargets.mockImplementation((target: ScopeTarget) =>
+    Promise.resolve(placementTargets(target)),
+  );
+}
+
 async function loadPage() {
   const mod = await import('../../../src/components/skills/SkillsDiscoveryPage');
   return mod.SkillsDiscoveryPage;
@@ -83,6 +126,7 @@ describe('SkillsDiscoveryPage 配置目标合同', () => {
   beforeEach(() => {
     queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     Object.values(mockApi).forEach((fn) => fn.mockReset());
+    setupPlacementTargets();
     mockApi.discoverAvailableSkills.mockResolvedValue([discoverable()]);
     mockApi.getInstalledSkills.mockResolvedValue([]);
     mockApi.getSkillRepos.mockResolvedValue([]);
@@ -104,7 +148,9 @@ describe('SkillsDiscoveryPage 配置目标合同', () => {
     });
     fireEvent.click(await screen.findByRole('button', { name: '安装' }));
     const globalInstallDialog = await screen.findByRole('dialog', { name: '安装 TestSkill' });
-    fireEvent.click(within(globalInstallDialog).getByRole('radio', { name: 'Codex' }));
+    fireEvent.click(
+      within(globalInstallDialog).getByRole('radio', { name: /Codex.*\.codex\/skills/ }),
+    );
     fireEvent.click(within(globalInstallDialog).getByRole('button', { name: '确认安装' }));
     await waitFor(() =>
       expect(mockApi.installSkill).toHaveBeenCalledWith(
@@ -119,7 +165,9 @@ describe('SkillsDiscoveryPage 配置目标合同', () => {
     });
     fireEvent.click(await screen.findByRole('button', { name: '安装' }));
     const projectInstallDialog = await screen.findByRole('dialog', { name: '安装 TestSkill' });
-    fireEvent.click(within(projectInstallDialog).getByRole('radio', { name: 'OpenCode' }));
+    fireEvent.click(
+      within(projectInstallDialog).getByRole('radio', { name: /OpenCode.*opencode\/skills/ }),
+    );
     fireEvent.click(within(projectInstallDialog).getByRole('button', { name: '确认安装' }));
     await waitFor(() =>
       expect(mockApi.installSkill).toHaveBeenLastCalledWith(
@@ -200,7 +248,7 @@ describe('SkillsDiscoveryPage 配置目标合同', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: '安装' }));
     const dialog = await screen.findByRole('dialog', { name: '安装 TestSkill' });
-    const codexRadio = within(dialog).getByRole('radio', { name: 'Codex' });
+    const codexRadio = within(dialog).getByRole('radio', { name: /Codex.*\.codex\/skills/ });
     fireEvent.click(codexRadio);
     fireEvent.click(within(dialog).getByRole('button', { name: '确认安装' }));
 
@@ -242,7 +290,7 @@ describe('SkillsDiscoveryPage 配置目标合同', () => {
     expect(
       within(dialog).getByText('安装目标：项目配置：同名项目（/workspaces/beta）'),
     ).toBeTruthy();
-    fireEvent.click(within(dialog).getByRole('radio', { name: 'OpenCode' }));
+    fireEvent.click(within(dialog).getByRole('radio', { name: /OpenCode.*opencode\/skills/ }));
     fireEvent.click(within(dialog).getByRole('button', { name: '确认安装' }));
 
     await waitFor(() =>
@@ -261,6 +309,7 @@ describe('SkillsDiscoveryPage 列表与上下文切换', () => {
   beforeEach(() => {
     queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     Object.values(mockApi).forEach((fn) => fn.mockReset());
+    setupPlacementTargets();
     mockApi.discoverAvailableSkills.mockResolvedValue([discoverable()]);
     mockApi.getInstalledSkills.mockResolvedValue([]);
     mockApi.getSkillRepos.mockResolvedValue([]);
@@ -305,17 +354,22 @@ describe('SkillsDiscoveryPage 列表与上下文切换', () => {
     );
   });
 
-  it('安装对话框展示四个真实 Agent，选择前不能确认', async () => {
+  it('全局安装对话框展示共享目录和四个品牌目录，选择前不能确认', async () => {
     const Page = await loadPage();
     renderPage(Page, queryClient);
 
     fireEvent.click(await screen.findByRole('button', { name: '安装' }));
     const dialog = await screen.findByRole('dialog', { name: '安装 TestSkill' });
-    expect(within(dialog).getAllByRole('radio')).toHaveLength(4);
-    expect(within(dialog).getByRole('radio', { name: 'Claude Code' })).toBeTruthy();
-    expect(within(dialog).getByRole('radio', { name: 'Codex' })).toBeTruthy();
-    expect(within(dialog).getByRole('radio', { name: 'Gemini CLI' })).toBeTruthy();
-    expect(within(dialog).getByRole('radio', { name: 'OpenCode' })).toBeTruthy();
+    expect(within(dialog).getAllByRole('radio')).toHaveLength(5);
+    expect(within(dialog).getByRole('radio', { name: /共享目录.*\.agents\/skills/ })).toBeTruthy();
+    expect(
+      within(dialog).getByRole('radio', { name: /Claude Code.*\.claude\/skills/ }),
+    ).toBeTruthy();
+    expect(within(dialog).getByRole('radio', { name: /Codex.*\.codex\/skills/ })).toBeTruthy();
+    expect(
+      within(dialog).getByRole('radio', { name: /Gemini CLI.*\.gemini\/skills/ }),
+    ).toBeTruthy();
+    expect(within(dialog).getByRole('radio', { name: /OpenCode.*opencode\/skills/ })).toBeTruthy();
     expect(within(dialog).getByRole('button', { name: '确认安装' })).toHaveProperty(
       'disabled',
       true,

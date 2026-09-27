@@ -19,7 +19,10 @@ const mockApi = {
   scanUnmanagedSkills: vi.fn(),
   importSkillsFromApps: vi.fn(),
   installSkillsFromZip: vi.fn(),
-  toggleSkillApp: vi.fn(),
+  getSkillPlacementTargets: vi.fn(),
+  getSkillPlacements: vi.fn(),
+  setSkillPlacement: vi.fn(),
+  previewSkillImport: vi.fn(),
   updateSkill: vi.fn(),
 };
 
@@ -122,7 +125,7 @@ describe('useSkills context and target contracts', () => {
       await mutationResult.current.mutateAsync({
         skill,
         target: globalTarget,
-        initialApp: 'codex',
+        initialLocation: 'codex',
       });
     });
 

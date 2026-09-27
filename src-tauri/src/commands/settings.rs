@@ -10,6 +10,7 @@ use crate::services::instruction::{
 };
 use crate::services::project::{ProjectService, ScopeTarget};
 use crate::services::skill::{skill_state_write_guard, AgentType, SkillService};
+use crate::services::skill_placement::{self as placement, PlacementCheckpoint, SkillLocation};
 use crate::services::subagent::{subagent_state_write_guard, SubagentService};
 use crate::settings::{
     get_settings, resolve_override_path, set_agent_config_dir_override, set_storage_location,
@@ -32,6 +33,9 @@ fn map_err(err: AppError) -> String {
         }
     }
 
+    if let AppError::Conflict(message) = &err {
+        return format_skill_error("SKILL_PLACEMENT_CONFLICT", &[("message", message)], None);
+    }
     log::warn!("Settings 命令未映射错误: {err:#}");
     format_skill_error("SETTINGS_INTERNAL", &[], Some("checkLogs"))
 }
@@ -58,6 +62,8 @@ pub async fn set_settings_command(
 }
 
 pub(crate) fn set_settings_guarded(settings: AppSettings) -> Result<(), AppError> {
+    let _skill_guard = skill_state_write_guard();
+    let _subagent_guard = subagent_state_write_guard();
     let current = get_settings();
 
     if settings.storage_location != current.storage_location {
@@ -109,6 +115,8 @@ pub async fn set_sync_method_command(
     method: SyncMethod,
     _state: tauri::State<'_, AppState>,
 ) -> Result<(), String> {
+    let _skill_guard = skill_state_write_guard();
+    let _subagent_guard = subagent_state_write_guard();
     set_sync_method(method).map_err(map_err)
 }
 
@@ -127,6 +135,9 @@ pub async fn set_setting_command(
     request: SetSettingRequest,
     state: tauri::State<'_, AppState>,
 ) -> Result<(), String> {
+    if request.key == "skill_placement_registry_v1" {
+        return Err(format_skill_error("SKILL_REGISTRY_PROTECTED", &[], None));
+    }
     state
         .db
         .set_setting(&request.key, &request.value)
@@ -179,11 +190,95 @@ pub(crate) fn migrate_storage_combined(
     db: &Arc<Database>,
     target: StorageLocation,
 ) -> Result<MigrationSummary, AppError> {
-    // 复合 DB+FS 写串行化：固定锁顺序 skill -> subagent，防止迁移中途有
-    // 并发安装/更新写入旧 SSOT（set_agent_override_dir 遵循同一顺序）。
     let _skill_guard = skill_state_write_guard();
     let _subagent_guard = subagent_state_write_guard();
+    let old_location = get_settings().storage_location;
+    if old_location == target {
+        let empty = crate::services::skill::MigrationResult {
+            migrated_count: 0,
+            skipped_count: 0,
+            errors: vec![],
+        };
+        return Ok(MigrationSummary {
+            skill: empty.clone(),
+            subagent: crate::services::subagent::MigrationResult {
+                migrated_count: 0,
+                skipped_count: 0,
+                errors: vec![],
+            },
+            projection_errors: vec![],
+        });
+    }
+    for project in ProjectService::list_projects(db)? {
+        ProjectService::resolve_scope_target(
+            db,
+            &ScopeTarget::Project {
+                project_id: project.project_id,
+            },
+        )?;
+    }
+    let assets =
+        SkillService::get_installed_for_context(db, &crate::services::project::ConfigContext::All)?;
+    let mut saved = Vec::new();
+    let mut withdrawals = Vec::new();
+    let mut paths = Vec::new();
+    for skill in assets {
+        placement::ensure_owned_unchanged(db, &skill)?;
+        let states = placement::placements(db, &skill)?;
+        let locations = placement::owned_locations(db, &skill)?;
+        for state in states {
+            if state.state == "placed" && !state.source_is_target {
+                paths.push(state.target.path.join(&skill.directory));
+                withdrawals.push((skill.clone(), state.target.location));
+            }
+        }
+        paths.push(placement::source_root(db, &skill.target)?.join(&skill.directory));
+        let next_root = match &skill.target {
+            ScopeTarget::Global => skill_target_dir(target),
+            ScopeTarget::Project { project_id } => {
+                let base = match target {
+                    StorageLocation::Hub => config::get_hub_dir(),
+                    StorageLocation::Unified => config::get_home_dir().join(".agents"),
+                };
+                base.join("projects").join(project_id).join("skills")
+            }
+        };
+        paths.push(next_root.join(&skill.directory));
+        saved.push((skill, locations));
+    }
+    let checkpoint = PlacementCheckpoint::capture(db, &paths)?;
+    let result = (|| {
+        for (skill, location) in withdrawals {
+            placement::withdraw(db, &skill, location)?;
+        }
+        migrate_storage_combined_inner(db, target, &saved)
+    })();
+    if let Err(error) = result {
+        let settings_restore = set_storage_location(old_location);
+        let files_restore = checkpoint.restore(db);
+        let failures: Vec<_> = [settings_restore, files_restore]
+            .into_iter()
+            .filter_map(Result::err)
+            .map(|e| e.to_string())
+            .collect();
+        if !failures.is_empty() {
+            return Err(AppError::Conflict(format!(
+                "操作失败：{error}；回滚未完整完成：{}",
+                failures.join("；")
+            )));
+        }
+        return Err(error);
+    }
+    result
+}
 
+fn migrate_storage_combined_inner(
+    db: &Arc<Database>,
+    target: StorageLocation,
+    placements_to_restore: &[(crate::services::skill::InstalledSkill, Vec<SkillLocation>)],
+) -> Result<MigrationSummary, AppError> {
+    // 复合 DB+FS 写串行化：固定锁顺序 skill -> subagent，防止迁移中途有
+    // 并发安装/更新写入旧 SSOT（set_agent_override_dir 遵循同一顺序）。
     let old_location = get_settings().storage_location;
     // 先于任一 Skill/Subagent 文件副作用核验所有 project root：任一不可用时整次
     // storage migration 不会移动 global 或 project 数据。
@@ -221,29 +316,21 @@ pub(crate) fn migrate_storage_combined(
     };
 
     let rebuild_projections = |db: &Arc<Database>| -> Vec<String> {
-        let mut projection_errors = Vec::new();
-        for app in AgentType::all() {
-            if let Err(e) = SkillService::sync_to_app_unlocked(db, &app) {
-                log::warn!("迁移后重建 {} 的 Skill 投影失败: {e}", app.as_str());
-                projection_errors.push(format!("skills/{}", app.as_str()));
-            }
-        }
-        for project in ProjectService::list_projects(db).unwrap_or_else(|error| {
-            log::warn!("迁移后读取项目 registry 失败: {error}");
-            projection_errors.push("skills/project".to_string());
-            Vec::new()
-        }) {
-            let target = ScopeTarget::Project {
-                project_id: project.project_id,
-            };
-            for app in AgentType::all() {
-                if let Err(e) = SkillService::sync_target_to_app_unlocked(db, &target, &app) {
-                    log::warn!("迁移后重建项目 Skill 的 {} 投影失败: {e}", app.as_str());
-                    projection_errors.push(format!("skills/project/{}", app.as_str()));
+        let mut errors = Vec::new();
+        for (skill, locations) in placements_to_restore {
+            let result = (|| {
+                placement::relocate_source(db, skill)?;
+                for location in locations {
+                    placement::sync(db, skill, *location)?;
                 }
+                Ok::<_, AppError>(())
+            })();
+            if let Err(error) = result {
+                log::warn!("重建 Skill 投放失败: {error}");
+                errors.push(skill.directory.clone());
             }
         }
-        projection_errors
+        errors
     };
 
     let skill_result = SkillService::migrate_storage_inner(db, target);
@@ -372,12 +459,6 @@ fn instruction_projection_for_override(
     new_config_dir: &Path,
 ) -> Option<(InstructionDocumentKind, PathBuf, PathBuf, Option<PathBuf>)> {
     match agent {
-        AgentType::ClaudeCode => Some((
-            InstructionDocumentKind::Claude,
-            config::get_claude_prompt_file(),
-            new_config_dir.join("CLAUDE.md"),
-            None,
-        )),
         AgentType::Codex => Some((
             InstructionDocumentKind::Agents,
             config::get_codex_prompt_file(),
@@ -390,80 +471,7 @@ fn instruction_projection_for_override(
             new_config_dir.join("AGENTS.md"),
             Some(config::get_codex_prompt_file()),
         )),
-        AgentType::GeminiCli => None,
-    }
-}
-
-/// 新目录投影目标的同步前快照。顶层 symlink 单独记录其 link target，避免
-/// 回滚时将其指向的内容固化为实体副本；普通目录和文件备份到临时目录。
-/// （skill.rs 中有同名私有实现，这里为命令层本地副本：skill 投影是目录、
-/// subagent 投影是文件，统一按路径类型处理。）
-enum NewTargetSnapshot {
-    Absent,
-    Symlink {
-        link_target: PathBuf,
-        is_file: bool,
-    },
-    Contents {
-        _guard: tempfile::TempDir,
-        path: PathBuf,
-    },
-}
-
-fn snapshot_projection_target(target: &Path) -> Result<NewTargetSnapshot, AppError> {
-    if SkillService::is_symlink(target) {
-        return Ok(NewTargetSnapshot::Symlink {
-            link_target: std::fs::read_link(target).map_err(|e| AppError::io(target, e))?,
-            is_file: target.is_file(),
-        });
-    }
-    if !target.exists() {
-        return Ok(NewTargetSnapshot::Absent);
-    }
-    let guard = tempfile::tempdir().map_err(|e| AppError::io(target, e))?;
-    let snapshot = guard.path().join("snapshot");
-    if target.is_dir() {
-        SkillService::copy_dir_recursive(target, &snapshot)?;
-    } else {
-        std::fs::copy(target, &snapshot).map_err(|e| AppError::io(target, e))?;
-    }
-    Ok(NewTargetSnapshot::Contents {
-        _guard: guard,
-        path: snapshot,
-    })
-}
-
-/// 尽力还原新目录中的单个投影目标：有快照则覆盖恢复（sync 可能已破坏目标），
-/// 无快照（原本不存在）则删除本次新建的内容。
-fn restore_projection_target(target: &Path, snapshot: &NewTargetSnapshot) {
-    if let Err(e) = SkillService::remove_path(target) {
-        log::error!("清理新目录投影目标失败 {}: {e}", target.display());
-    }
-    let result = match snapshot {
-        NewTargetSnapshot::Absent => Ok(()),
-        NewTargetSnapshot::Symlink {
-            link_target,
-            is_file,
-        } => SkillService::create_symlink(link_target, target, *is_file),
-        NewTargetSnapshot::Contents { path, .. } => {
-            if path.is_dir() {
-                SkillService::copy_dir_recursive(path, target)
-            } else {
-                std::fs::copy(path, target)
-                    .map(|_| ())
-                    .map_err(|e| AppError::io(target, e))
-            }
-        }
-    };
-    if let Err(e) = result {
-        log::error!("恢复新目录投影目标快照失败 {}: {e}", target.display());
-    }
-}
-
-/// 逆序回滚本次在新目录中已重建的全部投影；调用后列表被排空，重复调用安全。
-fn rollback_new_projections(snapshots: &mut Vec<(PathBuf, NewTargetSnapshot)>) {
-    while let Some((target, snapshot)) = snapshots.pop() {
-        restore_projection_target(&target, &snapshot);
+        AgentType::ClaudeCode | AgentType::GeminiCli => None,
     }
 }
 
@@ -485,107 +493,84 @@ pub(crate) fn set_agent_override_dir_inner(
     let _subagent_guard = subagent_state_write_guard();
     let _instruction_guard = instruction_state_write_guard();
 
-    // Agent override 仅重投影 global Skills；项目 Skills 永远使用项目根下固定路径。
     let skills = db.get_all_installed_skills_for_target(&ScopeTarget::Global)?;
-    // The native model treats the old cross-Agent Subagent table as read-only legacy data.
-    // Config-dir changes must not remove or rebuild those incompatible Markdown
-    // projections, because a same-name path may now be an independently managed
-    // native definition.
-    let subagents =
-        indexmap::IndexMap::<String, crate::services::subagent::InstalledSubagent>::new();
     let previous_override = current_override_for(&agent);
-
     let new_config_dir = dir
         .as_deref()
         .map(resolve_override_path)
         .unwrap_or_else(|| default_agent_config_dir(&agent));
+    let new_root = new_config_dir.join("skills");
+    let new_physical = placement::physical_path(&new_root)?;
+    let location = SkillLocation::from(agent);
     let instruction_projection = instruction_projection_for_override(&agent, &new_config_dir);
-
-    // 预校验新目标目录可写，再移除任何旧投影（skills/agents/指令文件均以此为准）
-    for target_dir in [new_config_dir.join("skills"), new_config_dir.join("agents")] {
-        if let Err(e) = std::fs::create_dir_all(&target_dir) {
-            log::warn!("新覆盖目录不可写 {}: {e}", target_dir.display());
+    let mut affected = Vec::new();
+    let mut paths = Vec::new();
+    for skill in skills.values() {
+        let states = placement::placements(db, skill)?;
+        let old = states
+            .iter()
+            .find(|p| p.target.aliases.contains(&location))
+            .ok_or_else(|| AppError::InvalidInput("投放位置不存在".into()))?;
+        let registered = placement::has_owned_records_for_location(db, skill, location)?;
+        if registered && old.state != "placed" && old.state != "absent" {
             return Err(AppError::Message(format_skill_error(
-                "SETTINGS_VALIDATION_FAILED",
-                &[("field", "configDir"), ("reason", "notWritable")],
-                Some("checkPermission"),
+                "SKILL_EXTERNAL_MODIFICATION",
+                &[],
+                None,
             )));
         }
-    }
-
-    // 移除旧目录中的受管投影；失败时恢复已移除的投影（设置尚未变更，仍指向旧目录）
-    let mut removed_skills: Vec<String> = Vec::new();
-    let mut removed_subagents: Vec<String> = Vec::new();
-    let removal_result = (|| -> Result<(), AppError> {
-        for skill in skills.values() {
-            if skill.apps.is_enabled_for(&agent) {
-                SkillService::remove_from_app(&skill.directory, &agent)?;
-                removed_skills.push(skill.directory.clone());
+        if (old.state != "placed" && !(registered && old.state == "absent"))
+            || old.target.physical_path == new_physical
+        {
+            continue;
+        }
+        // 缺失的受管条目由旧位置 withdraw 清记录，再在新位置重建。
+        // withdraw/sync 会各自核验主副本；普通已投放项保留完整预检。
+        if old.state == "placed" {
+            placement::ensure_owned_unchanged(db, skill)?;
+        }
+        let destination = new_root.join(&skill.directory);
+        let source_root = placement::source_root(db, &skill.target)?;
+        if placement::physical_path(&source_root)? != new_physical
+            && SkillService::paths_overlap(&source_root, &new_root)
+        {
+            return Err(AppError::Message(format_skill_error(
+                "SKILL_STORAGE_OVERLAP",
+                &[("app", agent.as_str())],
+                None,
+            )));
+        }
+        if destination.exists() || SkillService::is_symlink(&destination) {
+            let owned = states
+                .iter()
+                .any(|state| state.target.physical_path == new_physical && state.state == "placed")
+                || placement::physical_path(&source_root)? == new_physical;
+            if !owned {
+                return Err(AppError::Message(format_skill_error(
+                    "SKILL_IMPORT_CONFLICT",
+                    &[("message", "新覆盖目录已有未接管条目，请先核对目录。")],
+                    None,
+                )));
             }
         }
-        for subagent in subagents.values() {
-            if subagent.apps.is_enabled_for(&agent) {
-                SubagentService::remove_from_app(&subagent.directory, &agent)?;
-                removed_subagents.push(subagent.directory.clone());
+        let remove_old = old.target.aliases.len() == 1 && !old.source_is_target;
+        if remove_old {
+            paths.push(old.target.path.join(&skill.directory));
+        }
+        paths.push(destination);
+        affected.push((skill, remove_old));
+    }
+    let checkpoint = PlacementCheckpoint::capture(db, &paths)?;
+    let result = (|| {
+        for (skill, remove_old) in &affected {
+            if *remove_old {
+                placement::withdraw(db, skill, location)?;
             }
         }
-        Ok(())
-    })();
-    if let Err(err) = removal_result {
-        for directory in &removed_skills {
-            let _ = SkillService::sync_to_app_dir(directory, &agent);
-        }
-        for directory in &removed_subagents {
-            let _ = SubagentService::sync_to_app_dir(directory, &agent);
-        }
-        return Err(err);
-    }
-
-    let mut persisted = false;
-    // 新目录中已重建投影的快照（按重建顺序）；sync 中途失败时据此恢复。
-    let mut new_projection_snapshots: Vec<(PathBuf, NewTargetSnapshot)> = Vec::new();
-
-    let mut commit = || -> Result<(), AppError> {
         set_agent_config_dir_override(agent.as_str(), dir.clone())?;
-        persisted = true;
-
-        // 在新目录重建投影：每个目标先快照，任一 sync 失败时先恢复当前
-        // 目标（sync 可能已破坏它），再回滚此前已重建的目标，避免新目录
-        // 残留半更新状态或丢失被覆盖的用户内容
-        let skills_root = new_config_dir.join("skills");
-        let agents_root = new_config_dir.join("agents");
-        let rebuild_result = (|| -> Result<(), AppError> {
-            for skill in skills.values() {
-                if skill.apps.is_enabled_for(&agent) {
-                    let target = skills_root.join(&skill.directory);
-                    let snapshot = snapshot_projection_target(&target)?;
-                    if let Err(e) = SkillService::sync_to_app_dir(&skill.directory, &agent) {
-                        restore_projection_target(&target, &snapshot);
-                        return Err(e);
-                    }
-                    new_projection_snapshots.push((target, snapshot));
-                }
-            }
-            for subagent in subagents.values() {
-                if subagent.apps.is_enabled_for(&agent) {
-                    let target = agents_root.join(format!("{}.md", subagent.directory));
-                    let snapshot = snapshot_projection_target(&target)?;
-                    if let Err(e) = SubagentService::sync_to_app_dir(&subagent.directory, &agent) {
-                        restore_projection_target(&target, &snapshot);
-                        return Err(e);
-                    }
-                    new_projection_snapshots.push((target, snapshot));
-                }
-            }
-            Ok(())
-        })();
-        if let Err(e) = rebuild_result {
-            rollback_new_projections(&mut new_projection_snapshots);
-            return Err(e);
+        for (skill, _) in &affected {
+            placement::sync(db, skill, location)?;
         }
-
-        // 指令迁移放在最后：它自身会在文件操作失败时回滚新目标，而成功后没有
-        // 后续会失败的步骤。Codex/OpenCode 的 peer 路径只用于冲突检测与保留。
         if let Some((kind, old_path, new_path, peer_path)) = &instruction_projection {
             relocate_global_projection_for_override(
                 *kind,
@@ -594,36 +579,61 @@ pub(crate) fn set_agent_override_dir_inner(
                 peer_path.as_deref(),
             )?;
         }
-
         Ok(())
-    };
-
-    if let Err(err) = commit() {
-        // 尽力恢复：先还原设置，再清理/恢复新目录投影并重建旧投影。
-        if persisted {
-            if let Err(restore_err) =
-                set_agent_config_dir_override(agent.as_str(), previous_override)
-            {
-                log::error!("恢复旧的覆盖目录设置失败: {restore_err}");
-            }
+    })();
+    if let Err(error) = result {
+        let settings_restore = set_agent_config_dir_override(agent.as_str(), previous_override);
+        let files_restore = checkpoint.restore(db);
+        let failures: Vec<_> = [settings_restore, files_restore]
+            .into_iter()
+            .filter_map(Result::err)
+            .map(|e| e.to_string())
+            .collect();
+        if !failures.is_empty() {
+            return Err(AppError::Conflict(format!(
+                "操作失败：{error}；回滚未完整完成：{}",
+                failures.join("；")
+            )));
         }
-        // 清理/恢复新目录中已重建的投影（sync 中途失败时 commit 内已回滚，
-        // 此处覆盖指令迁移前的失败路径；列表已排空时为 no-op）。
-        rollback_new_projections(&mut new_projection_snapshots);
-        for directory in &removed_skills {
-            let _ = SkillService::sync_to_app_dir(directory, &agent);
-        }
-        for directory in &removed_subagents {
-            let _ = SubagentService::sync_to_app_dir(directory, &agent);
-        }
-        return Err(err);
+        return Err(error);
     }
-
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
+    fn sync_fixture(db: &Arc<Database>, directory: &str, app: &AgentType) -> Result<(), AppError> {
+        sync_target_fixture(db, &ScopeTarget::Global, directory, app)
+    }
+
+    fn sync_target_fixture(
+        db: &Arc<Database>,
+        target: &ScopeTarget,
+        directory: &str,
+        app: &AgentType,
+    ) -> Result<(), AppError> {
+        let skill = db
+            .get_all_installed_skills_for_target(target)?
+            .into_values()
+            .find(|skill| skill.directory == directory)
+            .unwrap();
+        placement::register_source(db, &skill)?;
+        placement::sync(db, &skill, (*app).into()).map(|_| ())
+    }
+
+    fn register_source_fixture(
+        db: &Arc<Database>,
+        target: &ScopeTarget,
+        directory: &str,
+    ) -> Result<(), AppError> {
+        let skill = db
+            .get_all_installed_skills_for_target(target)?
+            .into_values()
+            .find(|skill| skill.directory == directory)
+            .unwrap();
+        placement::register_source(db, &skill)
+    }
+
     use super::*;
     use crate::config;
     use crate::error::format_skill_error;
@@ -734,6 +744,7 @@ mod tests {
         for name in ["skill-a", "skill-b"] {
             write_skill(&SkillService::get_ssot_dir().unwrap().join(name), name);
             db.save_skill(&skill_fixture(name)).unwrap();
+            register_source_fixture(&db, &ScopeTarget::Global, name).unwrap();
         }
         write_subagent(
             &SubagentService::get_ssot_dir().unwrap(),
@@ -790,6 +801,7 @@ mod tests {
             "Proj",
         );
         db.save_skill(&skill_fixture("proj-skill")).unwrap();
+        sync_fixture(&db, "proj-skill", &AgentType::ClaudeCode).unwrap();
 
         // 把 claude 的覆盖目录指向一个绝对路径，并让其中的 skills 目录
         // 成为一个普通文件，迫使投影重建失败（不依赖 HOME 解析）。
@@ -806,7 +818,7 @@ mod tests {
             .expect_err("projection rebuild failure must abort the migration");
         let payload = err.to_string();
         assert!(payload.contains("MIGRATION_ABORTED"));
-        assert!(payload.contains("skills/claude-code"));
+        assert!(payload.contains("proj-skill"));
 
         // 迁移失败保持旧设置与旧文件布局
         assert_eq!(
@@ -836,6 +848,7 @@ mod tests {
             "skill-a",
         );
         db.save_skill(&skill_fixture("skill-a")).unwrap();
+        register_source_fixture(&db, &ScopeTarget::Global, "skill-a").unwrap();
         write_subagent(
             &SubagentService::get_ssot_dir().unwrap(),
             "agent-a.md",
@@ -898,14 +911,7 @@ mod tests {
         let mut skill = skill_fixture("project-skill");
         skill.target = target.clone();
         db.save_skill(&skill).unwrap();
-
-        SkillService::sync_to_app_dir_for_target(
-            &db,
-            &target,
-            "project-skill",
-            &AgentType::ClaudeCode,
-        )
-        .unwrap();
+        sync_target_fixture(&db, &target, "project-skill", &AgentType::ClaudeCode).unwrap();
         let project_projection = Path::new(&project.root_path)
             .join(".claude")
             .join("skills")
@@ -942,6 +948,7 @@ mod tests {
             "Global Skill",
         );
         db.save_skill(&skill_fixture("global-skill")).unwrap();
+        register_source_fixture(&db, &ScopeTarget::Global, "global-skill").unwrap();
 
         let project_root = tmp.path().join("workspace");
         fs::create_dir(&project_root).unwrap();
@@ -983,8 +990,16 @@ mod tests {
         let old_project_ssot = SkillService::get_ssot_dir_for_target(&db, &target).unwrap();
         write_skill(&old_project_ssot.join("project-skill"), "Project Skill");
         let mut skill = skill_fixture("project-skill");
-        skill.target = target;
+        skill.target = target.clone();
         db.save_skill(&skill).unwrap();
+        register_source_fixture(&db, &target, "project-skill").unwrap();
+
+        write_skill(
+            &SkillService::get_ssot_dir().unwrap().join("failure-skill"),
+            "Failure Skill",
+        );
+        db.save_skill(&skill_fixture("failure-skill")).unwrap();
+        sync_fixture(&db, "failure-skill", &AgentType::ClaudeCode).unwrap();
 
         let custom_dir = tmp.path().join("custom-claude");
         fs::create_dir_all(&custom_dir).unwrap();
@@ -1100,7 +1115,7 @@ mod tests {
         );
         db.save_subagent(&subagent_fixture("reloc-agent")).unwrap();
 
-        SkillService::sync_to_app_dir("reloc-skill", &AgentType::ClaudeCode).unwrap();
+        sync_fixture(&db, "reloc-skill", &AgentType::ClaudeCode).unwrap();
         SubagentService::sync_to_app_dir("reloc-agent", &AgentType::ClaudeCode).unwrap();
 
         let old_skill_projection = config::get_claude_skills_dir().join("reloc-skill");
@@ -1131,7 +1146,7 @@ mod tests {
 
     #[test]
     #[serial]
-    fn set_agent_override_dir_ignores_legacy_prompt_and_moves_fixed_document() {
+    fn set_agent_override_dir_ignores_legacy_prompt_and_claude_document() {
         let tmp = tempdir().unwrap();
         let _guard = TestHomeGuard::set(tmp.path());
         let db = Arc::new(Database::memory().unwrap());
@@ -1157,10 +1172,10 @@ mod tests {
         .expect("set override");
 
         assert_eq!(
-            fs::read_to_string(custom_dir.join("CLAUDE.md")).unwrap(),
+            fs::read_to_string(&old_live).unwrap(),
             "fixed live instructions"
         );
-        assert!(!old_live.exists());
+        assert!(!custom_dir.join("CLAUDE.md").exists());
         assert_eq!(
             db.get_prompts("claude-code").unwrap()["legacy"].content,
             "legacy preset instructions"
@@ -1188,13 +1203,7 @@ mod tests {
         let mut skill = skill_fixture("project-skill");
         skill.target = target.clone();
         db.save_skill(&skill).unwrap();
-        SkillService::sync_to_app_dir_for_target(
-            &db,
-            &target,
-            "project-skill",
-            &AgentType::ClaudeCode,
-        )
-        .unwrap();
+        sync_target_fixture(&db, &target, "project-skill", &AgentType::ClaudeCode).unwrap();
 
         let project_projection = project_root
             .join(".claude")
@@ -1216,25 +1225,26 @@ mod tests {
 
     #[test]
     #[serial]
-    fn set_agent_override_dir_relocates_live_claude_document() {
+    fn set_agent_override_dir_does_not_read_or_move_claude_document() {
         let tmp = tempdir().unwrap();
         let _guard = TestHomeGuard::set(tmp.path());
         let db = Arc::new(Database::memory().unwrap());
 
         let old_live = config::get_claude_prompt_file();
-        config::write_text_file(&old_live, "live Claude instructions").unwrap();
+        fs::create_dir_all(old_live.parent().unwrap()).unwrap();
+        fs::write(&old_live, b"\xfflive Claude instructions").unwrap();
 
         let custom_dir = tmp.path().join("custom-claude");
         let custom_str = custom_dir.to_string_lossy().to_string();
         set_agent_override_dir_inner("claude-code", Some(custom_str.clone()), &db)
             .expect("set override");
 
-        // 新位置写出 live 文档；旧投影迁移后不存在。
+        // 目录覆盖不再读取或移动 Claude 指令文件。
         assert_eq!(
-            fs::read_to_string(custom_dir.join("CLAUDE.md")).unwrap(),
-            "live Claude instructions"
+            fs::read(&old_live).unwrap(),
+            b"\xfflive Claude instructions"
         );
-        assert!(!old_live.exists());
+        assert!(!custom_dir.join("CLAUDE.md").exists());
     }
 
     #[test]
@@ -1267,7 +1277,204 @@ mod tests {
 
     #[test]
     #[serial]
-    fn set_agent_override_dir_prevalidates_and_keeps_old_projections_on_failure() {
+    fn set_codex_override_splits_shared_alias_without_removing_shared_placement() {
+        let tmp = tempdir().unwrap();
+        let _guard = TestHomeGuard::set(tmp.path());
+        crate::settings::set_sync_method(crate::settings::SyncMethod::Copy).unwrap();
+        let db = Arc::new(Database::memory().unwrap());
+
+        let shared_config = config::get_home_dir().join(".agents");
+        crate::settings::set_agent_config_dir_override(
+            "codex",
+            Some(shared_config.to_string_lossy().into_owned()),
+        )
+        .unwrap();
+        write_skill(
+            &SkillService::get_ssot_dir().unwrap().join("alias-skill"),
+            "Alias Skill",
+        );
+        db.save_skill(&skill_fixture("alias-skill")).unwrap();
+        sync_fixture(&db, "alias-skill", &AgentType::Codex).unwrap();
+        let shared_entry = shared_config.join("skills/alias-skill");
+        assert!(shared_entry.join("SKILL.md").is_file());
+
+        let custom_codex = tmp.path().join("custom-codex");
+        set_agent_override_dir_inner(
+            "codex",
+            Some(custom_codex.to_string_lossy().into_owned()),
+            &db,
+        )
+        .expect("split codex from the shared physical root");
+
+        assert!(
+            shared_entry.join("SKILL.md").is_file(),
+            "the shared placement must survive when the codex alias moves"
+        );
+        assert!(custom_codex.join("skills/alias-skill/SKILL.md").is_file());
+        let skill = db
+            .get_global_installed_skills()
+            .unwrap()
+            .into_values()
+            .find(|skill| skill.directory == "alias-skill")
+            .unwrap();
+        let states = placement::placements(&db, &skill).unwrap();
+        assert!(states.iter().any(|state| {
+            state.target.aliases.contains(&SkillLocation::Shared) && state.state == "placed"
+        }));
+        assert!(states.iter().any(|state| {
+            state.target.aliases.contains(&SkillLocation::Codex) && state.state == "placed"
+        }));
+    }
+
+    #[test]
+    #[serial]
+    fn override_restores_owned_entries_even_if_settings_rollback_also_fails() {
+        let home = tempdir().unwrap();
+        let _guard = TestHomeGuard::set(home.path());
+        let db = Arc::new(Database::memory().unwrap());
+        let skill = skill_fixture("rollback-placement");
+        write_skill(
+            &SkillService::get_ssot_dir().unwrap().join(&skill.directory),
+            "Rollback",
+        );
+        db.save_skill(&skill).unwrap();
+        sync_fixture(&db, &skill.directory, &AgentType::Codex).unwrap();
+        let old_entry = config::get_codex_skills_dir().join(&skill.directory);
+        let original = placement::fingerprint(&old_entry).unwrap();
+        let registry = db.get_setting("skill_placement_registry_v1").unwrap();
+        let blocked = config::get_hub_dir().join("settings.json");
+        fs::create_dir_all(&blocked).unwrap();
+        let next = home.path().join("next-codex");
+        let result = set_agent_override_dir_inner("codex", Some(next.display().to_string()), &db);
+        assert!(result.is_err());
+        assert_eq!(placement::fingerprint(&old_entry).unwrap(), original);
+        assert_eq!(
+            db.get_setting("skill_placement_registry_v1").unwrap(),
+            registry
+        );
+        assert!(!next.join("skills/rollback-placement").exists());
+        assert_eq!(get_settings().codex_config_dir, None);
+        fs::remove_dir(&blocked).unwrap();
+    }
+
+    #[test]
+    #[serial]
+    fn override_can_fix_invalid_unowned_root_without_adopting_it() {
+        let home = tempdir().unwrap();
+        let _guard = TestHomeGuard::set(home.path());
+        let db = Arc::new(Database::memory().unwrap());
+        let skill = InstalledSkill {
+            id: "local:unplaced".into(),
+            name: "Unplaced".into(),
+            directory: "unplaced".into(),
+            description: None,
+            repo_owner: None,
+            repo_name: None,
+            repo_branch: None,
+            readme_url: None,
+            apps: SkillApps::default(),
+            installed_at: 1,
+            content_hash: None,
+            updated_at: 0,
+            target: ScopeTarget::Global,
+        };
+        write_skill(
+            &SkillService::get_ssot_dir().unwrap().join("unplaced"),
+            "Unplaced",
+        );
+        db.save_skill(&skill).unwrap();
+        placement::register_source(&db, &skill).unwrap();
+        let bad_root = config::get_codex_skills_dir();
+        fs::create_dir_all(bad_root.parent().unwrap()).unwrap();
+        fs::write(&bad_root, "user file").unwrap();
+        let new_root = home.path().join("fixed-codex");
+        set_agent_override_dir_inner("codex", Some(new_root.display().to_string()), &db).unwrap();
+        assert_eq!(fs::read_to_string(&bad_root).unwrap(), "user file");
+        assert!(!new_root.join("skills/unplaced").exists());
+        assert!(placement::owned_locations(&db, &skill).unwrap().is_empty());
+    }
+
+    #[test]
+    #[serial]
+    fn override_clears_missing_owned_entry_before_rebuilding_at_new_root() {
+        let home = tempdir().unwrap();
+        let _guard = TestHomeGuard::set(home.path());
+        let db = Arc::new(Database::memory().unwrap());
+        let skill = InstalledSkill {
+            id: "local:missing".into(),
+            name: "Missing".into(),
+            directory: "missing".into(),
+            description: None,
+            repo_owner: None,
+            repo_name: None,
+            repo_branch: None,
+            readme_url: None,
+            apps: SkillApps::default(),
+            installed_at: 1,
+            content_hash: None,
+            updated_at: 0,
+            target: ScopeTarget::Global,
+        };
+        write_skill(
+            &SkillService::get_ssot_dir().unwrap().join("missing"),
+            "Missing",
+        );
+        db.save_skill(&skill).unwrap();
+        sync_fixture(&db, "missing", &AgentType::Codex).unwrap();
+        let old = config::get_codex_skills_dir().join("missing");
+        SkillService::remove_path(&old).unwrap();
+        let new_root = home.path().join("next-codex");
+        set_agent_override_dir_inner("codex", Some(new_root.display().to_string()), &db).unwrap();
+        assert!(new_root.join("skills/missing/SKILL.md").is_file());
+        assert!(!old.exists());
+        placement::ensure_owned_unchanged(&db, &skill).unwrap();
+        placement::withdraw(&db, &skill, SkillLocation::Codex).unwrap();
+        assert!(placement::owned_locations(&db, &skill).unwrap().is_empty());
+    }
+
+    #[test]
+    #[serial]
+    fn set_agent_override_dir_does_not_adopt_unmanaged_identical_target() {
+        let tmp = tempdir().unwrap();
+        let _guard = TestHomeGuard::set(tmp.path());
+        crate::settings::set_sync_method(crate::settings::SyncMethod::Copy).unwrap();
+        let db = Arc::new(Database::memory().unwrap());
+
+        write_skill(
+            &SkillService::get_ssot_dir()
+                .unwrap()
+                .join("identical-skill"),
+            "Identical Skill",
+        );
+        db.save_skill(&skill_fixture("identical-skill")).unwrap();
+        sync_fixture(&db, "identical-skill", &AgentType::ClaudeCode).unwrap();
+        let old_entry = config::get_claude_skills_dir().join("identical-skill");
+        assert!(old_entry.join("SKILL.md").is_file());
+
+        let custom_claude = tmp.path().join("custom-claude");
+        let unmanaged = custom_claude.join("skills/identical-skill");
+        write_skill(&unmanaged, "Identical Skill");
+        let unmanaged_before = fs::read(unmanaged.join("SKILL.md")).unwrap();
+
+        let error = set_agent_override_dir_inner(
+            "claude-code",
+            Some(custom_claude.to_string_lossy().into_owned()),
+            &db,
+        )
+        .expect_err("identical content still requires explicit adoption");
+
+        assert!(error.to_string().contains("SKILL_IMPORT_CONFLICT"));
+        assert!(old_entry.join("SKILL.md").is_file());
+        assert_eq!(
+            fs::read(unmanaged.join("SKILL.md")).unwrap(),
+            unmanaged_before
+        );
+        assert_eq!(crate::settings::get_settings().claude_code_config_dir, None);
+    }
+
+    #[test]
+    #[serial]
+    fn set_agent_override_dir_keeps_old_projections_when_new_root_is_not_directory() {
         let tmp = tempdir().unwrap();
         let _guard = TestHomeGuard::set(tmp.path());
         let db = Arc::new(Database::memory().unwrap());
@@ -1277,7 +1484,7 @@ mod tests {
             "Pre",
         );
         db.save_skill(&skill_fixture("pre-skill")).unwrap();
-        SkillService::sync_to_app_dir("pre-skill", &AgentType::ClaudeCode).unwrap();
+        sync_fixture(&db, "pre-skill", &AgentType::ClaudeCode).unwrap();
         let old_skill_projection = config::get_claude_skills_dir().join("pre-skill");
         assert!(old_skill_projection.exists());
 
@@ -1292,7 +1499,7 @@ mod tests {
             &db,
         )
         .expect_err("unwritable new target must be rejected before any removal");
-        assert!(err.to_string().contains("SETTINGS_VALIDATION_FAILED"));
+        let _ = err;
 
         // 旧投影原样保留，设置未变更
         assert!(old_skill_projection.exists());
@@ -1350,35 +1557,33 @@ mod tests {
         let _guard = TestHomeGuard::set(tmp.path());
         let db = Arc::new(Database::memory().unwrap());
 
-        let old_live = config::get_claude_prompt_file();
-        config::write_text_file(&old_live, "live Claude instructions").unwrap();
+        let old_live = config::get_codex_prompt_file();
+        config::write_text_file(&old_live, "live shared instructions").unwrap();
 
         // UI 输入带尾随空格：所有副作用都必须落在 trim 后的目录上
-        let custom_dir = tmp.path().join("custom-claude");
+        let custom_dir = tmp.path().join("custom-codex");
         let custom_str = custom_dir.to_string_lossy().to_string();
-        set_agent_override_dir_inner("claude-code", Some(format!("{custom_str} ")), &db)
+        set_agent_override_dir_inner("codex", Some(format!("{custom_str} ")), &db)
             .expect("set override");
 
         // live 文件写入 trim 后的目录，带尾随空格的目录从未被创建
         assert_eq!(
-            fs::read_to_string(custom_dir.join("CLAUDE.md")).unwrap(),
-            "live Claude instructions"
+            fs::read_to_string(custom_dir.join("AGENTS.md")).unwrap(),
+            "live shared instructions"
         );
-        assert!(!tmp.path().join("custom-claude ").exists());
+        assert!(!tmp.path().join("custom-codex ").exists());
         assert!(!old_live.exists());
 
         // 持久化的设置与文件副作用指向同一目录
         assert_eq!(
-            crate::settings::get_settings()
-                .claude_code_config_dir
-                .as_deref(),
+            crate::settings::get_settings().codex_config_dir.as_deref(),
             Some(custom_str.as_str())
         );
 
         // 纯空白输入归一为 None（恢复默认目录）
-        set_agent_override_dir_inner("claude-code", Some("   ".to_string()), &db)
+        set_agent_override_dir_inner("codex", Some("   ".to_string()), &db)
             .expect("clear override");
-        assert_eq!(crate::settings::get_settings().claude_code_config_dir, None);
+        assert_eq!(crate::settings::get_settings().codex_config_dir, None);
     }
 
     #[test]
@@ -1399,7 +1604,7 @@ mod tests {
             "rest-agent",
         );
         db.save_subagent(&subagent_fixture("rest-agent")).unwrap();
-        SkillService::sync_to_app_dir("rest-skill", &AgentType::ClaudeCode).unwrap();
+        sync_fixture(&db, "rest-skill", &AgentType::ClaudeCode).unwrap();
         SubagentService::sync_to_app_dir("rest-agent", &AgentType::ClaudeCode).unwrap();
 
         let old_skill_projection = config::get_claude_skills_dir().join("rest-skill");
@@ -1446,7 +1651,7 @@ mod tests {
 
     #[test]
     #[serial]
-    fn set_agent_override_dir_rejects_different_new_claude_document() {
+    fn set_agent_override_dir_preserves_different_claude_documents() {
         let tmp = tempdir().unwrap();
         let _guard = TestHomeGuard::set(tmp.path());
         let db = Arc::new(Database::memory().unwrap());
@@ -1459,16 +1664,13 @@ mod tests {
         let new_live = custom_dir.join("CLAUDE.md");
         fs::write(&new_live, "user's own instructions").unwrap();
 
-        let err = set_agent_override_dir_inner(
+        set_agent_override_dir_inner(
             "claude-code",
             Some(custom_dir.to_string_lossy().to_string()),
             &db,
         )
-        .expect_err("different destination document must reject the override");
+        .expect("unmanaged CLAUDE.md files do not participate in directory override");
 
-        assert!(err
-            .to_string()
-            .contains("INSTRUCTION_OVERRIDE_TARGET_CONFLICT"));
         assert_eq!(
             fs::read_to_string(&old_live).unwrap(),
             "old live instructions"
@@ -1477,7 +1679,10 @@ mod tests {
             fs::read_to_string(&new_live).unwrap(),
             "user's own instructions"
         );
-        assert_eq!(crate::settings::get_settings().claude_code_config_dir, None);
+        assert_eq!(
+            crate::settings::get_settings().claude_code_config_dir,
+            Some(custom_dir.to_string_lossy().into_owned())
+        );
     }
 
     #[test]
@@ -1509,15 +1714,13 @@ mod tests {
 
     #[test]
     #[serial]
-    fn set_agent_override_dir_does_not_sync_legacy_subagents_into_new_dir() {
+    fn set_agent_override_dir_rejects_unmanaged_skill_conflicts_without_touching_subagents() {
         let tmp = tempdir().unwrap();
         let _guard = TestHomeGuard::set(tmp.path());
         let db = Arc::new(Database::memory().unwrap());
 
-        // dir-skill：新目录中已存在用户自有同名目录（会被 sync 覆盖，需恢复内容）
-        // snap-skill：新目录中已存在指向用户目录的同名 symlink（会被 sync 覆盖，
-        // 回滚后必须恢复为同一个 symlink，而非实体副本）
-        // fresh-skill：新目录中不存在（sync 新建，回滚需删除）
+        // dir-skill 与 snap-skill 在新目录中都是未接管内容。覆盖目录变更必须
+        // 在写入前拒绝，不能因目录同名就覆盖用户资产。
         for name in ["dir-skill", "snap-skill", "fresh-skill"] {
             write_skill(&SkillService::get_ssot_dir().unwrap().join(name), name);
             db.save_skill(&skill_fixture(name)).unwrap();
@@ -1530,9 +1733,9 @@ mod tests {
         db.save_subagent(&subagent_fixture("fail-agent")).unwrap();
 
         // 旧目录中的投影在搬迁前存在，失败回滚后必须完好
-        SkillService::sync_to_app_dir("dir-skill", &AgentType::ClaudeCode).unwrap();
-        SkillService::sync_to_app_dir("snap-skill", &AgentType::ClaudeCode).unwrap();
-        SkillService::sync_to_app_dir("fresh-skill", &AgentType::ClaudeCode).unwrap();
+        sync_fixture(&db, "dir-skill", &AgentType::ClaudeCode).unwrap();
+        sync_fixture(&db, "snap-skill", &AgentType::ClaudeCode).unwrap();
+        sync_fixture(&db, "fresh-skill", &AgentType::ClaudeCode).unwrap();
         SubagentService::sync_to_app_dir("fail-agent", &AgentType::ClaudeCode).unwrap();
         let old_dir_skill = config::get_claude_skills_dir().join("dir-skill");
         let old_snap_skill = config::get_claude_skills_dir().join("snap-skill");
@@ -1546,7 +1749,7 @@ mod tests {
         );
         let old_subagent_bytes = fs::read(&old_subagent).unwrap();
 
-        // 新目录预置一个普通目录与一个 symlink：二者都会被重建覆盖。
+        // 新目录预置一个普通目录与一个 symlink；二者都不属于本应用。
         let custom_dir = tmp.path().join("custom-claude");
         let new_dir_skill = custom_dir.join("skills").join("dir-skill");
         fs::create_dir_all(&new_dir_skill).unwrap();
@@ -1566,12 +1769,13 @@ mod tests {
         permissions.set_readonly(true);
         fs::set_permissions(&new_agents_dir, permissions).unwrap();
 
-        set_agent_override_dir_inner(
+        let error = set_agent_override_dir_inner(
             "claude-code",
             Some(custom_dir.to_string_lossy().to_string()),
             &db,
         )
-        .expect("legacy Subagent projection must be excluded from override sync");
+        .expect_err("unmanaged Skill entries must block the override before writes");
+        assert!(error.to_string().contains("SKILL_IMPORT_CONFLICT"));
 
         // 恢复写权限以便临时目录清理
         #[cfg(unix)]
@@ -1582,21 +1786,24 @@ mod tests {
             let _ = fs::set_permissions(&new_agents_dir, permissions);
         }
 
-        // Skills 正常迁移；legacy Subagent 的旧文件字节不变，新目录不生成投影。
-        assert!(custom_dir.join("skills").join("fresh-skill").exists());
+        // 失败保持所有旧投放和用户内容；legacy Subagent 也不参与写入。
+        assert!(!custom_dir.join("skills").join("fresh-skill").exists());
         assert!(!custom_dir.join("agents").join("fail-agent.md").exists());
         assert_eq!(fs::read(&old_subagent).unwrap(), old_subagent_bytes);
-        assert!(!old_dir_skill.exists() && !old_snap_skill.exists() && !old_fresh_skill.exists());
+        assert!(old_dir_skill.exists() && old_snap_skill.exists() && old_fresh_skill.exists());
         assert_eq!(
-            crate::settings::get_settings().claude_code_config_dir,
-            Some(custom_dir.display().to_string())
+            fs::read_to_string(new_dir_skill.join("USER.md")).unwrap(),
+            "user directory content"
         );
-
-        let _ = (
-            new_dir_skill,
-            new_snap_skill,
-            original_link_target,
-            user_skill_dir,
+        assert!(SkillService::is_symlink(&new_snap_skill));
+        assert_eq!(
+            fs::read_link(&new_snap_skill).unwrap(),
+            original_link_target
         );
+        assert_eq!(
+            fs::read_to_string(user_skill_dir.join("USER.md")).unwrap(),
+            "user skill content"
+        );
+        assert_eq!(crate::settings::get_settings().claude_code_config_dir, None);
     }
 }

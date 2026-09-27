@@ -33,7 +33,7 @@ export function useMigrateStorage() {
     mutationFn: (target: StorageLocation) => settingsApi.migrateStorage(target),
     onSettled: () => {
       void queryClient.invalidateQueries({ queryKey: key });
-      void queryClient.invalidateQueries({ queryKey: ['skills', 'installed'] });
+      void queryClient.invalidateQueries({ queryKey: ['skills'] });
       void queryClient.invalidateQueries({ queryKey: ['subagents', 'installed'] });
     },
   });
@@ -46,7 +46,7 @@ export function useSetAgentOverrideDir() {
       settingsApi.setAgentOverrideDir(app, dir),
     onSettled: () => {
       void queryClient.invalidateQueries({ queryKey: key });
-      void queryClient.invalidateQueries({ queryKey: ['skills', 'installed'] });
+      void queryClient.invalidateQueries({ queryKey: ['skills'] });
       void queryClient.invalidateQueries({ queryKey: ['subagents', 'installed'] });
     },
   });

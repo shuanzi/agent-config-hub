@@ -34,7 +34,6 @@ function NativeDiscovery({ context, projects }: Props) {
   const client = useQueryClient();
   const [target, setTarget] = useState<ScopeTarget | null>(() => contextTarget(context));
   const [search, setSearch] = useState('');
-  const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [installing, setInstalling] = useState<api.NativeSubagentDiscovery | null>(null);
   const [agent, setAgent] = useState<AgentType | null>(null);
   const [notice, setNotice] = useState('');
@@ -75,7 +74,6 @@ function NativeDiscovery({ context, projects }: Props) {
       value.toLowerCase().includes(search.trim().toLowerCase()),
     ),
   );
-  const selected = candidates.find((item) => item.key === selectedKey);
   const targetText =
     target === null
       ? '未选择目标'
@@ -102,19 +100,18 @@ function NativeDiscovery({ context, projects }: Props) {
     install.reset();
   };
   return (
-    <section className="subagent-panel native-panel" aria-label="发现原生 Subagent">
-      <div className="subagent-toolbar">
-        <label className="subagent-search-field">
-          <Search size={16} aria-hidden="true" />
-          <input
-            id="subagent-discovery-search"
-            type="search"
-            aria-label="搜索可安装 Subagent"
-            placeholder="搜索名称或仓库路径"
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-          />
-        </label>
+    <section
+      className="subagent-panel native-panel native-discovery-panel"
+      aria-label="发现原生 Subagent"
+    >
+      <div className="native-page-heading">
+        <div>
+          <p className="skill-eyebrow">SUBAGENTS</p>
+          <h2>发现 Subagents</h2>
+          <p>从仓库发现兼容的原生定义，选择目标后安装。</p>
+        </div>
+      </div>
+      <div className="discovery-target-card native-discovery-target">
         {context.kind === 'all' && (
           <label className="subagent-target-field">
             安装目标
@@ -133,7 +130,6 @@ function NativeDiscovery({ context, projects }: Props) {
                       ? { scope: 'project', projectId: value.slice(8) }
                       : null,
                 );
-                setSelectedKey(null);
                 setInstalling(null);
                 setNotice('');
               }}
@@ -156,6 +152,25 @@ function NativeDiscovery({ context, projects }: Props) {
           <RefreshCw size={14} className={discovery.isFetching ? 'spin' : ''} />
           刷新发现
         </button>
+        {context.kind !== 'all' && (
+          <div>
+            <strong>发现目标</strong>
+            <p>{targetText}</p>
+          </div>
+        )}
+      </div>
+      <div className="subagent-toolbar native-discovery-filters">
+        <label className="subagent-search-field">
+          <Search size={16} aria-hidden="true" />
+          <input
+            id="subagent-discovery-search"
+            type="search"
+            aria-label="搜索可安装 Subagent"
+            placeholder="搜索名称或仓库路径"
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+          />
+        </label>
         <button className="subagent-button" onClick={() => setManageRepos(true)}>
           <Settings size={14} />
           仓库管理
@@ -187,72 +202,56 @@ function NativeDiscovery({ context, projects }: Props) {
           <p>可添加包含原生 Agent 文件的仓库，或调整搜索条件。</p>
         </div>
       ) : (
-        <div className={`native-master-detail${selected ? ' has-selection' : ''}`}>
-          <div className="native-list" aria-label="可安装 Subagent 列表">
-            {filtered.map((item) => (
-              <button
-                key={item.key}
-                data-subagent-key={item.key}
-                className={`native-row${selected?.key === item.key ? ' is-selected' : ''}`}
-                onClick={() => setSelectedKey(item.key)}
-              >
-                <strong>{item.name}</strong>
-                <span>
-                  {item.repoOwner}/{item.repoName} · {item.format}
-                </span>
-                <span className="native-source">{item.path}</span>
-                <span>
-                  {item.compatibleAgents.map((value) => agentLabels[value]).join(' / ') ||
-                    '格式需要核对'}
-                </span>
-              </button>
-            ))}
-          </div>
-          {selected ? (
-            <aside className="native-detail" aria-label={`${selected.name} 详情`}>
-              <button className="subagent-detail-back" onClick={() => setSelectedKey(null)}>
-                返回列表
-              </button>
-              <h2>{selected.name}</h2>
-              <p className="native-help">{selected.description}</p>
-              <p className="native-source">
-                {selected.repoOwner}/{selected.repoName} · {selected.path}
-              </p>
-              <div className="native-actions">
-                {selected.compatibleAgents.map((value) => (
-                  <span key={value}>
-                    <AgentBrandMark app={value} size={16} /> {agentLabels[value]}
-                  </span>
-                ))}
+        <div className="native-discovery-list" aria-label="可安装 Subagent 列表">
+          {filtered.map((item) => (
+            <article
+              key={item.key}
+              data-subagent-key={item.key}
+              className="native-discovery-card"
+              aria-label={`${item.name} 详情`}
+            >
+              <div className="native-discovery-card-heading">
+                {item.compatibleAgents[0] && (
+                  <AgentBrandMark app={item.compatibleAgents[0]} size={30} />
+                )}
+                <div>
+                  <h3>{item.name}</h3>
+                  <p>
+                    {item.repoOwner}/{item.repoName} · {item.format}
+                  </p>
+                </div>
+                <button
+                  className="subagent-button is-primary"
+                  disabled={item.compatibleAgents.length === 0 || install.isPending}
+                  onClick={() => beginInstall(item)}
+                >
+                  <Download size={14} />
+                  安装
+                </button>
               </div>
+              <p>{item.description}</p>
               <p className="native-help">
-                支持 Codex 的全局和项目 TOML 定义。Markdown 不会直接复制成 Codex 配置。
+                兼容 Agent：
+                {item.compatibleAgents.map((value) => agentLabels[value]).join(' / ') ||
+                  '格式需要核对'}{' '}
+                · {item.path}
               </p>
-              {installedAgents(selected).length > 0 && (
-                <p>
+              {installedAgents(item).length > 0 && (
+                <p className="native-help">
                   此目标已管理：
-                  {installedAgents(selected)
+                  {installedAgents(item)
                     .map((value) => agentLabels[value])
                     .join('、')}
                 </p>
               )}
-              <button
-                className="subagent-button is-primary"
-                disabled={selected.compatibleAgents.length === 0 || install.isPending}
-                onClick={() => beginInstall(selected)}
-              >
-                <Download size={14} />
-                安装
-              </button>
-            </aside>
-          ) : (
-            <aside className="native-detail native-detail-empty">选择定义查看兼容 Agent。</aside>
-          )}
+            </article>
+          ))}
         </div>
       )}
       <FocusedDialog
         open={installing !== null}
         title={`安装 ${installing?.name ?? ''}`}
+        className="native-install-dialog"
         onClose={() => {
           if (!install.isPending) setInstalling(null);
         }}
@@ -287,10 +286,16 @@ function NativeDiscovery({ context, projects }: Props) {
           </>
         }
       >
-        <p className="native-source">安装目标：{targetText}</p>
-        <p>请选择所属 Agent。安装前由后端再次校验原生格式，不进行跨 Agent 转换。</p>
+        <p className="native-source">
+          {installing?.name} · {installing?.format.toUpperCase()}
+        </p>
+        <div className="skill-dialog-field">
+          <span>安装到</span>
+          <div className="native-install-target">{targetText}</div>
+        </div>
         <InitialAgentRadioGroup
           name="native-subagent-agent"
+          legend="选择兼容 Agent"
           value={agent}
           onChange={setAgent}
           disabled={install.isPending}
@@ -298,6 +303,16 @@ function NativeDiscovery({ context, projects }: Props) {
             (value) =>
               !installing?.compatibleAgents.includes(value) ||
               (installing && installedAgents(installing).includes(value)),
+          )}
+          optionHints={Object.fromEntries(
+            WORKBENCH_AGENTS.map((value) => [
+              value,
+              !installing?.compatibleAgents.includes(value)
+                ? '此原生定义格式不兼容'
+                : installedAgents(installing).includes(value)
+                  ? '此目标已管理该 Agent 定义'
+                  : `原生 ${installing.format.toUpperCase()} · ${installing.path}`,
+            ]),
           )}
           description="当前定义格式不兼容，或此目标已管理该 Agent 定义。"
         />

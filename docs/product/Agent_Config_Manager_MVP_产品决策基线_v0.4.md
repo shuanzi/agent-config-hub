@@ -30,14 +30,13 @@ Skills 保留仓库发现、安装、导入、更新、卸载、备份恢复及�
 
 ### 2.2 长期指令
 
-长期指令不再是 per-Agent 预设库，只管理每个 target 的两种固定 live 文档：
+2026-09-22 更新：每个完整 target 只管理一个逻辑文档 `AGENTS.md`，支持查看、创建、编辑和保存。应用只负责文件管理，不保证 Agent 已加载或遵循内容；是否加载由 Agent 自身机制和配置决定。
 
-- `CLAUDE.md`：只对 Claude Code 生效；
-- `AGENTS.md`：对 Codex 与 OpenCode 生效。
-
-本功能不支持 Gemini CLI，不读取、写入或显示 `GEMINI.md`；不提供预设 CRUD、导入、物理删除或 per-Agent enable。
-
-global `AGENTS.md` 是同一逻辑文档，保存时将同一内容投影到 Codex 与 OpenCode 的有效全局文件；两份既有内容分歧时返回结构化错误且零写入。project `AGENTS.md` 只写项目根的单一文件。
+- global 保存继续将同一内容写入 Codex 与 OpenCode 的有效全局目录，沿用目录覆盖设置。默认路径为 `~/.codex/AGENTS.md` 与 `~/.config/opencode/AGENTS.md`。两份既有内容分歧时返回结构化错误且零写入；任一写入失败时恢复已写入的文件。
+- project 只写项目 registry 根目录的 `AGENTS.md`，保持全局与项目隔离。全部上下文按 target 分组，项目上下文保留当前项目与全局文档。
+- 界面展示实际保存路径，不再声明“对某 Agent 生效”，不新增 Claude 专用路径或引用文件。
+- 不读取、写入、合并、改名、删除或生成 `CLAUDE.md` / `GEMINI.md`；Claude 目录覆盖设置不再迁移长期指令文件，现有文件原处保留。
+- 不提供预设 CRUD、导入、物理删除或 per-Agent enable；不引入升级兼容或自动迁移。
 
 ### 2.3 Subagents
 
@@ -45,12 +44,12 @@ global `AGENTS.md` 是同一逻辑文档，保存时将同一内容投影到 Cod
 
 ## 3. UI 与响应式基线
 
-宽屏采用 selected B2 的 `资产类型 rail → 配置上下文 rail → 主工作区`。第一栏固定为 Skills、长期指令、Subagents，设置位于底部；第二栏固定为“全部／全局配置／真实项目列表”。不提供全局 Agent 选择控件；Skills 保留四 Agent 行状态和显式 `initialApp`，Subagents 显示单一所属 Agent 及原生状态并显式选择兼容 Agent 安装，不占用第二栏，也不影响长期指令的两种固定文档。
+宽屏采用 selected B2 的 `资产类型 rail → 配置上下文 rail → 主工作区`。第一栏固定为 Skills、长期指令、Subagents，设置位于底部；第二栏固定为“全部／全局配置／真实项目列表”。不提供全局 Agent 选择控件；Skills 保留四 Agent 行状态和显式 `initialApp`，Subagents 显示单一所属 Agent 及原生状态并显式选择兼容 Agent 安装，不占用第二栏，也不影响长期指令的单一 AGENTS.md 文档。
 
 `1200px` 以下使用“类型 → 配置上下文 → 列表 → 详情”的单表面栈，设置跳过配置上下文。390px 不产生横向溢出，列表与详情往返恢复原触发项焦点。
 
 ## 4. 被本文取代的 v0.3 条款
 
 - “项目作用域资产管理（仅全局作用域）”不再属于本期不做；
-- “长期指令是每个 Agent 互斥激活一条的预设库”被两种固定 live 文档取代；
-- 四个一等 Agent 仍适用于 Skills 与 Subagents，但长期指令明确不支持 Gemini CLI。
+- “长期指令是每个 Agent 互斥激活一条的预设库”及“两种固定 live 文档”均被每个 target 的单一逻辑 AGENTS.md 文档取代；
+- 四个一等 Agent 仍适用于 Skills 与 Subagents；长期指令只管理 AGENTS.md，不管理各 Agent 的加载配置。

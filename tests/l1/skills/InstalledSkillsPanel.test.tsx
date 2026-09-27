@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, cleanup, waitFor, within } from '@testing-library/react';
+import { act, render, screen, fireEvent, cleanup, waitFor, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
 import type {
@@ -8,6 +8,9 @@ import type {
   InstalledSkill,
   ProjectSummary,
   ScopeTarget,
+  SkillImportPreview,
+  SkillPlacementAsset,
+  SkillPlacementTarget,
   SkillUpdateInfo,
   UnmanagedSkill,
 } from '../../../src/types';
@@ -21,13 +24,16 @@ const mockApi = {
   discoverAvailableSkills: vi.fn(),
   getSkillRepos: vi.fn(),
   getSkillBackups: vi.fn(),
+  getSkillPlacements: vi.fn(),
+  getSkillPlacementTargets: vi.fn(),
   scanUnmanagedSkills: vi.fn(),
   checkSkillUpdates: vi.fn(),
   installSkill: vi.fn(),
   uninstallSkill: vi.fn(),
-  toggleSkillApp: vi.fn(),
+  setSkillPlacement: vi.fn(),
   updateSkill: vi.fn(),
   importSkillsFromApps: vi.fn(),
+  previewSkillImport: vi.fn(),
   installSkillsFromZip: vi.fn(),
   restoreSkillBackup: vi.fn(),
   deleteSkillBackup: vi.fn(),
@@ -57,6 +63,83 @@ const installedSkill = (
   updatedAt: 0,
   target,
 });
+
+function placementTargets(target: ScopeTarget): SkillPlacementTarget[] {
+  const prefix = target.scope === 'global' ? '/home/user' : `/workspaces/${target.projectId}`;
+  const codexPath =
+    target.scope === 'global' ? `${prefix}/.codex/skills` : `${prefix}/.agents/skills`;
+  const opencodePath =
+    target.scope === 'global' ? `${prefix}/.config/opencode/skills` : `${prefix}/.opencode/skills`;
+  const agents: SkillPlacementTarget[] = [
+    {
+      location: 'claude-code',
+      aliases: [],
+      path: `${prefix}/.claude/skills`,
+      physicalPath: `${prefix}/.claude/skills`,
+    },
+    { location: 'codex', aliases: [], path: codexPath, physicalPath: codexPath },
+    {
+      location: 'gemini-cli',
+      aliases: [],
+      path: `${prefix}/.gemini/skills`,
+      physicalPath: `${prefix}/.gemini/skills`,
+    },
+    { location: 'opencode', aliases: [], path: opencodePath, physicalPath: opencodePath },
+  ];
+  return target.scope === 'global'
+    ? [
+        {
+          location: 'shared',
+          aliases: [],
+          path: `${prefix}/.agents/skills`,
+          physicalPath: `${prefix}/.agents/skills`,
+        },
+        ...agents,
+      ]
+    : agents;
+}
+
+function setupPlacementMocks() {
+  mockApi.getSkillPlacements.mockResolvedValue([]);
+  mockApi.getSkillPlacementTargets.mockImplementation((target: ScopeTarget) =>
+    Promise.resolve(placementTargets(target)),
+  );
+  mockApi.setSkillPlacement.mockResolvedValue(undefined);
+  mockApi.previewSkillImport.mockImplementation(
+    (selections: Array<{ directory: string; sourcePath: string }>) =>
+      Promise.resolve({
+        revision: 'preview-1',
+        items: selections.map((selection) => ({
+          directory: selection.directory,
+          sourcePath: selection.sourcePath,
+          storagePath: `/managed/${selection.directory}`,
+          actions: [{ path: selection.sourcePath, action: '保留来源并创建受管投放' }],
+        })),
+      } satisfies SkillImportPreview),
+  );
+}
+
+function placementAsset(
+  id: string,
+  target: ScopeTarget,
+  location: 'claude-code' | 'codex' = 'codex',
+  state: 'placed' | 'absent' | 'unmanaged' | 'conflict' = 'absent',
+): SkillPlacementAsset {
+  const placementTarget = placementTargets(target).find((item) => item.location === location)!;
+  return {
+    id,
+    target,
+    placements: [
+      {
+        ...placementTarget,
+        state,
+        withdrawable: state === 'placed',
+        sourceIsTarget: false,
+        revision: `${id}-${location}-r1`,
+      },
+    ],
+  };
+}
 
 async function loadPanel() {
   const mod = await import('../../../src/components/skills/InstalledSkillsPanel');
@@ -92,6 +175,7 @@ describe('InstalledSkillsPanel 导入同目录不同来源的本地 Skill', () =
       defaultOptions: { queries: { retry: false } },
     });
     Object.values(mockApi).forEach((fn) => fn.mockReset());
+    setupPlacementMocks();
     mockOpenFileDialog.mockReset();
     mockApi.getInstalledSkills.mockResolvedValue([]);
     mockApi.getSkillBackups.mockResolvedValue([]);
@@ -116,7 +200,7 @@ describe('InstalledSkillsPanel 导入同目录不同来源的本地 Skill', () =
     cleanup();
   });
 
-  it('同 directory 的两条默认只勾选第一条，并提示互斥', async () => {
+  it('同 directory 的来源默认都不接管，并提示一次只能选择一个来源', async () => {
     const Panel = await loadPanel();
     renderPanel(Panel, queryClient);
 
@@ -134,14 +218,16 @@ describe('InstalledSkillsPanel 导入同目录不同来源的本地 Skill', () =
     const firstCheckbox = within(firstItem as HTMLElement).getAllByRole('checkbox')[0];
     const secondCheckbox = within(secondItem as HTMLElement).getAllByRole('checkbox')[0];
 
-    // 同 directory 组内默认只勾选第一条
-    expect(firstCheckbox).toHaveProperty('checked', true);
+    expect(firstCheckbox).toHaveProperty('checked', false);
     expect(secondCheckbox).toHaveProperty('checked', false);
-    expect(within(dialog).getByRole('button', { name: /导入选中项 \(1\)/ })).toBeTruthy();
+    expect(within(dialog).getByRole('button', { name: /预览接管 \(0\)/ })).toHaveProperty(
+      'disabled',
+      true,
+    );
     expect(within(dialog).getAllByText('同名 Skill 一次只能导入一个来源')).toHaveLength(2);
   });
 
-  it('勾选第二条时自动取消第一条，提交只含一条 selection', async () => {
+  it('明确选择来源和目录后先预览，再携带 revision 接管', async () => {
     const Panel = await loadPanel();
     renderPanel(Panel, queryClient);
 
@@ -161,42 +247,53 @@ describe('InstalledSkillsPanel 导入同目录不同来源的本地 Skill', () =
     expect(firstCheckbox).toHaveProperty('checked', false);
     expect(secondCheckbox).toHaveProperty('checked', true);
 
-    fireEvent.click(within(dialog).getByRole('button', { name: /导入选中项 \(1\)/ }));
+    fireEvent.click(
+      within(secondItem as HTMLElement).getByRole('checkbox', { name: /Codex.*\.codex\/skills/ }),
+    );
+    fireEvent.click(within(dialog).getByRole('button', { name: /预览接管 \(1\)/ }));
+    expect(await within(dialog).findByText('/managed/shared')).toBeTruthy();
+    fireEvent.click(within(dialog).getByRole('button', { name: '确认接管' }));
 
     await waitFor(() => expect(mockApi.importSkillsFromApps).toHaveBeenCalledTimes(1));
     expect(mockApi.importSkillsFromApps.mock.calls[0][0]).toEqual([
       {
         directory: 'shared',
         sourcePath: '/agents/codex/skills/shared',
-        apps: { claudeCode: false, codex: true, geminiCli: false, opencode: false },
+        locations: ['codex'],
       },
     ]);
     expect(mockApi.importSkillsFromApps.mock.calls[0][1]).toEqual(globalTarget);
+    expect(mockApi.importSkillsFromApps.mock.calls[0][2]).toEqual('preview-1');
   });
 
-  it('导入失败在对话框内提示并保留选择以便重试', async () => {
+  it('接管失败在预览对话框内提示并保留确认动作以便重试', async () => {
     mockApi.importSkillsFromApps.mockRejectedValueOnce(new Error('boom'));
     const Panel = await loadPanel();
     renderPanel(Panel, queryClient);
 
     fireEvent.click(await screen.findByRole('button', { name: /导入已有/ }));
     const dialog = await screen.findByRole('dialog', { name: '导入已有 Skill' });
-    const selectedItem = within(dialog).getByRole('checkbox', {
+    const sourceItem = within(dialog).getByRole('checkbox', {
       name: '选择 SharedSkill，来源 /agents/claude/skills/shared',
     });
-    fireEvent.click(within(dialog).getByRole('button', { name: /导入选中项/ }));
+    fireEvent.click(sourceItem);
+    fireEvent.click(
+      within(dialog).getByRole('checkbox', { name: /Claude Code.*\.claude\/skills/ }),
+    );
+    fireEvent.click(within(dialog).getByRole('button', { name: /预览接管/ }));
+    const confirmButton = await within(dialog).findByRole('button', { name: '确认接管' });
+    fireEvent.click(confirmButton);
 
     expect((await within(dialog).findByRole('alert')).textContent).toContain(
       '操作失败，请稍后重试。',
     );
-    expect(selectedItem).toHaveProperty('checked', true);
-    expect(within(dialog).getByRole('button', { name: /导入选中项/ })).toHaveProperty(
+    expect(within(dialog).getByRole('button', { name: '确认接管' })).toHaveProperty(
       'disabled',
       false,
     );
   });
 
-  it('directory 大小写不同（Foo / foo）也视为同一组：默认只勾第一条并互斥', async () => {
+  it('directory 大小写不同（Foo / foo）也视为同一组并互斥', async () => {
     mockApi.scanUnmanagedSkills.mockResolvedValue([
       {
         directory: 'Foo',
@@ -224,28 +321,31 @@ describe('InstalledSkillsPanel 导入同目录不同来源的本地 Skill', () =
     const firstCheckbox = within(firstItem as HTMLElement).getAllByRole('checkbox')[0];
     const secondCheckbox = within(secondItem as HTMLElement).getAllByRole('checkbox')[0];
 
-    // 默认只勾第一条，且两条都有互斥提示
-    expect(firstCheckbox).toHaveProperty('checked', true);
+    expect(firstCheckbox).toHaveProperty('checked', false);
     expect(secondCheckbox).toHaveProperty('checked', false);
-    expect(within(dialog).getByRole('button', { name: /导入选中项 \(1\)/ })).toBeTruthy();
     expect(within(dialog).getAllByText('同名 Skill 一次只能导入一个来源')).toHaveLength(2);
 
-    // 勾选第二条自动取消第一条，提交 payload 只有一条
+    fireEvent.click(firstCheckbox);
     fireEvent.click(secondCheckbox);
     expect(firstCheckbox).toHaveProperty('checked', false);
     expect(secondCheckbox).toHaveProperty('checked', true);
 
-    fireEvent.click(within(dialog).getByRole('button', { name: /导入选中项 \(1\)/ }));
+    fireEvent.click(
+      within(secondItem as HTMLElement).getByRole('checkbox', { name: /Codex.*\.codex\/skills/ }),
+    );
+    fireEvent.click(within(dialog).getByRole('button', { name: /预览接管 \(1\)/ }));
+    fireEvent.click(await within(dialog).findByRole('button', { name: '确认接管' }));
 
     await waitFor(() => expect(mockApi.importSkillsFromApps).toHaveBeenCalledTimes(1));
     expect(mockApi.importSkillsFromApps.mock.calls[0][0]).toEqual([
       {
         directory: 'foo',
         sourcePath: '/agents/codex/skills/foo',
-        apps: { claudeCode: false, codex: true, geminiCli: false, opencode: false },
+        locations: ['codex'],
       },
     ]);
     expect(mockApi.importSkillsFromApps.mock.calls[0][1]).toEqual(globalTarget);
+    expect(mockApi.importSkillsFromApps.mock.calls[0][2]).toEqual('preview-1');
   });
 });
 
@@ -257,6 +357,7 @@ describe('InstalledSkillsPanel 全部更新部分失败', () => {
       defaultOptions: { queries: { retry: false } },
     });
     Object.values(mockApi).forEach((fn) => fn.mockReset());
+    setupPlacementMocks();
     mockOpenFileDialog.mockReset();
     mockApi.getInstalledSkills.mockResolvedValue([
       installedSkill('skill-a', 'SkillA'),
@@ -316,6 +417,7 @@ describe('InstalledSkillsPanel 全部上下文的操作目标', () => {
   beforeEach(() => {
     queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     Object.values(mockApi).forEach((fn) => fn.mockReset());
+    setupPlacementMocks();
     mockOpenFileDialog.mockReset();
     mockApi.getInstalledSkills.mockResolvedValue([]);
     mockApi.getSkillBackups.mockResolvedValue([]);
@@ -357,24 +459,101 @@ describe('InstalledSkillsPanel 全部上下文的操作目标', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '导入已有' }));
     const dialog = await screen.findByRole('dialog', { name: '导入已有 Skill' });
-    fireEvent.click(within(dialog).getByRole('button', { name: /导入选中项/ }));
+    fireEvent.click(within(dialog).getByRole('checkbox', { name: /选择 Local Skill/ }));
+    fireEvent.click(within(dialog).getByRole('checkbox', { name: /共享目录.*\.agents\/skills/ }));
+    fireEvent.click(within(dialog).getByRole('button', { name: /预览接管/ }));
+    fireEvent.click(await within(dialog).findByRole('button', { name: '确认接管' }));
 
     await waitFor(() =>
-      expect(mockApi.importSkillsFromApps).toHaveBeenCalledWith(expect.any(Array), globalTarget),
+      expect(mockApi.importSkillsFromApps).toHaveBeenCalledWith(
+        expect.any(Array),
+        globalTarget,
+        'preview-1',
+      ),
     );
   });
 
-  it('ZIP picker 只接受单个 ZIP，取消不安装，选择后提交真实路径、目标与 initialApp', async () => {
+  it('全部上下文的行内接管始终使用该项目行的 target，并在提交期间阻止重复确认', async () => {
+    const projectSkill = installedSkill('project-skill', 'Project Skill', projectTarget);
+    mockApi.getInstalledSkills.mockResolvedValue([projectSkill]);
+    mockApi.getSkillPlacements.mockResolvedValue([
+      placementAsset('project-skill', projectTarget, 'codex', 'unmanaged'),
+    ]);
+    let resolveImport!: (skills: InstalledSkill[]) => void;
+    mockApi.importSkillsFromApps.mockImplementation(
+      () =>
+        new Promise<InstalledSkill[]>((resolve) => {
+          resolveImport = resolve;
+        }),
+    );
+    const Panel = await loadPanel();
+    renderPanel(Panel, queryClient, allContext);
+
+    fireEvent.change(await screen.findByLabelText('选择 Skill 操作目标'), {
+      target: { value: 'global' },
+    });
+    fireEvent.click(await screen.findByRole('button', { name: /Project Skill.*查看详情并接管/ }));
+    fireEvent.click(
+      await screen.findByRole('button', {
+        name: /接管 Project Skill 在 .*project-alpha\/\.agents\/skills/,
+      }),
+    );
+    const dialog = await screen.findByRole('dialog', {
+      name: '接管 Project Skill 的已有投放',
+    });
+    fireEvent.click(within(dialog).getByRole('button', { name: /预览接管 \(1\)/ }));
+
+    await waitFor(() =>
+      expect(mockApi.previewSkillImport).toHaveBeenCalledWith(
+        [
+          {
+            directory: 'project-skill',
+            sourcePath: '/workspaces/project-alpha/.agents/skills/project-skill',
+            locations: ['codex'],
+          },
+        ],
+        projectTarget,
+      ),
+    );
+    const confirmButton = await within(dialog).findByRole('button', { name: '确认接管' });
+    fireEvent.click(confirmButton);
+
+    await waitFor(() => {
+      expect(mockApi.importSkillsFromApps).toHaveBeenCalledWith(
+        expect.any(Array),
+        projectTarget,
+        'preview-1',
+      );
+      expect(confirmButton).toHaveProperty('disabled', true);
+      expect(within(dialog).getByRole('button', { name: '返回修改' })).toHaveProperty(
+        'disabled',
+        true,
+      );
+    });
+    fireEvent.click(confirmButton);
+    expect(mockApi.importSkillsFromApps).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      resolveImport([]);
+    });
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: '接管 Project Skill 的已有投放' })).toBeNull(),
+    );
+  });
+
+  it('ZIP picker 只接受单个 ZIP，项目目标只展示四个投放位置并提交 initialLocation', async () => {
     const Panel = await loadPanel();
     renderPanel(Panel, queryClient, allContext);
 
     fireEvent.change(screen.getByLabelText('选择 Skill 操作目标'), {
       target: { value: 'project:project-alpha' },
     });
-    fireEvent.click(screen.getByRole('button', { name: '从 ZIP 安装' }));
+    const zipButton = screen.getByRole('button', { name: '从 ZIP 安装' });
+    await waitFor(() => expect(zipButton).toHaveProperty('disabled', false));
+    fireEvent.click(zipButton);
     const dialog = await screen.findByRole('dialog', { name: '从 ZIP 安装 Skill' });
     const installButton = within(dialog).getByRole('button', { name: '安装' });
-    expect(within(dialog).getAllByRole('radio')).toHaveLength(4);
+    expect(await within(dialog).findAllByRole('radio')).toHaveLength(4);
     expect(installButton).toHaveProperty('disabled', true);
 
     mockOpenFileDialog.mockResolvedValueOnce(null);
@@ -391,7 +570,7 @@ describe('InstalledSkillsPanel 全部上下文的操作目标', () => {
     mockOpenFileDialog.mockResolvedValueOnce('/tmp/local-skill.zip');
     fireEvent.click(within(dialog).getByRole('button', { name: '选择 ZIP 文件' }));
     expect(await within(dialog).findByText('/tmp/local-skill.zip')).toBeTruthy();
-    fireEvent.click(within(dialog).getByRole('radio', { name: 'Codex' }));
+    fireEvent.click(within(dialog).getByRole('radio', { name: /Codex.*\.agents\/skills/ }));
     expect(installButton).toHaveProperty('disabled', false);
     mockApi.installSkillsFromZip.mockRejectedValueOnce(new Error('boom'));
     fireEvent.click(installButton);
@@ -399,7 +578,10 @@ describe('InstalledSkillsPanel 全部上下文的操作目标', () => {
     const alert = await within(dialog).findByRole('alert');
     expect(alert.textContent).toContain('操作失败，请稍后重试。');
     expect(within(dialog).getByText('/tmp/local-skill.zip')).toBeTruthy();
-    expect(within(dialog).getByRole('radio', { name: 'Codex' })).toHaveProperty('checked', true);
+    expect(within(dialog).getByRole('radio', { name: /Codex.*\.agents\/skills/ })).toHaveProperty(
+      'checked',
+      true,
+    );
     expect(installButton).toHaveProperty('disabled', false);
 
     fireEvent.click(installButton);
@@ -455,8 +637,11 @@ describe('InstalledSkillsPanel 全部上下文的操作目标', () => {
     });
     fireEvent.click(screen.getByRole('button', { name: '检查更新' }));
     fireEvent.click(
+      await screen.findByRole('button', { name: '更多操作 Project Skill，项目配置：项目 Alpha' }),
+    );
+    fireEvent.click(
       await screen.findByRole('button', {
-        name: '更新 Project Skill，项目配置：项目 Alpha',
+        name: '更新 Project Skill',
       }),
     );
 
@@ -474,12 +659,14 @@ describe('InstalledSkillsPanel 列表和详情', () => {
       defaultOptions: { queries: { retry: false } },
     });
     Object.values(mockApi).forEach((fn) => fn.mockReset());
+    setupPlacementMocks();
     mockOpenFileDialog.mockReset();
     mockApi.getInstalledSkills.mockResolvedValue([
       { ...installedSkill('skill-a', 'SkillA'), description: '用于检查提交规范' },
     ]);
+    mockApi.getSkillPlacements.mockResolvedValue([placementAsset('skill-a', globalTarget)]);
     mockApi.getSkillBackups.mockResolvedValue([]);
-    mockApi.toggleSkillApp.mockResolvedValue(undefined);
+    mockApi.setSkillPlacement.mockResolvedValue(undefined);
   });
 
   afterEach(() => {
@@ -490,6 +677,10 @@ describe('InstalledSkillsPanel 列表和详情', () => {
     mockApi.getInstalledSkills.mockResolvedValue([
       installedSkill('shared-skill', 'Shared Skill', globalTarget),
       installedSkill('shared-skill', 'Shared Skill', projectTarget),
+    ]);
+    mockApi.getSkillPlacements.mockResolvedValue([
+      placementAsset('shared-skill', globalTarget),
+      placementAsset('shared-skill', projectTarget),
     ]);
     const Panel = await loadPanel();
     renderPanel(Panel, queryClient, allContext);
@@ -506,23 +697,25 @@ describe('InstalledSkillsPanel 列表和详情', () => {
     expect(projectDetailButton).toBeTruthy();
 
     fireEvent.click(
-      screen.getByRole('checkbox', {
-        name: 'Shared Skill，项目配置：项目 Alpha，Codex',
+      screen.getByRole('button', {
+        name: /Shared Skill，Codex，\/workspaces\/project-alpha\/\.agents\/skills，投放/,
       }),
     );
     await waitFor(() =>
-      expect(mockApi.toggleSkillApp).toHaveBeenCalledWith(
+      expect(mockApi.setSkillPlacement).toHaveBeenCalledWith(
         'shared-skill',
         projectTarget,
         'codex',
         true,
+        'shared-skill-codex-r1',
       ),
     );
-    expect(mockApi.toggleSkillApp).not.toHaveBeenCalledWith(
+    expect(mockApi.setSkillPlacement).not.toHaveBeenCalledWith(
       'shared-skill',
       globalTarget,
       'codex',
       true,
+      expect.any(String),
     );
 
     fireEvent.click(projectDetailButton);
@@ -540,6 +733,10 @@ describe('InstalledSkillsPanel 列表和详情', () => {
     mockApi.getInstalledSkills.mockResolvedValue([
       installedSkill('shared-skill', 'Shared Skill', projectTarget),
       installedSkill('shared-skill', 'Shared Skill', betaTarget),
+    ]);
+    mockApi.getSkillPlacements.mockResolvedValue([
+      placementAsset('shared-skill', projectTarget),
+      placementAsset('shared-skill', betaTarget),
     ]);
     const Panel = await loadPanel();
     renderPanel(Panel, queryClient, allContext, () => undefined, duplicateProjects);
@@ -562,23 +759,18 @@ describe('InstalledSkillsPanel 列表和详情', () => {
     ).toBeTruthy();
 
     fireEvent.click(
-      screen.getByRole('checkbox', {
-        name: 'Shared Skill，项目配置：同名项目（/workspaces/beta），Codex',
+      screen.getByRole('button', {
+        name: /Shared Skill，Codex，\/workspaces\/project-beta\/\.agents\/skills，投放/,
       }),
     );
     await waitFor(() =>
-      expect(mockApi.toggleSkillApp).toHaveBeenCalledWith(
+      expect(mockApi.setSkillPlacement).toHaveBeenCalledWith(
         'shared-skill',
         betaTarget,
         'codex',
         true,
+        'shared-skill-codex-r1',
       ),
-    );
-    expect(mockApi.toggleSkillApp).not.toHaveBeenCalledWith(
-      'shared-skill',
-      projectTarget,
-      'codex',
-      true,
     );
   });
 
@@ -591,7 +783,7 @@ describe('InstalledSkillsPanel 列表和详情', () => {
     renderPanel(Panel, queryClient, { kind: 'project', projectId: 'project-alpha' });
 
     expect(await screen.findByRole('heading', { name: /此项目拥有：项目 Alpha.*1/ })).toBeTruthy();
-    expect(screen.getByRole('heading', { name: /全局配置，可用于此项目.*1/ })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: /已投放的全局资产.*1/ })).toBeTruthy();
   });
 
   it('发现技能入口交给现有发现子视图处理', async () => {
@@ -603,9 +795,12 @@ describe('InstalledSkillsPanel 列表和详情', () => {
     expect(onOpenDiscovery).toHaveBeenCalledTimes(1);
   });
 
-  it('点击高密度行进入详情，Agent checkbox 仍调用即时 toggle mutation', async () => {
+  it('点击高密度行进入详情，目录开关携带 revision 调用投放 mutation', async () => {
     mockApi.getInstalledSkills.mockResolvedValue([
       { ...installedSkill('skill-a', 'SkillA'), target: projectTarget },
+    ]);
+    mockApi.getSkillPlacements.mockResolvedValue([
+      placementAsset('skill-a', projectTarget, 'claude-code', 'placed'),
     ]);
     const Panel = await loadPanel();
     renderPanel(Panel, queryClient, allContext);
@@ -616,19 +811,87 @@ describe('InstalledSkillsPanel 列表和详情', () => {
     const detail = await screen.findByLabelText('SkillA 详情');
     expect(detail.getAttribute('data-skill-detail')).toBe('skill-a');
     const claudeCheckbox = within(detail).getByRole('checkbox', {
-      name: 'SkillA，项目配置：项目 Alpha，Claude Code',
+      name: /SkillA，Claude Code，.*\.claude\/skills，撤回投放/,
     });
     fireEvent.click(claudeCheckbox);
 
     await waitFor(() =>
-      expect(mockApi.toggleSkillApp).toHaveBeenCalledWith(
+      expect(mockApi.setSkillPlacement).toHaveBeenCalledWith(
         'skill-a',
         projectTarget,
         'claude-code',
         false,
+        'skill-a-claude-code-r1',
       ),
     );
-    expect(screen.getByText('SkillA（项目配置：项目 Alpha）已停用 Claude Code。')).toBeTruthy();
+    expect(screen.getByText('SkillA 已从 Claude Code 撤回投放。')).toBeTruthy();
+  });
+
+  it('未接管、外部冲突和主副本重合均显示真实目录并限制撤回', async () => {
+    const targets = placementTargets(globalTarget);
+    const target = (location: SkillPlacementTarget['location']) =>
+      targets.find((item) => item.location === location)!;
+    mockApi.getSkillPlacements.mockResolvedValue([
+      {
+        id: 'skill-a',
+        target: globalTarget,
+        placements: [
+          {
+            ...target('shared'),
+            state: 'unmanaged',
+            withdrawable: false,
+            sourceIsTarget: false,
+            revision: 'shared-r1',
+          },
+          {
+            ...target('codex'),
+            state: 'conflict',
+            reason: '目录内容已被外部修改。',
+            withdrawable: false,
+            sourceIsTarget: false,
+            revision: 'codex-r1',
+          },
+          {
+            ...target('claude-code'),
+            state: 'placed',
+            withdrawable: false,
+            sourceIsTarget: true,
+            revision: 'claude-r1',
+          },
+        ],
+      } satisfies SkillPlacementAsset,
+    ]);
+    const Panel = await loadPanel();
+    renderPanel(Panel, queryClient);
+
+    fireEvent.click(await screen.findByRole('button', { name: /^SkillA.*查看详情$/ }));
+    expect(await screen.findByText('已存在·未接管')).toBeTruthy();
+    expect(screen.getByText('投放冲突')).toBeTruthy();
+    expect(screen.getByText('目录内容已被外部修改。')).toBeTruthy();
+    expect(screen.getByText('该位置同时保存主副本，无法独立撤回。')).toBeTruthy();
+    expect(screen.getByRole('checkbox', { name: /Claude Code.*撤回投放/ })).toHaveProperty(
+      'disabled',
+      true,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /接管 SkillA 在 .*\.agents\/skills/ }));
+    const dialog = await screen.findByRole('dialog', { name: '接管 SkillA 的已有投放' });
+    expect(within(dialog).getByText('/home/user/.agents/skills/skill-a')).toBeTruthy();
+    fireEvent.click(within(dialog).getByRole('button', { name: /预览接管 \(1\)/ }));
+    fireEvent.click(await within(dialog).findByRole('button', { name: '确认接管' }));
+    await waitFor(() =>
+      expect(mockApi.importSkillsFromApps).toHaveBeenCalledWith(
+        [
+          {
+            directory: 'skill-a',
+            sourcePath: '/home/user/.agents/skills/skill-a',
+            locations: ['shared'],
+          },
+        ],
+        globalTarget,
+        'preview-1',
+      ),
+    );
   });
 
   it('卸载先确认，取消不调用 mutation，确认后按 Skill ID 卸载', async () => {
@@ -639,6 +902,9 @@ describe('InstalledSkillsPanel 列表和详情', () => {
     const Panel = await loadPanel();
     renderPanel(Panel, queryClient, allContext);
 
+    fireEvent.click(
+      await screen.findByRole('button', { name: '更多操作 SkillA，项目配置：项目 Alpha' }),
+    );
     const uninstallButton = await screen.findByRole('button', {
       name: '卸载 SkillA，项目配置：项目 Alpha',
     });
@@ -650,6 +916,7 @@ describe('InstalledSkillsPanel 列表和详情', () => {
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
     expect(mockApi.uninstallSkill).not.toHaveBeenCalled();
 
+    fireEvent.click(screen.getByRole('button', { name: '更多操作 SkillA，项目配置：项目 Alpha' }));
     fireEvent.click(screen.getByRole('button', { name: '卸载 SkillA，项目配置：项目 Alpha' }));
     fireEvent.click(
       within(await screen.findByRole('dialog')).getByRole('button', { name: '卸载' }),
@@ -684,7 +951,7 @@ describe('InstalledSkillsPanel 列表和详情', () => {
     fireEvent.click(await screen.findByRole('button', { name: /^SkillA/ }));
     await screen.findByLabelText('SkillA 详情');
 
-    fireEvent.change(screen.getByPlaceholderText('搜索已安装 Skill'), {
+    fireEvent.change(screen.getByPlaceholderText('搜索名称、描述或来源'), {
       target: { value: 'does-not-match' },
     });
 
@@ -712,6 +979,7 @@ describe('InstalledSkillsPanel 查询错误', () => {
   beforeEach(() => {
     queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     Object.values(mockApi).forEach((fn) => fn.mockReset());
+    setupPlacementMocks();
     mockOpenFileDialog.mockReset();
   });
 

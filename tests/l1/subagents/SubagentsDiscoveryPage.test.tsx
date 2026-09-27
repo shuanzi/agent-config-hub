@@ -105,8 +105,7 @@ function renderPage(
 }
 
 async function openCandidate(name: string) {
-  const list = await screen.findByLabelText('可安装 Subagent 列表');
-  fireEvent.click(within(list).getByRole('button', { name: new RegExp(name) }));
+  await screen.findByLabelText('可安装 Subagent 列表');
   return screen.findByLabelText(`${name} 详情`);
 }
 
@@ -184,7 +183,7 @@ describe('SubagentsDiscoveryPage 原生安装契约', () => {
     renderPage(Page, queryClient, projectContext);
 
     const detail = await openCandidate('Markdown Reviewer');
-    expect(within(detail).getByText(/Markdown 不会直接复制成 Codex 配置/)).toBeTruthy();
+    expect(within(detail).getByText(/兼容 Agent：Claude Code/)).toBeTruthy();
     fireEvent.click(within(detail).getByRole('button', { name: '安装' }));
     const dialog = await screen.findByRole('dialog', { name: '安装 Markdown Reviewer' });
     expect(within(dialog).getByRole('radio', { name: /Codex/ })).toHaveProperty('disabled', true);

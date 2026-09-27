@@ -3,32 +3,16 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
-import type { ConfigContext } from '../../../src/types';
+import type { ConfigContext, InstructionDocument } from '../../../src/types';
 
-type InstructionKind = 'claude' | 'agents';
-
-interface InstructionDocumentFixture {
-  kind: InstructionKind;
-  fileName: 'CLAUDE.md' | 'AGENTS.md';
-  appliesTo: readonly ('claude-code' | 'codex' | 'opencode')[];
-  target: { scope: 'global' } | { scope: 'project'; projectId: string };
-  content: string;
-  exists: boolean;
-}
+type InstructionKind = 'agents';
+type InstructionDocumentFixture = InstructionDocument;
 
 const globalDocuments: InstructionDocumentFixture[] = [
   {
-    kind: 'claude',
-    fileName: 'CLAUDE.md',
-    appliesTo: ['claude-code'],
-    target: { scope: 'global' },
-    content: '# Global Claude instructions',
-    exists: true,
-  },
-  {
     kind: 'agents',
     fileName: 'AGENTS.md',
-    appliesTo: ['codex', 'opencode'],
+    paths: ['/isolated/.codex/AGENTS.md', '/isolated/.config/opencode/AGENTS.md'],
     target: { scope: 'global' },
     content: '',
     exists: false,
@@ -37,17 +21,9 @@ const globalDocuments: InstructionDocumentFixture[] = [
 
 const projectDocuments: InstructionDocumentFixture[] = [
   {
-    kind: 'claude',
-    fileName: 'CLAUDE.md',
-    appliesTo: ['claude-code'],
-    target: { scope: 'project', projectId: 'project-alpha' },
-    content: '# Project Claude instructions',
-    exists: true,
-  },
-  {
     kind: 'agents',
     fileName: 'AGENTS.md',
-    appliesTo: ['codex', 'opencode'],
+    paths: ['/isolated/project-alpha/AGENTS.md'],
     target: { scope: 'project', projectId: 'project-alpha' },
     content: '# Project shared instructions',
     exists: true,
@@ -140,14 +116,14 @@ describe('InstructionsPanel document management', () => {
     delete (window as unknown as Record<string, unknown>).__ACM_MOCK_INVOKE__;
   });
 
-  it('在 global target 固定展示 CLAUDE.md 和 AGENTS.md，且未创建文件仍可选择', async () => {
+  it('在 global target 只展示 AGENTS.md，且未创建文件仍可选择', async () => {
     await renderPanel({ kind: 'global' });
 
     const list = await screen.findByRole('region', { name: '长期指令文件列表' });
-    await findDocumentButton('global', 'claude');
+    await findDocumentButton('global', 'agents');
     const rows = within(list).getAllByRole('button');
-    expect(rows).toHaveLength(2);
-    expect(within(list).getByRole('button', { name: /CLAUDE\.md/ })).toBeTruthy();
+    expect(rows).toHaveLength(1);
+    expect(within(list).queryByRole('button', { name: /CLAUDE\.md/ })).toBeNull();
     expect(within(list).getByRole('button', { name: /AGENTS\.md/ })).toBeTruthy();
     expect(screen.getByText('未创建')).toBeTruthy();
 
@@ -158,20 +134,14 @@ describe('InstructionsPanel document management', () => {
     expect(screen.getByRole('button', { name: '保存 AGENTS.md' })).toBeTruthy();
   });
 
-  it('将两类文档的原生适用 Agent 显示在详情中，并完全排除 Gemini', async () => {
+  it('展示全局实际保存路径及加载说明，不声明 Agent 已生效', async () => {
     await renderPanel({ kind: 'global' });
-
-    fireEvent.click(await findDocumentButton('global', 'claude'));
-    const claudeDetail = screen.getByRole('region', { name: '长期指令文件详情' });
-    expect(claudeDetail.textContent).toContain('Claude Code');
-    expect(claudeDetail.textContent).not.toContain('Codex');
-    expect(claudeDetail.textContent).not.toContain('Gemini');
-
     fireEvent.click(await findDocumentButton('global', 'agents'));
-    const agentsDetail = screen.getByRole('region', { name: '长期指令文件详情' });
-    expect(agentsDetail.textContent).toContain('Codex');
-    expect(agentsDetail.textContent).toContain('OpenCode');
-    expect(agentsDetail.textContent).not.toContain('Gemini');
+    const paths = screen.getByRole('region', { name: '保存位置' });
+    expect(within(paths).getByText('/isolated/.codex/AGENTS.md')).toBeTruthy();
+    expect(within(paths).getByText('/isolated/.config/opencode/AGENTS.md')).toBeTruthy();
+    expect(paths.textContent).toContain('Agent 是否加载此文件，由其自身机制和配置决定。');
+    expect(document.body.textContent).not.toMatch(/对.+生效|适用于|CLAUDE\.md/);
   });
 
   it('直接保存 global AGENTS.md 到共享文档 target，不包含 Agent 或 enable 参数', async () => {
@@ -202,6 +172,12 @@ describe('InstructionsPanel document management', () => {
     await renderPanel({ kind: 'project', projectId: 'project-alpha' });
 
     fireEvent.click(await findDocumentButton('project:project-alpha', 'agents'));
+    expect(screen.getByRole('region', { name: '保存位置' }).textContent).toContain(
+      '/isolated/project-alpha/AGENTS.md',
+    );
+    expect(screen.getByRole('region', { name: '保存位置' }).textContent).not.toContain(
+      '/isolated/.codex',
+    );
     fireEvent.change(screen.getByLabelText('内容'), {
       target: { value: '# Shared project instructions' },
     });
@@ -221,7 +197,7 @@ describe('InstructionsPanel document management', () => {
 
   it('不暴露旧的预设或 Agent 使能操作', async () => {
     await renderPanel({ kind: 'global' });
-    await findDocumentButton('global', 'claude');
+    await findDocumentButton('global', 'agents');
 
     for (const name of [
       '新建预设',
@@ -266,13 +242,13 @@ describe('InstructionsPanel document management', () => {
     const globalAgents = await findDocumentButton('global', 'agents');
     const projectAgents = await findDocumentButton('project:project-alpha', 'agents');
 
-    expect(within(list).getAllByRole('button')).toHaveLength(4);
+    expect(within(list).getAllByRole('button')).toHaveLength(2);
     expect(globalAgents).not.toBe(projectAgents);
     expect(globalAgents.textContent).toContain('未创建');
     expect(projectAgents.textContent).toContain('已创建');
   });
 
-  it('项目视图中的适用 global AGENTS.md 保持 global ownership 保存', async () => {
+  it('项目视图中的 global AGENTS.md 保持 global ownership 保存', async () => {
     const calls = installInstructionInvoke();
     await renderPanel({ kind: 'project', projectId: 'project-alpha' });
 

@@ -1,21 +1,33 @@
+@font-face {
+  font-family: Inter;
+  src: url('../assets/fonts/InterVariable.woff2') format('woff2');
+  font-weight: 100 900;
+  font-display: swap;
+}
 /* Agent Config Manager 工作台（FE-01 只读主路径） */
 
 :root {
   color-scheme: light;
   font-family:
-    -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Helvetica Neue', 'PingFang SC', 'Segoe UI',
+    Inter,
+    -apple-system,
+    BlinkMacSystemFont,
+    'SF Pro Text',
+    'Helvetica Neue',
+    'PingFang SC',
+    'Segoe UI',
     sans-serif;
-  --wb-bg: #f5f5f7;
+  --wb-bg: #f6f7f9;
   --wb-panel: #fff;
-  --wb-panel-muted: #fbfbfd;
-  --wb-ink: #1d1d1f;
-  --wb-muted: #6e6e73;
-  --wb-faint: #86868b;
-  --wb-line: #e8e8ed;
-  --wb-line-strong: #d2d2d7;
-  --wb-blue: #0071e3;
-  --wb-blue-dark: #0066cc;
-  --wb-blue-soft: color-mix(in srgb, var(--wb-blue) 9%, #fff);
+  --wb-panel-muted: #f8fafc;
+  --wb-ink: #172033;
+  --wb-muted: #64748b;
+  --wb-faint: #64748b;
+  --wb-line: #e2e8f0;
+  --wb-line-strong: #cbd5e1;
+  --wb-blue: #2563eb;
+  --wb-blue-dark: #1d4ed8;
+  --wb-blue-soft: #eff6ff;
   --wb-green: #16a34a;
   --wb-amber: #9a5b00;
   --wb-red: #dc2626;

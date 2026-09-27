@@ -25,7 +25,9 @@
     "build:app": "node scripts/orchestrator/not-established.mjs build:app",
     "package:macos": "node scripts/orchestrator/not-established.mjs package:macos",
     "verify:ticket": "node scripts/orchestrator/verify-ticket.mjs",
-    "verify:release": "node scripts/orchestrator/not-established.mjs verify:release"
+    "verify:release": "node scripts/orchestrator/not-established.mjs verify:release",
+    "accept:ui": "node scripts/acceptance/ui.mjs",
+    "accept:app": "node scripts/acceptance/app.mjs"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.101.4",

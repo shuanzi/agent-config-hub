@@ -10,8 +10,9 @@
  * 的子进程继承该 env，仓库内 fixture 绝不被原地修改，onComplete 清理临时目录。
  */
 import type { Options } from '@wdio/types';
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdtempSync, rmSync, readFileSync, existsSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { tmpdir, homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 // 拉入 webdriverio 的全局 WebDriver namespace 类型
@@ -22,6 +23,26 @@ const repoRoot = resolve(here, '../..');
 const appBinary = join(repoRoot, 'src-tauri/target/debug/agent-config-manager');
 
 let homeSandbox: string | null = null;
+const protectedPaths = [
+  '.claude/CLAUDE.md',
+  '.claude/settings.json',
+  '.codex/AGENTS.md',
+  '.codex/config.toml',
+  '.gemini/GEMINI.md',
+  '.gemini/settings.json',
+  '.config/opencode/AGENTS.md',
+  '.config/opencode/opencode.json',
+];
+const externalFingerprint = () =>
+  protectedPaths
+    .map((p) => {
+      const file = join(homedir(), p);
+      return existsSync(file)
+        ? createHash('sha256').update(readFileSync(file)).digest('hex')
+        : 'absent';
+    })
+    .join(':');
+let externalBefore = '';
 
 // 注：@wdio/types 的 Options.Testrunner 声明不完整（capabilities/services 透传
 // 给 service），与 tests/l2/wdio.conf.ts 同样以类型断言补齐，不改依赖。
@@ -55,14 +76,17 @@ export const config = {
     timeout: 120000,
   },
   onPrepare: () => {
-    homeSandbox = mkdtempSync(join(tmpdir(), 'acm-l3-home-'));
+    externalBefore = externalFingerprint();
+    homeSandbox = process.env.ACM_L3_HOME ?? mkdtempSync(join(tmpdir(), 'acm-l3-home-'));
     process.env.ACM_HOME = homeSandbox;
   },
   onComplete: () => {
-    if (homeSandbox !== null) {
+    if (homeSandbox !== null && !process.env.ACM_L3_HOME) {
       rmSync(homeSandbox, { recursive: true, force: true });
       homeSandbox = null;
     }
     delete process.env.ACM_HOME;
+    if (externalFingerprint() !== externalBefore)
+      throw new Error('验收期间隔离目录外的配置文件发生变化，请检查外部进程或写入路径');
   },
 } as Options.Testrunner;

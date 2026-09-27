@@ -11,7 +11,7 @@ async function waitForStable(): Promise<void> {
 }
 
 describe('Skill management journey', () => {
-  it('lands on installed view, discovers, installs, toggles agent and uninstalls', async () => {
+  it('lands on installed view, discovers, installs, withdraws one placement and uninstalls', async () => {
     await browser.setWindowSize(1280, 900);
     await browser.url(ENTRY);
 
@@ -60,11 +60,13 @@ describe('Skill management journey', () => {
     const installedDetail = await $("[data-skill-detail='anthropics/skills:commit-conventions']");
     await installedDetail.waitForDisplayed();
 
-    // 切换 Codex 启用开关
-    const codexToggle = await installedDetail.$(".//label[contains(.,'Codex')]//input");
-    const wasChecked = await codexToggle.isSelected();
+    // 撤回 Codex 目录投放；这只改变该目录，不表达 Agent 使用权限。
+    const codexToggle = await installedDetail.$(
+      ".//div[contains(@class,'skill-placement-row')][contains(.,'Codex')]//input",
+    );
+    expect(await codexToggle.isSelected()).toBe(true);
     await codexToggle.click();
-    await browser.waitUntil(async () => (await codexToggle.isSelected()) === !wasChecked);
+    await browser.waitUntil(async () => (await codexToggle.isSelected()) === false);
 
     // 卸载
     const uninstallButton = await installedDetail.$(".//button[normalize-space()='卸载']");
@@ -82,7 +84,7 @@ describe('Skill management journey', () => {
     expect(await $('.skill-empty h3').getText()).toContain('尚未安装');
   });
 
-  it('uses the visual fixture for installed detail update, toggle and uninstall paths', async () => {
+  it('uses the visual fixture for installed detail update, placement and uninstall paths', async () => {
     await browser.setWindowSize(1280, 900);
     await browser.url(`${ENTRY}?fixture=visual`);
     await waitForStable();
@@ -127,10 +129,12 @@ describe('Skill management journey', () => {
     await updateButton.click();
     await browser.waitUntil(async () => (await $('.skill-status').getText()).includes('已更新'));
 
-    const codexToggle = await detail.$(".//label[contains(.,'Codex')]//input");
-    const wasChecked = await codexToggle.isSelected();
+    const codexToggle = await detail.$(
+      ".//div[contains(@class,'skill-placement-row')][contains(.,'Codex')]//input",
+    );
+    expect(await codexToggle.isSelected()).toBe(true);
     await codexToggle.click();
-    await browser.waitUntil(async () => (await codexToggle.isSelected()) === !wasChecked);
+    await browser.waitUntil(async () => (await codexToggle.isSelected()) === false);
 
     const uninstallButton = await detail.$(".//button[normalize-space()='卸载']");
     await uninstallButton.click();
@@ -141,5 +145,27 @@ describe('Skill management journey', () => {
       async () =>
         (await $("[data-skill-id='anthropics/skills:testing-strategy']").isExisting()) === false,
     );
+  });
+
+  it('shows all five global placement directories without horizontal clipping on a narrow viewport', async () => {
+    await browser.setViewport({ width: 390, height: 844 });
+    await browser.url(`${ENTRY}?fixture=visual&viewport=narrow`);
+    await waitForStable();
+    await $("//*[@data-workbench-rail='asset-type']//button[normalize-space()='Skills']").click();
+    await $("[data-workbench-rail='context']").waitForDisplayed();
+    await $("//nav[@aria-label='配置上下文']//button[normalize-space()='全局配置']").click();
+    await waitForStable();
+
+    const row = await $("[data-skill-id='anthropics/skills:testing-strategy']");
+    await row.$('.skill-row-select').click();
+    const detail = await $("[data-skill-detail='anthropics/skills:testing-strategy']");
+    await detail.waitForDisplayed();
+
+    expect((await detail.$$('.skill-placement-row')).length).toBe(5);
+    expect(await detail.getText()).toContain('/Users/mock/.agents/skills');
+    const overflow = await browser.execute(
+      () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    );
+    expect(overflow).toBeLessThanOrEqual(1);
   });
 });

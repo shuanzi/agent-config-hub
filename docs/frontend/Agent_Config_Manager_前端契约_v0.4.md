@@ -42,7 +42,11 @@
 
 ### 3.2 长期指令
 
-列表固定显示每个可见 target 的 `CLAUDE.md` 与 `AGENTS.md`。详情直接编辑并保存当前 live 文档：`CLAUDE.md` 显示 Claude Code，`AGENTS.md` 显示 Codex 与 OpenCode。界面不显示 Gemini CLI、预设、导入、删除或 Agent enable 控件。
+2026-09-22 更新：列表固定显示每个可见 target 的一个 `AGENTS.md`，即使文件尚未创建也可选择。保留全部／全局／项目上下文，详情直接编辑并保存当前 target 的文档。
+
+详情展示 `paths` 中的实际保存位置，并说明：“Agent 是否加载此文件，由其自身机制和配置决定。”全局保存将同一内容写入 Codex、OpenCode 的有效全局路径，项目保存只写项目根文件；界面不再展示适用 Agent 或生效声明，不提供 CLAUDE.md、GEMINI.md、预设、导入、删除或 Agent enable 控件。
+
+命令名保留 `get_instruction_documents` 与 `upsert_instruction_document`。`InstructionDocumentKind` 仅接受 `agents`，`fileName` 固定为 `AGENTS.md`；DTO 移除 `appliesTo`，增加 `paths: string[]`。保存仍传入 `target`、`kind`、`content`；旧 `claude` 请求拒绝执行，不产生写入。读取或保存时发现全局内容分歧，沿用现有结构化错误；写入失败沿用回滚能力。
 
 ### 3.3 Subagents
 

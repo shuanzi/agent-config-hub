@@ -1,11 +1,14 @@
 import { invoke } from './invoke';
 import type {
-  AgentType,
   ConfigContext,
   DiscoverableSkill,
   ImportSkillSelection,
   InstalledSkill,
   ScopeTarget,
+  SkillImportPreview,
+  SkillLocation,
+  SkillPlacementAsset,
+  SkillPlacementTarget,
   SkillBackupEntry,
   SkillRepo,
   SkillUninstallResult,
@@ -24,9 +27,9 @@ export async function discoverAvailableSkills(target: ScopeTarget): Promise<Disc
 export async function installSkill(
   skill: DiscoverableSkill,
   target: ScopeTarget,
-  initialApp: AgentType,
+  initialLocation: SkillLocation,
 ): Promise<InstalledSkill> {
-  return invoke('install_skill', { skill, target, initialApp });
+  return invoke('install_skill', { skill, target, initialLocation });
 }
 
 export async function uninstallSkill(
@@ -36,13 +39,30 @@ export async function uninstallSkill(
   return invoke('uninstall_skill', { id, target });
 }
 
-export async function toggleSkillApp(
+export async function getSkillPlacementTargets(
+  target: ScopeTarget,
+): Promise<SkillPlacementTarget[]> {
+  return invoke('get_skill_placement_targets', { target });
+}
+
+export async function getSkillPlacements(context: ConfigContext): Promise<SkillPlacementAsset[]> {
+  return invoke('get_skill_placements', { context });
+}
+
+export async function setSkillPlacement(
   id: string,
   target: ScopeTarget,
-  app: AgentType,
-  enabled: boolean,
+  location: SkillLocation,
+  placed: boolean,
+  expectedRevision: string,
 ): Promise<void> {
-  return invoke('toggle_skill_app', { id, target, app, enabled });
+  return invoke('set_skill_placement', {
+    id,
+    target,
+    location,
+    placed,
+    expectedRevision,
+  });
 }
 
 export async function checkSkillUpdates(target: ScopeTarget): Promise<SkillUpdateInfo[]> {
@@ -72,16 +92,24 @@ export async function scanUnmanagedSkills(target: ScopeTarget): Promise<Unmanage
 export async function importSkillsFromApps(
   selections: ImportSkillSelection[],
   target: ScopeTarget,
+  expectedRevision: string,
 ): Promise<InstalledSkill[]> {
-  return invoke('import_skills_from_apps', { selections, target });
+  return invoke('import_skills_from_apps', { selections, target, expectedRevision });
+}
+
+export async function previewSkillImport(
+  selections: ImportSkillSelection[],
+  target: ScopeTarget,
+): Promise<SkillImportPreview> {
+  return invoke('preview_skill_import', { selections, target });
 }
 
 export async function installSkillsFromZip(
   filePath: string,
-  initialApp: AgentType,
+  initialLocation: SkillLocation,
   target: ScopeTarget,
 ): Promise<InstalledSkill[]> {
-  return invoke('install_skills_from_zip', { filePath, initialApp, target });
+  return invoke('install_skills_from_zip', { filePath, initialLocation, target });
 }
 
 export async function getSkillBackups(target: ScopeTarget): Promise<SkillBackupEntry[]> {

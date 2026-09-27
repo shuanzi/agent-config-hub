@@ -243,12 +243,9 @@
   color: var(--wb-green);
 }
 
-.instruction-document-applies-to {
-  display: flex;
+.instruction-document-paths {
   flex: 0 0 auto;
-  align-items: center;
-  gap: 12px;
-  min-height: 44px;
+  min-width: 0;
   padding: 8px 14px;
   border: 1px solid var(--wb-line);
   border-radius: 8px;
@@ -257,23 +254,30 @@
   font-size: 12px;
 }
 
-.instruction-document-applies-to > span {
+.instruction-document-paths h3 {
+  margin: 0 0 8px;
   color: var(--wb-faint);
-}
-
-.instruction-document-applies-to > div {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-}
-
-.instruction-document-agent {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--wb-ink);
   font-size: 12px;
   font-weight: 500;
+}
+
+.instruction-document-paths ul {
+  display: grid;
+  gap: 6px;
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+
+.instruction-document-paths code {
+  color: var(--wb-ink);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.instruction-document-paths p {
+  margin: 10px 0 0;
+  line-height: 1.5;
 }
 
 .instructions-editor-surface {
@@ -478,16 +482,6 @@
 
   .instruction-document-state {
     min-height: 0;
-  }
-
-  .instruction-document-applies-to {
-    align-items: flex-start;
-    flex-direction: column;
-    gap: 6px;
-  }
-
-  .instruction-document-applies-to > div {
-    gap: 8px 12px;
   }
 
   .instruction-document-actions {

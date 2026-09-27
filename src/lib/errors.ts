@@ -7,6 +7,11 @@ export interface UserError {
 
 const ERROR_MESSAGES: Record<string, string | ((ctx: Record<string, string>) => string)> = {
   SKILL_NOT_FOUND: 'Skill 不存在。',
+  SKILL_IMPORT_CONFLICT: (ctx) => ctx.message ?? '导入发生目录冲突，请重新扫描并预览。',
+  SKILL_EXTERNAL_MODIFICATION: '目录、内容或设置已发生变化，本次操作未写入，请刷新后重新核对。',
+  SKILL_LOCATION_INVALID: '当前范围不支持此投放位置。',
+  SKILL_PLACEMENT_CONFLICT: (ctx) => ctx.message ?? '投放目录存在归属或外部修改冲突，请重新核对。',
+  SKILL_REGISTRY_PROTECTED: '投放归属记录只能通过投放管理操作更新。',
   MISSING_REPO_INFO: '缺少仓库信息。',
   DOWNLOAD_TIMEOUT: '下载仓库超时，请检查网络后重试。',
   DOWNLOAD_FAILED: '下载仓库失败。',
@@ -33,6 +38,8 @@ const ERROR_MESSAGES: Record<string, string | ((ctx: Record<string, string>) => 
     ctx.rootPath
       ? `项目目录不可用：${ctx.rootPath}。`
       : '项目目录不可用，请重新关联项目目录后重试。',
+  PROJECT_HAS_SKILL_PLACEMENTS:
+    '项目仍有受管 Skill 投放。请先在原项目路径撤回投放，再重新关联目录。',
   PROJECT_HAS_NATIVE_SUBAGENT_STATE:
     '项目仍有受管原生 Subagent 或其备份，暂不能移除或重新关联目录，以免原生文件和备份失去归属。',
   SUBAGENT_INTERNAL: 'Subagent 操作失败。',

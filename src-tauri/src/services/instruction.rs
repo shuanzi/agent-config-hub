@@ -1,8 +1,8 @@
-//! 两类长期指令文档的 live 文件管理。
+//! AGENTS.md 长期指令文档的 live 文件管理。
 //!
 //! 长期指令不再是按 Agent 维护的预设库：每个完整 ownership target 固定有
-//! `CLAUDE.md` 与 `AGENTS.md` 两项。前者只作用于 Claude Code；后者在全局
-//! target 投影到 Codex 与 OpenCode，在项目 target 只写项目根的同一文件。
+//! 一个 `AGENTS.md`。全局 target 保存到 Codex 与 OpenCode 的有效目录，
+//! 项目 target 只写项目根文件；是否加载由 Agent 自身机制和配置决定。
 
 use std::path::{Path, PathBuf};
 use std::sync::{OnceLock, RwLock, RwLockWriteGuard};
@@ -25,31 +25,22 @@ pub(crate) fn instruction_state_write_guard() -> RwLockWriteGuard<'static, ()> {
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
-/// 仅有的两种长期指令文档。
+/// 唯一受管理的长期指令文档；其他 kind 在 IPC 反序列化阶段拒绝。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum InstructionDocumentKind {
-    Claude,
     Agents,
 }
 
 impl InstructionDocumentKind {
     pub fn file_name(self) -> &'static str {
         match self {
-            Self::Claude => "CLAUDE.md",
             Self::Agents => "AGENTS.md",
         }
     }
 
-    fn applies_to(self) -> Vec<String> {
-        match self {
-            Self::Claude => vec!["claude-code".to_string()],
-            Self::Agents => vec!["codex".to_string(), "opencode".to_string()],
-        }
-    }
-
-    fn all() -> [Self; 2] {
-        [Self::Claude, Self::Agents]
+    fn all() -> [Self; 1] {
+        [Self::Agents]
     }
 }
 
@@ -59,7 +50,7 @@ impl InstructionDocumentKind {
 pub struct InstructionDocument {
     pub kind: InstructionDocumentKind,
     pub file_name: String,
-    pub applies_to: Vec<String>,
+    pub paths: Vec<PathBuf>,
     pub target: ScopeTarget,
     pub content: String,
     pub exists: bool,
@@ -123,7 +114,6 @@ pub(crate) fn instruction_document_paths(
 ) -> Result<Vec<PathBuf>, AppError> {
     match target {
         ScopeTarget::Global => Ok(match kind {
-            InstructionDocumentKind::Claude => vec![config::get_claude_prompt_file()],
             InstructionDocumentKind::Agents => {
                 vec![
                     config::get_codex_prompt_file(),
@@ -174,7 +164,7 @@ fn document_for_target(
     Ok(InstructionDocument {
         kind,
         file_name: kind.file_name().to_string(),
-        applies_to: kind.applies_to(),
+        paths,
         target: target.clone(),
         content,
         exists,
@@ -255,7 +245,7 @@ pub(crate) fn relocate_global_projection_for_override(
 pub struct InstructionDocumentService;
 
 impl InstructionDocumentService {
-    /// 返回 context 内固定的两种文档；`all` 按 global、再可访问项目的稳定顺序展开。
+    /// 每个 target 返回一个 AGENTS.md；`all` 按 global、再可访问项目的稳定顺序展开。
     pub fn get_documents_for_context(
         state: &AppState,
         context: &ConfigContext,
@@ -393,26 +383,48 @@ mod tests {
     }
 
     #[test]
+    fn instruction_kind_rejects_claude_and_other_filenames() {
+        for value in ["claude", "gemini", "../CLAUDE.md"] {
+            assert!(
+                serde_json::from_value::<InstructionDocumentKind>(serde_json::json!(value))
+                    .is_err()
+            );
+        }
+        assert_eq!(
+            serde_json::from_value::<InstructionDocumentKind>(serde_json::json!("agents")).unwrap(),
+            InstructionDocumentKind::Agents
+        );
+    }
+
+    #[test]
     #[serial]
-    fn global_read_returns_two_fixed_documents_when_no_live_files_exist() {
+    fn global_read_returns_one_agents_document_and_does_not_read_claude() {
         let _temp = setup_temp_home();
         let state = state();
-
+        let claude = config::get_claude_prompt_file();
+        std::fs::create_dir_all(claude.parent().unwrap()).unwrap();
+        // 非 UTF-8 的旧文件仍不应阻止 AGENTS.md 查询。
+        std::fs::write(&claude, b"\xffexisting claude").unwrap();
         let documents =
             InstructionDocumentService::get_documents_for_context(&state, &ConfigContext::Global)
-                .expect("read documents");
+                .expect("read documents without reading CLAUDE.md");
 
-        assert_eq!(documents.len(), 2);
-        assert_eq!(documents[0].kind, InstructionDocumentKind::Claude);
-        assert_eq!(documents[0].file_name, "CLAUDE.md");
-        assert_eq!(documents[0].applies_to, vec!["claude-code"]);
+        assert_eq!(documents.len(), 1);
+        assert_eq!(documents[0].kind, InstructionDocumentKind::Agents);
+        assert_eq!(documents[0].file_name, "AGENTS.md");
+        assert_eq!(
+            documents[0].paths,
+            vec![
+                config::get_codex_prompt_file(),
+                config::get_opencode_prompt_file()
+            ]
+        );
         assert!(!documents[0].exists);
         assert_eq!(documents[0].content, "");
-        assert_eq!(documents[1].kind, InstructionDocumentKind::Agents);
-        assert_eq!(documents[1].file_name, "AGENTS.md");
-        assert_eq!(documents[1].applies_to, vec!["codex", "opencode"]);
-        assert!(!documents[1].exists);
-        assert_eq!(documents[1].content, "");
+        let serialized = serde_json::to_value(&documents[0]).unwrap();
+        assert!(serialized.get("appliesTo").is_none());
+        assert_eq!(serialized["paths"].as_array().unwrap().len(), 2);
+        assert_eq!(std::fs::read(claude).unwrap(), b"\xffexisting claude");
     }
 
     #[test]
@@ -420,6 +432,9 @@ mod tests {
     fn saving_global_agents_writes_the_same_content_to_codex_and_opencode() {
         let _temp = setup_temp_home();
         let state = state();
+        let claude = config::get_claude_prompt_file();
+        std::fs::create_dir_all(claude.parent().unwrap()).unwrap();
+        std::fs::write(&claude, b"\xffkeep global claude").unwrap();
 
         InstructionDocumentService::upsert_document(
             &state,
@@ -438,11 +453,12 @@ mod tests {
                 .expect("opencode projection"),
             "shared instructions"
         );
+        assert_eq!(std::fs::read(claude).unwrap(), b"\xffkeep global claude");
     }
 
     #[test]
     #[serial]
-    fn project_context_lists_its_two_documents_before_the_global_two_documents() {
+    fn project_context_lists_project_agents_before_global_agents() {
         let _temp = setup_temp_home();
         let state = state();
         let root = tempfile::tempdir().expect("project root");
@@ -464,17 +480,19 @@ mod tests {
         )
         .expect("read project documents");
 
-        assert_eq!(documents.len(), 4);
+        assert_eq!(documents.len(), 2);
         assert_eq!(documents[0].target, project_target);
-        assert_eq!(documents[0].kind, InstructionDocumentKind::Claude);
-        assert_eq!(documents[0].content, "project claude");
-        assert_eq!(documents[1].target, documents[0].target);
+        assert_eq!(documents[0].kind, InstructionDocumentKind::Agents);
+        assert_eq!(documents[0].content, "");
+        assert_eq!(
+            documents[0].paths,
+            vec![std::fs::canonicalize(root.path())
+                .unwrap()
+                .join("AGENTS.md")]
+        );
+        assert_eq!(documents[1].target, ScopeTarget::Global);
         assert_eq!(documents[1].kind, InstructionDocumentKind::Agents);
-        assert_eq!(documents[2].target, ScopeTarget::Global);
-        assert_eq!(documents[2].kind, InstructionDocumentKind::Claude);
-        assert_eq!(documents[2].content, "global claude");
-        assert_eq!(documents[3].target, ScopeTarget::Global);
-        assert_eq!(documents[3].kind, InstructionDocumentKind::Agents);
+        assert_eq!(documents[1].content, "");
     }
 
     #[test]
@@ -567,7 +585,11 @@ mod tests {
     fn saving_project_agents_writes_only_the_project_root_file() {
         let _temp = setup_temp_home();
         let state = state();
+        let claude = config::get_claude_prompt_file();
+        std::fs::create_dir_all(claude.parent().unwrap()).unwrap();
+        std::fs::write(&claude, b"\xffkeep global claude").unwrap();
         let root = tempfile::tempdir().expect("project root");
+        std::fs::write(root.path().join("CLAUDE.md"), b"\xffkeep project claude").unwrap();
         let project = ProjectService::add_project(&state.db, root.path(), None).expect("project");
         let target = ScopeTarget::Project {
             project_id: project.project_id,
@@ -592,6 +614,11 @@ mod tests {
             "global instructions"
         );
         assert!(!config::get_opencode_prompt_file().exists());
+        assert_eq!(std::fs::read(claude).unwrap(), b"\xffkeep global claude");
+        assert_eq!(
+            std::fs::read(root.path().join("CLAUDE.md")).unwrap(),
+            b"\xffkeep project claude"
+        );
     }
 
     #[test]

@@ -4,9 +4,18 @@ import { createRoot } from 'react-dom/client';
 import * as skillsApi from '../../src/lib/api/skills';
 import * as settingsApi from '../../src/lib/api/settings';
 import * as promptsApi from '../../src/lib/api/prompts';
+import { invoke } from '../../src/lib/api/invoke';
 import * as subagentsApi from '../../src/lib/api/subagents';
 import * as projectsApi from '../../src/lib/api/projects';
-import type { InstalledSkill, ProjectSummary, ScopeTarget, SkillRepo } from '../../src/types';
+import type {
+  InstalledSkill,
+  InstructionDocument,
+  ProjectSummary,
+  ScopeTarget,
+  SkillRepo,
+  SkillPlacementAsset,
+  SkillLocation,
+} from '../../src/types';
 
 // 初始化 WDIO Tauri plugin 前端侧（提供 execute/mock 所需的 __wdio_original_core__）。
 void initWdioPlugin();
@@ -24,13 +33,12 @@ interface SmokeResult {
   installed?: InstalledSkill[];
   skillSequence?: {
     installed: InstalledSkill[];
-    toggled: InstalledSkill[];
+    toggled: SkillPlacementAsset[];
     uninstalledCount: number;
   };
   instructionSequence?: {
-    claudeContent: string;
-    agentsContent: string;
-    agentsAppliesTo: string[];
+    rejectedClaudeKind: boolean;
+    documents: InstructionDocument[];
   };
   subagentSequence?: {
     installedCount: number;
@@ -84,27 +92,57 @@ function SmokeApp() {
         if (installedSkill === undefined) {
           throw new Error('install_skills_from_zip returned empty');
         }
-        await skillsApi.toggleSkillApp(installedSkill.id, installedSkill.target, 'codex', true);
-        const toggled = await skillsApi.getInstalledSkills(GLOBAL_CONTEXT);
+        const changePlacement = async (location: SkillLocation, placed: boolean) => {
+          const state = (await skillsApi.getSkillPlacements(GLOBAL_CONTEXT))
+            .find((entry) => entry.id === installedSkill.id)
+            ?.placements.find((entry) => entry.aliases.includes(location));
+          if (!state) throw new Error(`Missing placement ${location}`);
+          await skillsApi.setSkillPlacement(
+            installedSkill.id,
+            installedSkill.target,
+            location,
+            placed,
+            state.revision,
+          );
+        };
+        await changePlacement('shared', true);
+        await changePlacement('codex', false);
+        const toggled = await skillsApi.getSkillPlacements(GLOBAL_CONTEXT);
+        const finalLocations = toggled.find((item) => item.id === installedSkill.id)?.placements;
+        if (
+          finalLocations?.find((item) => item.aliases.includes('shared'))?.state !== 'placed' ||
+          finalLocations?.find((item) => item.aliases.includes('codex'))?.state !== 'absent'
+        ) {
+          throw new Error('Shared placement must remain after withdrawing Codex directory');
+        }
         await skillsApi.uninstallSkill(installedSkill.id, installedSkill.target);
         const uninstalled = await skillsApi.getInstalledSkills(GLOBAL_CONTEXT);
 
-        // 长期指令写序列：两种固定文档直接写入，再通过全局读取确认。
+        // 通过真实 IPC 验证旧 kind 被拒绝，再保存唯一的 AGENTS.md 文档。
+        let rejectedClaudeKind = false;
+        try {
+          await invoke('upsert_instruction_document', {
+            target: GLOBAL_TARGET,
+            kind: 'claude',
+            content: 'must never overwrite CLAUDE.md',
+          });
+        } catch {
+          rejectedClaudeKind = true;
+        }
+        if (!rejectedClaudeKind) throw new Error('Removed claude kind must be rejected');
         await promptsApi.upsertInstructionDocument(
-          { scope: 'global' },
-          'claude',
-          'l3 smoke CLAUDE.md content',
-        );
-        await promptsApi.upsertInstructionDocument(
-          { scope: 'global' },
+          GLOBAL_TARGET,
           'agents',
           'l3 smoke AGENTS.md content',
         );
-        const instructionDocuments = await promptsApi.getInstructionDocuments({ kind: 'global' });
-        const claudeDocument = instructionDocuments.find((document) => document.kind === 'claude');
-        const agentsDocument = instructionDocuments.find((document) => document.kind === 'agents');
-        if (claudeDocument === undefined || agentsDocument === undefined) {
-          throw new Error('get_instruction_documents must return both fixed documents');
+        const instructionDocuments = await promptsApi.getInstructionDocuments(GLOBAL_CONTEXT);
+        const agentsDocument = instructionDocuments[0];
+        if (
+          instructionDocuments.length !== 1 ||
+          agentsDocument?.kind !== 'agents' ||
+          agentsDocument.paths.length !== 2
+        ) {
+          throw new Error('Expected one AGENTS.md with two global save paths');
         }
 
         // Subagent 读取使用完整 context；仓库写序列保持既有真实 IPC 旅程。
@@ -152,6 +190,21 @@ function SmokeApp() {
                 if (projectSkill === undefined) {
                   throw new Error('project install_skills_from_zip returned empty');
                 }
+                const projectLocations = await skillsApi.getSkillPlacements({
+                  kind: 'project',
+                  projectId: firstProject.projectId,
+                });
+                const projectCodex = projectLocations
+                  .find((item) => item.id === projectSkill.id && item.target.scope === 'project')
+                  ?.placements.find((item) => item.aliases.includes('codex'));
+                if (!projectCodex) throw new Error('Missing project Codex directory');
+                await skillsApi.setSkillPlacement(
+                  projectSkill.id,
+                  projectTarget,
+                  'codex',
+                  false,
+                  projectCodex.revision,
+                );
                 const relinked = await projectsApi.relinkProjectRoot({
                   projectId: firstProject.projectId,
                   rootPath: relinkedRoot,
@@ -192,9 +245,8 @@ function SmokeApp() {
             uninstalledCount: uninstalled.length,
           },
           instructionSequence: {
-            claudeContent: claudeDocument.content,
-            agentsContent: agentsDocument.content,
-            agentsAppliesTo: agentsDocument.appliesTo,
+            rejectedClaudeKind,
+            documents: instructionDocuments,
           },
           subagentSequence: {
             installedCount: seededSubagents.length,
