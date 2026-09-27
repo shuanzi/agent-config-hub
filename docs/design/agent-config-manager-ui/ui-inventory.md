@@ -2,7 +2,17 @@
 
 > 仓库位置：`docs/design/agent-config-manager-ui/`。本目录内的 Pen 源文件、最终预览、关键页面预览、采集证据和生成迭代均作为项目设计资产管理。
 
-## 采集基线
+## 当前精细稿同步（2026-09-27）
+
+当前交付以 [精细稿说明](./polished/README.md)、[功能同步记录](./polished/sync-2026-09-24.md) 和 [Skills 布局修订](./polished/skills-layout-2026-09-27.md) 为准。下文保留 2026-08-30 的采集与 reconstruction 验收，不能替代当前功能模型。
+
+- Skills 第四列为“投放位置”，恢复 cc-switch 式横向图标与 64px 紧凑行。实际目录与处理入口进入详情；行内区分已投放／未投放／已存在·未接管／投放冲突。全局增加 `~/.agents/skills`，按物理路径合并别名。开关不代表 Agent 使用权限。
+- Skill 与 ZIP 安装显式选择一个初始投放位置；导入已有先核对来源、受管位置与逐路径动作，再确认接管。
+- 长期指令每个完整目标只管理一个逻辑 `AGENTS.md`；展示实际保存位置。全局默认写入 Codex、OpenCode 两处，项目写入根目录。移除当前精细稿中的 `CLAUDE.md` 入口及“对哪些 Agent 生效”承诺。
+- Subagent 每个原生定义归属一个 Agent；项目 Codex 可安装。兼容性、纳入管理、源码、停用／启用、更新差异与备份恢复按原生模型表达。
+- 本轮修改 `Polished` 区域、37 份 PNG 和交付文档；4 个历史根节点保持不变。没有集成 `b25a` 功能代码或实现新版前端。
+
+## 历史采集基线（2026-08-30）
 
 - 日期：2026-08-30
 - Worktree：`/Users/xiquandai/Documents/code/.worktree/agent-config-hub-skill-output-management`
@@ -59,7 +69,7 @@
 - `selected-b2/04`：Subagents master-detail。
 - 这些截图只提供视觉语言和层级，不恢复旧 Demo 的全局搜索、假项目、跨 Agent 转换或 prepare/apply 流程。
 
-## 目标稿必须保留的真实语义
+## 历史目标稿语义（2026-08-30，部分已被下述同步修订替代）
 
 - Header 不出现“当前 Agent”或替代全局 Agent 控件。
 - 仅出现 Claude Code、Codex、Gemini CLI、OpenCode。
@@ -89,7 +99,7 @@
 3. `Target / Responsive`：1280 和 390 关键断点。
 4. `Components & States`：表格行、scope group、Agent 控件、操作条、安装／ZIP／导入／备份对话框、空态和错误态。
 
-## 最终设计产物验收
+## 历史 reconstruction 设计产物验收
 
 - 最终稿：`agent-config-manager-ui-reconstruction.pen`，pen.dev v2.17 结构化设计文件，约 423 KB。
 - 总览：`agent-config-manager-ui-reconstruction@2x.png`，8192×4320。
