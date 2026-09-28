@@ -1,6 +1,6 @@
 # Polished UI 验收结果
 
-核验日期：2026-09-27。本报告记录本地验证结果，不代表远端 CI、正式签名或发布。
+核验日期：2026-09-27。实现基线为 `cd175f4`，证据交付为 `4448ffc`；后续文档整理没有重新执行本文全部功能测试。本报告记录本地验证结果，不代表远端 CI、正式签名或发布。
 
 实现采用[已同步的 polished 精细稿](../design/agent-config-manager-ui/polished/README.md)，覆盖 Skills、统一 AGENTS.md、原生 Subagents、设置和对应弹窗。Skills 保留五列 64px 紧凑行、横排 32px 投放图标；390px 下采用逐层导航和横排 44px 操作区域。没有自动迁移已有用户文件。
 

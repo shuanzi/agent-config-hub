@@ -1,22 +1,10 @@
-# Domain Docs
+# 领域文档使用指南
 
-How the engineering skills should consume this repo's domain documentation when exploring the codebase.
+本仓库是单一业务上下文。从根 [README](../../README.md) 找到相关文档，术语以[产品说明](../product/README.md#范围与术语)为准，不要求另建 CONTEXT.md。
 
-This is a single-context repository.
+- 用户能力及限制查产品说明；接口和 UI 行为查前端说明；路径、数据与写入保护查架构说明。
+- 架构决定从 [ADR 索引](../architecture/adr/README.md)进入，先检查现行适用性，再阅读历史理由。实际目录是 `docs/architecture/adr/`。
+- UI 实现参照当前 polished 源稿；模拟预览与真实验收证据不能互相替代。
+- 发现文档、代码与已批准决定之间的实质冲突时，明确说明具体差异及影响。不要仅凭文件日期或代码现状撤销已批准约束。
 
-## Before exploring, read these
-
-- **`CONTEXT.md`** at the repo root when it exists and is relevant.
-- **`docs/adr/`** — read ADRs that touch the area you're about to work in.
-
-If either file or directory doesn't exist, proceed silently. Don't flag its absence; don't suggest creating it upfront. The `/domain-modeling` skill creates these lazily when terms or decisions actually get resolved.
-
-## Use the glossary's vocabulary
-
-When your output names a domain concept (in an issue title, a refactor proposal, a hypothesis, or a test name), use the term as defined in `CONTEXT.md`. If the concept you need isn't in the glossary yet, that's a signal — either you're inventing language the project doesn't use (reconsider) or there's a real gap (note it for `/domain-modeling`).
-
-## Flag ADR conflicts
-
-If your output contradicts an existing ADR, surface it explicitly rather than silently overriding:
-
-> _Contradicts ADR-0007 (event-sourced orders) — but worth reopening because…_
+新增术语在产品说明中定义；普通说明直接更新对应章节。重要决策新增 ADR，任务进度放在 GitHub Issues。项目不再使用 OpenSpec，也不维护并列的版本号规格文件。

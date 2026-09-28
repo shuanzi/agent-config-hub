@@ -69,33 +69,26 @@ npm run accept:app
 | 进程重启 | 关闭窗口，再执行相同 `accept:app` 命令 | Skills、冲突、AGENTS.md、原生源码与设置从原验收目录回读；不是重置样例 |
 | 在线命令 | Skills → 发现 → 选目标 → 添加或使用真实 GitHub 仓库 → 安装 → 检查更新 | 使用真实后端命令与网络；在线失败与模拟验收分别判断，不把加载动画当成功 |
 
+## 边界场景复验
+
+以下手工场景只在本次启动打印的隔离根目录内操作；自动化覆盖是代码指针，不表示本轮文档整理重新执行了这些功能测试。
+
+| 场景 | 操作 | 预期界面及文件结果 | 自动化覆盖 |
+| --- | --- | --- | --- |
+| 同名资产与顶部目标 | 浏览器使用 `?scenario=isolation`，在全部中把顶部目标选为项目，再操作全局同名行 | 修改仍属于该行目标，项目同名条目不受影响 | [Polished 旅程](../../tests/l2/polished.journey.test.ts) |
+| 项目根不可用 | 桌面登记隔离样例项目后暂时改名其目录，进入项目视图并尝试读取或保存；验证后恢复原名 | 显示项目根不可用，不回退到全局；全局文件不变 | [项目服务测试](../../src-tauri/src/services/project.rs)、[工作台旅程](../../tests/l2/workbench-shell.journey.test.ts) |
+| 项目改绑保护 | 对已有投放的项目选择重新关联；撤回投放后再尝试。原生受管定义及备份须另行清理 | 仍有 Skill 投放或原生管理状态时阻止改绑；满足条件后保留同一项目 ID | [项目服务](../../src-tauri/src/services/project.rs) |
+| 删除登记不删文件 | 添加一个没有受管资产或备份的隔离项目，再从侧栏移除 | 项目从 registry 消失，目录及原有 AGENTS.md 保留 | [工作台旅程](../../tests/l2/workbench-shell.journey.test.ts) |
+| 原生源码并发修改 | 打开受管定义详情后，从隔离文件修改内容，再保存旧编辑器草稿 | 摘要冲突阻止覆盖，外部内容保留；重新读取后再操作 | [原生服务测试](../../src-tauri/src/services/native_subagent.rs) |
+| 主资产与投放同位置 | 确认迁移至 unified，查看全局共享位置 | 同路径合并，主资产位置不可独立撤回，详情说明原因 | [投放测试](../../src-tauri/src/services/skill_placement.rs) |
+| 文件或设置写入失败 | 使用下列 Rust 测试中的临时目录和失败注入场景复验，勿改宿主权限制造失败 | 操作失败且报告原因；对应测试断言设置、文件、登记恢复。回滚自身失败须单独报告 | [设置命令测试](../../src-tauri/src/commands/settings.rs)、[指令服务测试](../../src-tauri/src/services/instruction.rs) |
+
 ## 自动验证及证据
 
-```sh
-npm run verify:static
-npm run test:frontend
-npm run test:rust
-npm run test:ui
-npm run test:tauri
-npm run build:frontend
-```
+命令、工具链、隔离目录和分层证据统一维护在[开发指南](../development.md#测试与证据)。功能修改按风险运行相关前端、Rust、浏览器及真实桌面测试；文档检查不替代功能复测。
 
-`test:tauri` 先跑真实 IPC 和 UI 写入，再退出进程、以同一隔离目录重新启动回读。完成后清理测试自建目录，不清理 `accept:app` 的验收数据。它还比较宿主八个关键配置文件的前后哈希；该检查不声称遍历了整个用户目录。
+`test:tauri` 先执行真实 IPC 与 UI 写入，再退出进程、使用同一隔离目录重开回读；完成后清理测试自建目录，不清理 `accept:app` 的手工样例。宿主检查比较八个关键文件，不能表述为遍历整个用户目录。
 
-在线验收单独开启，普通测试不依赖外网：
+在线流程使用 `ACM_ONLINE_ACCEPTANCE=1 npm run test:tauri` 单独开启，报告与离线结果分开。已有在线样例、系统选择器实操、截图和日志保存在[2026-09-27 验收结果](polished-ui-results.md)，不代表后续每次运行均通过。
 
-```sh
-ACM_ONLINE_ACCEPTANCE=1 npm run test:tauri
-```
-
-已执行的在线样例：`anthropics/skills` 发现 20 项，安装 `frontend-design` 到 Codex、检查更新（0 项新版本）、调用同源更新并读取实际 `SKILL.md`。这证明本次真实命令链路，不代表未来网络或远端版本始终可用。
-
-`tests/l2/polished.journey.test.ts` 保存与清单对应的 25 个页面状态、8 个弹窗及额外异常状态截图到 `/tmp/acm-polished-evidence`。测试对行高、按钮尺寸、横向溢出、焦点、错误重试、目标隔离和草稿提交进行断言；截图用于人工对照，不以截图存在代替视觉审核。
-
-本次没有改写 Pen 或精细稿预览来适配实现，保留原有设计修改；`b25a` 原工作区保持不变。没有发布、部署、合并或签名打包。
-
-## 2026-09-27 桌面补验
-
-已通过真实系统 ZIP 和项目文件夹选择／取消；ZIP 安装后磁盘内容与样例一致，项目登记持久化。关闭后从 macOS 直接重开，仍读取同一隔离目录；宿主八个关键配置文件哈希未变。默认验收目录现在保留 `acceptance-skill` 和 `visual-alpha`，可继续操作；要从空列表重新验收，请使用 `--fresh`。
-
-全仓 `verify:static` 已通过 8/8。三个本地设计 Skill 仅整理格式，Markdown 结构与标准化代码块核对一致；整理前的副本保存在 `.artifacts/acceptance/format-review`。
+[Polished L2](../../tests/l2/polished.journey.test.ts) 输出 25 个页面状态、8 个弹窗及额外异常状态到 `/tmp/acm-polished-evidence`；布局、焦点和交互断言与人工对照共同用于验收，不以截图存在代替视觉核对。设计预览和验收截图来源分别标明，不修改 Pen 来掩盖实现差异。

@@ -1,5 +1,7 @@
 # ADR-0001：采用 Tauri 2、React/TypeScript 与 Rust core
 
+> 现行适用性（2026-09-27）：**有效**。技术栈仍适用。 以下保留历史决策理由；现状见[架构说明](../README.md)，其他决策见[索引](README.md)。
+
 > 状态：Accepted
 >
 > 决策日期：2026-07-27

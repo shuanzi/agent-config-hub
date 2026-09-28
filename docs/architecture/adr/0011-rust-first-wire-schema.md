@@ -1,5 +1,7 @@
 # ADR-0011：以 Rust wire DTO 作为 IPC schema 事实源
 
+> 现行适用性（2026-09-27）：**已替代**。ADR-0020 移除 wire 生成协议，改为手工镜像 serde DTO。 以下保留历史决策理由；现状见[架构说明](../README.md)，其他决策见[索引](README.md)。
+
 > 状态：Superseded（2026-08-22，由 ADR-0020 取代）
 >
 > 决策日期：2026-07-27

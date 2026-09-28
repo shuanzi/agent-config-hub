@@ -1,5 +1,7 @@
 # ADR-0007：四个 Agent 使用统一 compatibility bundle
 
+> 现行适用性（2026-09-27）：**已退出当前范围**。ADR-0020 取消动态 Adapter 路线；不提供 compatibility bundle。 以下保留历史决策理由；现状见[架构说明](../README.md)，其他决策见[索引](README.md)。
+
 > 状态：Accepted
 >
 > 决策日期：2026-07-27

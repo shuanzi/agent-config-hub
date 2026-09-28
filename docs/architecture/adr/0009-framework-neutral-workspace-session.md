@@ -1,5 +1,7 @@
 # ADR-0009：采用 framework-neutral 深 WorkspaceSession
 
+> 现行适用性（2026-09-27）：**已替代**。ADR-0020 改用 React Query 与 feature 面板，不再使用 WorkspaceSession。 以下保留历史决策理由；现状见[架构说明](../README.md)，其他决策见[索引](README.md)。
+
 > 状态：Accepted
 >
 > 决策日期：2026-07-27

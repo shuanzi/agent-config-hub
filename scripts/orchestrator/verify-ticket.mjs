@@ -104,8 +104,7 @@ const TICKET_REGISTRY = {
       timeoutMs: 2_400_000,
     },
     // PF-01 性能采样已显式降级：旧采样绑定已删除的 gateway/perf-catalog 实现，
-    // 待按 cc-switch 式新列表实现重新校准后恢复（见 performance/README.md 与
-    // OpenSpec change adopt-ccswitch-asset-management tasks 7.1）。
+    // 待按当前 Skills 列表重新校准后恢复（见 performance/README.md）。
   ],
 };
 

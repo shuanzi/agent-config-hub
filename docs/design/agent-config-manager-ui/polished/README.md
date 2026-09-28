@@ -1,11 +1,10 @@
 # Agent Config Manager 全产品 UI 精细稿
 
-2026-09-27 已按用户反馈恢复 Skills 的紧凑列表与横向投放图标，参考 cc-switch 的 `ListItemRow` / `AppToggleGroup`，保留 selected B2 三栏壳层。2026-09-24 同步的共享目录、接管流程及原生 Subagent 模型继续保留。当前交付为可编辑设计与静态预览。
+2026-09-27 已按用户反馈恢复 Skills 的紧凑列表与横向投放图标，参考 cc-switch 的 `ListItemRow` / `AppToggleGroup`，保留 selected B2 三栏壳层。2026-09-24 同步的共享目录、接管流程及原生 Subagent 模型继续保留。本目录保存可编辑设计与静态预览；正式 App 的实现与运行证据另见验收文档。
 
 - [可编辑 Pen 源文件](../agent-config-manager-ui-polished.pen)
 - [全产品总览](./previews/product-overview.png) · [弹窗与状态总览](./previews/dialogs-states-overview.png)
-- [画板与预览清单](./preview-manifest.tsv) · [布局修订记录](./skills-layout-2026-09-27.md) · [功能同步记录](./sync-2026-09-24.md)
-- [历史采集清单](../ui-inventory.md) · [历史 reconstruction 稿](../agent-config-manager-ui-reconstruction.pen)
+- [画板与预览清单](./preview-manifest.tsv) · [正式 App 操作验收](../../../acceptance/polished-ui.md) · [2026-09-27 运行结果](../../../acceptance/polished-ui-results.md)
 
 ## 本轮同步内容
 
@@ -67,6 +66,8 @@
 
 ## 排版与交接
 
+紧凑列表的参考基线为 cc-switch 提交 `1ee2fdc3a791f1e73476c631c7ab7ce8fac0638f` 的 [ListItemRow](https://github.com/farion1231/cc-switch/blob/1ee2fdc3a791f1e73476c631c7ab7ce8fac0638f/src/components/common/ListItemRow.tsx) 和 [AppToggleGroup](https://github.com/farion1231/cc-switch/blob/1ee2fdc3a791f1e73476c631c7ab7ce8fac0638f/src/components/common/AppToggleGroup.tsx)。本项目保留自己的配置上下文、五列结构和完整目录详情。
+
 - 保留桌面 66px Header、两级侧栏及窄屏 58px Header；正文 14px、辅助信息 12px、页面标题 22px。使用既有 Inter、Lucide 和品牌 SVG。
 - 桌面操作区分两行，搜索与刷新置于上行，目标与导入操作置于下行。Skills 记录保持 64px，表头与内容共用列轨；行内横排四个 Agent 目录及全局共享目录图标，路径明细不撑高列表。
 - 窄屏把集中操作收进“更多操作”，每条记录保留名称、来源、目标及 44px 横向图标。样例展示前 3 条记录，列表继续滚动；完整路径与异常处理进入详情。
@@ -79,10 +80,6 @@
 
 37 份 2× PNG 与可编辑稿对应：25 个主页面、8 类弹窗、组件库、状态板及两张总览。主页面尺寸分别为 3172×1984、2560×1600、780×1688；弹窗与总览保留描边或阴影，实际 PNG 可比画板的两倍略大。
 
-2026-09-24 的全量同步验收见历史记录；2026-09-27 的修订范围与复核见布局修订记录。三个 Skills 列表断点、组件库及产品总览的 PNG 均从保存的 Pen 源文件重新导出。
+设计同步过程与旧修订记录通过 Git 历史追溯。这里的 PNG 是 Pen 静态导出图；样例路径、计数和状态不代表用户机器现状。保留的历史参考节点不在当前预览清单内。
 
-没有修改当前工作区或 `b25a` 的产品源码、公共 API、数据类型或依赖；没有集成功能分支。上述检查是静态设计验收，不是前端、Tauri 或文件写入功能测试。后续 UI 实现应先纳入对应功能变更，再对照此稿进行交互与运行时验证。
-
-## 实现与运行验收（2026-09-27）
-
-上述“未修改源码”描述的是精细稿同步阶段。后续实现已集成共享目录、导入预览及 AGENTS.md 契约，并提供 `npm run accept:ui` 与 `npm run accept:app`。启动方式、交互步骤、真实文件结果及验证边界见 [Polished UI 操作验收](../../../acceptance/polished-ui.md)。本节不改变 Pen 或导出预览的视觉基准。
+正式 App 已接入共享目录、导入预览、单一 AGENTS.md、原生 Subagents 和设置。可使用 `npm run accept:ui` 与 `npm run accept:app` 验收，分别对应模拟命令和真实隔离目录。运行结果见[2026-09-27 验收报告](../../../acceptance/polished-ui-results.md)，不将设计校验当作文件写入验证。

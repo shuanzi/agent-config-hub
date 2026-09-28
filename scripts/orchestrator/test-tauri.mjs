@@ -1,17 +1,9 @@
 /* global process, console */
 /**
- * test:tauri（L3）：专用 test-harness 构建的真实 command/event/隔离磁盘 tracer。
- *
- * 顺序（命令固化自 tests/l3/README.md）：
- * 1. harness 构建（tsc -b + vite build --config vite.l3.config.ts +
- *    `tauri build --debug --no-bundle -c src-tauri/tauri.conf.test-harness.json
- *    -- --features test-harness`，见 build-harness.mjs）；
- * 2. `wdio run tests/l3/wdio.conf.ts`（onPrepare 自带临时隔离 fixture 根
- *    ACM_NATIVE_ROOT，仓库内 fixture 不被原地修改）；
- * 3. harness artifact identity 由 build-harness.mjs 记录到
- *    .artifacts/test-harness/identity.json，供 verify:ticket manifest 引用。
- *
- * Provenance：只证明隔离测试构建，不等同生产签名、DMG 或 L4。
+ * test:tauri（L3）：隔离 test-harness 的真实命令与文件操作。
+ * 构建后运行写入旅程，再用同一 ACM_L3_HOME 启动新进程回读；结束清理临时根。
+ * 构建身份由 build-harness.mjs 记录；细节见 docs/development.md。
+ * 该证据不等同正式签名、分发或生产构建验收。
  */
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
