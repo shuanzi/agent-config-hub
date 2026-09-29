@@ -103,12 +103,15 @@ impl SkillService {
                     "主存储已有同名不同内容，不能覆盖或认领其他来源。",
                 ));
             }
-            if let Some(skill) = existing_skill {
-                placement::ensure_owned_unchanged(db, skill)?;
-            }
+            let register_existing = existing_skill
+                .map(|skill| placement::needs_source_registration(db, skill))
+                .transpose()?
+                .unwrap_or(false);
             let mut actions = vec![SkillImportAction {
                 path: dest.to_string_lossy().into_owned(),
-                action: if source_is_storage_entry {
+                action: if register_existing {
+                    "确认登记旧安装的主副本归属；保留原安装记录，不自动接管其他位置"
+                } else if source_is_storage_entry {
                     "原位接管主副本；不复制文件"
                 } else if existing_skill.is_some() {
                     "复用已受管主副本"
@@ -208,6 +211,7 @@ impl SkillService {
             selections,
             get_settings(),
             &items,
+            existing.values().collect::<Vec<_>>(),
             evidence,
             db.get_setting("skill_placement_registry_v1")?,
         ))
@@ -263,6 +267,9 @@ impl SkillService {
                     .values()
                     .find(|s| s.directory.eq_ignore_ascii_case(&selection.directory))
                 {
+                    if placement::needs_source_registration(db, existing)? {
+                        placement::register_source(db, existing)?;
+                    }
                     existing.clone()
                 } else {
                     let (name, description) =

@@ -541,6 +541,48 @@ describe('InstalledSkillsPanel 全部上下文的操作目标', () => {
     );
   });
 
+  it('ZIP 切换目标立即清空位置，加载中禁止使用旧目标位置，重新选择后仅提交新目标', async () => {
+    const Panel = await loadPanel();
+    let resolveProject!: (value: SkillPlacementTarget[]) => void;
+    mockApi.getSkillPlacementTargets.mockImplementation((target: ScopeTarget) =>
+      target.scope === 'global'
+        ? Promise.resolve(placementTargets(target))
+        : new Promise<SkillPlacementTarget[]>((resolve) => {
+            resolveProject = resolve;
+          }),
+    );
+    renderPanel(Panel, queryClient, allContext);
+    fireEvent.change(screen.getByLabelText('选择 Skill 操作目标'), { target: { value: 'global' } });
+    fireEvent.click(screen.getByRole('button', { name: '从 ZIP 安装' }));
+    const dialog = await screen.findByRole('dialog', { name: '从 ZIP 安装 Skill' });
+    mockOpenFileDialog.mockResolvedValueOnce('/tmp/skill.zip');
+    fireEvent.click(within(dialog).getByRole('button', { name: '选择 ZIP 文件' }));
+    await within(dialog).findByText('/tmp/skill.zip');
+    fireEvent.click(await within(dialog).findByRole('radio', { name: /共享目录/ }));
+    const install = within(dialog).getByRole('button', { name: '安装' });
+    expect(install).toHaveProperty('disabled', false);
+    fireEvent.change(within(dialog).getByLabelText('选择 ZIP 安装目标'), {
+      target: { value: 'project:project-alpha' },
+    });
+    expect(install).toHaveProperty('disabled', true);
+    expect(within(dialog).queryAllByRole('radio')).toHaveLength(0);
+    fireEvent.click(install);
+    expect(mockApi.installSkillsFromZip).not.toHaveBeenCalled();
+    await act(async () => resolveProject(placementTargets(projectTarget)));
+    expect(await within(dialog).findAllByRole('radio')).toHaveLength(4);
+    expect(within(dialog).queryByRole('radio', { checked: true })).toBeNull();
+    expect(install).toHaveProperty('disabled', true);
+    fireEvent.click(within(dialog).getByRole('radio', { name: /Codex/ }));
+    fireEvent.click(install);
+    await waitFor(() =>
+      expect(mockApi.installSkillsFromZip).toHaveBeenCalledWith(
+        '/tmp/skill.zip',
+        'codex',
+        projectTarget,
+      ),
+    );
+  });
+
   it('ZIP picker 只接受单个 ZIP，项目目标只展示四个投放位置并提交 initialLocation', async () => {
     const Panel = await loadPanel();
     renderPanel(Panel, queryClient, allContext);

@@ -371,6 +371,37 @@ fn validate_source_record(
     Ok(())
 }
 
+/// Explicit import may register an old installation that has no ownership records.
+/// Never use this to reset the fingerprint of an already managed or partially
+/// registered asset. Preview and commit both call this under the Skill state lock.
+pub(crate) fn needs_source_registration(
+    db: &Arc<Database>,
+    skill: &InstalledSkill,
+) -> Result<bool, AppError> {
+    let registry = read_registry(db)?;
+    if source_record(&registry, skill).is_some() {
+        ensure_owned_unchanged(db, skill)?;
+        return Ok(false);
+    }
+    if registry
+        .placements
+        .iter()
+        .any(|r| same_asset(&r.target, &r.id, skill))
+    {
+        return Err(AppError::Conflict(
+            "主副本归属缺失但仍有投放登记，不能重新接管".into(),
+        ));
+    }
+    let source = source_path(db, skill)?;
+    validate_skill_directory(&source)?;
+    if physical_entry_owned_by_other(&registry, &physical_entry_path(&source)?, skill) {
+        return Err(AppError::Conflict(
+            "主副本物理路径已归属于其他资产或 scope".into(),
+        ));
+    }
+    Ok(true)
+}
+
 pub(crate) fn register_source(db: &Arc<Database>, skill: &InstalledSkill) -> Result<(), AppError> {
     let source = source_path(db, skill)?;
     validate_skill_directory(&source)?;
@@ -634,7 +665,7 @@ pub fn placements(
             Ok(_) => Some("Skill 主副本已被外部修改".to_string()),
             Err(_) => Some("Skill 主副本缺失或不可读取".to_string()),
         },
-        None => Some("Skill 主副本尚未登记归属".to_string()),
+        None => Some("Skill 主副本尚未登记归属，请通过导入已有目录预览后登记".to_string()),
     };
 
     targets(db, &skill.target)?

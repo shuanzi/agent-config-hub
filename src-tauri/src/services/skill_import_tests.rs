@@ -540,3 +540,235 @@ fn project_import_has_no_shared_target_and_rejects_global_sources() {
         .expect("project skills")
         .is_empty());
 }
+
+fn legacy_skill(target: ScopeTarget) -> InstalledSkill {
+    InstalledSkill {
+        id: "owner/repo:legacy".into(),
+        name: "Legacy".into(),
+        directory: "legacy".into(),
+        description: None,
+        repo_owner: Some("owner".into()),
+        repo_name: Some("repo".into()),
+        repo_branch: Some("main".into()),
+        readme_url: None,
+        apps: SkillApps {
+            codex: true,
+            claude_code: true,
+            ..Default::default()
+        },
+        installed_at: 7,
+        updated_at: 9,
+        content_hash: None,
+        target,
+    }
+}
+
+#[test]
+#[serial]
+fn legacy_install_requires_preview_then_preserves_identity_and_unselected_entries() {
+    let home = tempdir().unwrap();
+    let _guard = TestHomeGuard::set(home.path());
+    settings::set_sync_method(SyncMethod::Copy).unwrap();
+    let db = Arc::new(Database::memory().unwrap());
+    let project_root = home.path().join("workspace");
+    fs::create_dir_all(&project_root).unwrap();
+    let project = ProjectService::add_project(&db, &project_root, None).unwrap();
+    // Same legacy identity in two scopes must be registered independently.
+    let mut registered = Vec::new();
+    for target in [
+        ScopeTarget::Global,
+        ScopeTarget::Project {
+            project_id: project.project_id,
+        },
+    ] {
+        let skill = legacy_skill(target.clone());
+        db.save_skill(&skill).unwrap();
+        let source = placement::source_root(&db, &target).unwrap().join("legacy");
+        write_skill(&source, "Legacy");
+        let codex = SkillService::get_app_skills_dir_for_target(&db, &target, &AgentType::Codex)
+            .unwrap()
+            .join("legacy");
+        let claude =
+            SkillService::get_app_skills_dir_for_target(&db, &target, &AgentType::ClaudeCode)
+                .unwrap()
+                .join("legacy");
+        write_skill(&codex, "Legacy");
+        write_skill(&claude, "Unselected external content");
+        let untouched = placement::fingerprint(&claude).unwrap();
+        let selection = vec![selection("legacy", &source, vec![SkillLocation::Codex])];
+        assert!(SkillService::uninstall_for_target(&db, &target, &skill.id).is_err());
+        assert!(SkillService::scan_unmanaged_for_target(&db, &target)
+            .unwrap()
+            .iter()
+            .any(|s| s.path == source.to_string_lossy()));
+        let before = db.get_setting("skill_placement_registry_v1").unwrap();
+        let preview = SkillService::preview_import_for_target(&db, &target, &selection).unwrap();
+        assert!(preview.items[0].actions[0].action.contains("旧安装"));
+        assert_eq!(
+            db.get_setting("skill_placement_registry_v1").unwrap(),
+            before
+        );
+        let imported =
+            SkillService::import_from_apps_for_target(&db, &target, selection, &preview.revision)
+                .unwrap();
+        assert_eq!(
+            serde_json::to_value(&imported[0]).unwrap(),
+            serde_json::to_value(&skill).unwrap()
+        );
+        placement::ensure_owned_unchanged(&db, &skill).unwrap();
+        assert_eq!(
+            placement_for(&db, &skill, SkillLocation::Codex).state,
+            "placed"
+        );
+        assert_eq!(
+            placement_for(&db, &skill, SkillLocation::ClaudeCode).state,
+            "unmanaged"
+        );
+        registered.push((skill, codex, claude, untouched));
+    }
+    for (skill, codex, claude, untouched) in &registered {
+        SkillService::uninstall_for_target(&db, &skill.target, &skill.id).unwrap();
+        assert!(!codex.exists());
+        assert_eq!(placement::fingerprint(claude).unwrap(), *untouched);
+        if skill.target == ScopeTarget::Global {
+            placement::ensure_owned_unchanged(&db, &registered[1].0).unwrap();
+            assert!(registered[1].1.join("SKILL.md").is_file());
+        }
+    }
+}
+
+#[test]
+#[serial]
+fn legacy_registration_rejects_stale_preview_and_managed_external_changes() {
+    let home = tempdir().unwrap();
+    let _guard = TestHomeGuard::set(home.path());
+    let db = Arc::new(Database::memory().unwrap());
+    let target = ScopeTarget::Global;
+    let skill = legacy_skill(target.clone());
+    db.save_skill(&skill).unwrap();
+    let source = placement::source_root(&db, &target).unwrap().join("legacy");
+    write_skill(&source, "Legacy");
+    let selections = vec![selection("legacy", &source, vec![])];
+    let preview = SkillService::preview_import_for_target(&db, &target, &selections).unwrap();
+    fs::write(source.join(".external"), "changed after preview").unwrap();
+    assert!(SkillService::import_from_apps_for_target(
+        &db,
+        &target,
+        selections.clone(),
+        &preview.revision
+    )
+    .is_err());
+    assert!(db
+        .get_setting("skill_placement_registry_v1")
+        .unwrap()
+        .is_none());
+    // A new preview can explicitly accept an unregistered source, but never
+    // reset the recorded fingerprint of an already managed source.
+    preview_and_import(&db, &target, selections.clone());
+    fs::write(source.join(".external"), "another change").unwrap();
+    assert!(SkillService::preview_import_for_target(&db, &target, &selections).is_err());
+    assert_eq!(
+        fs::read_to_string(source.join(".external")).unwrap(),
+        "another change"
+    );
+}
+
+#[test]
+#[serial]
+fn legacy_registration_failure_preserves_old_record_and_can_retry_after_reopen() {
+    let home = tempdir().unwrap();
+    let _guard = TestHomeGuard::set(home.path());
+    let db = Arc::new(Database::init().unwrap());
+    let skill = legacy_skill(ScopeTarget::Global);
+    db.save_skill(&skill).unwrap();
+    let source = placement::source_root(&db, &skill.target)
+        .unwrap()
+        .join("legacy");
+    write_skill(&source, "Legacy");
+    let before = placement::fingerprint(&source).unwrap();
+    let selections = vec![selection("legacy", &source, vec![SkillLocation::Codex])];
+    let preview = SkillService::preview_import_for_target(&db, &skill.target, &selections).unwrap();
+    // Fail after registering the source, when the placement registry is updated.
+    db.conn.lock().unwrap().execute_batch(
+        "CREATE TRIGGER reject_legacy_placement BEFORE INSERT ON settings
+         WHEN NEW.key = 'skill_placement_registry_v1' AND json_array_length(NEW.value, '$.placements') > 0
+         BEGIN SELECT RAISE(ABORT, 'forced legacy placement failure'); END;"
+    ).unwrap();
+    let error = SkillService::import_from_apps_for_target(
+        &db,
+        &skill.target,
+        selections.clone(),
+        &preview.revision,
+    )
+    .unwrap_err();
+    assert!(error
+        .to_string()
+        .contains("forced legacy placement failure"));
+    assert_eq!(placement::fingerprint(&source).unwrap(), before);
+    assert!(!config::get_codex_skills_dir().join("legacy").exists());
+    assert!(db
+        .get_setting("skill_placement_registry_v1")
+        .unwrap()
+        .is_none());
+    assert_eq!(
+        serde_json::to_value(db.get_global_installed_skill(&skill.id).unwrap().unwrap()).unwrap(),
+        serde_json::to_value(&skill).unwrap()
+    );
+    db.conn
+        .lock()
+        .unwrap()
+        .execute_batch("DROP TRIGGER reject_legacy_placement")
+        .unwrap();
+    drop(db);
+    let db = Arc::new(Database::init().unwrap());
+    preview_and_import(&db, &skill.target, selections);
+    drop(db);
+    let db = Arc::new(Database::init().unwrap());
+    placement::ensure_owned_unchanged(&db, &skill).unwrap();
+    assert_eq!(
+        placement_for(&db, &skill, SkillLocation::Codex).state,
+        "placed"
+    );
+}
+
+#[test]
+#[serial]
+fn legacy_registration_cannot_reclaim_partial_or_other_asset_ownership() {
+    let home = tempdir().unwrap();
+    let _guard = TestHomeGuard::set(home.path());
+    let db = Arc::new(Database::memory().unwrap());
+    let skill = legacy_skill(ScopeTarget::Global);
+    db.save_skill(&skill).unwrap();
+    let source = placement::source_root(&db, &skill.target)
+        .unwrap()
+        .join("legacy");
+    write_skill(&source, "Legacy");
+    placement::register_source(&db, &skill).unwrap();
+    placement::sync(&db, &skill, SkillLocation::Codex).unwrap();
+    let raw = db
+        .get_setting("skill_placement_registry_v1")
+        .unwrap()
+        .unwrap();
+    let mut partial: serde_json::Value = serde_json::from_str(&raw).unwrap();
+    partial["sources"] = serde_json::json!([]);
+    db.set_setting("skill_placement_registry_v1", &partial.to_string())
+        .unwrap();
+    let selections = vec![selection("legacy", &source, vec![])];
+    assert!(
+        SkillService::preview_import_for_target(&db, &skill.target, &selections)
+            .unwrap_err()
+            .to_string()
+            .contains("仍有投放登记")
+    );
+    let mut other: serde_json::Value = serde_json::from_str(&raw).unwrap();
+    other["placements"] = serde_json::json!([]);
+    other["sources"][0]["id"] = serde_json::json!("different-owner");
+    db.set_setting("skill_placement_registry_v1", &other.to_string())
+        .unwrap();
+    assert!(
+        SkillService::preview_import_for_target(&db, &skill.target, &selections)
+            .unwrap_err()
+            .to_string()
+            .contains("其他资产")
+    );
+}

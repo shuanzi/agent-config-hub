@@ -33,7 +33,7 @@ Rust serde 类型与 TypeScript 手工镜像，原生定义的前端类型集中
 
 [数据库 schema](../../src-tauri/src/database/schema.rs) 当前版本为 4。项目 registry、按 target 区分的 Skills、来源仓库、原生定义及备份均持久化；旧 prompts/subagents 表保留兼容数据。schema 使用前向迁移和 savepoint，拒绝高于程序支持版本的数据库。数据库目录／文件在 Unix 下限制为 0700／0600。
 
-Skill 投放所有权与主资产指纹记录在 SQLite settings 的 `skill_placement_registry_v1`，通用设置命令禁止改写该键。它与目录实时状态共同决定能否操作，不能只凭旧 `apps` 布尔值判断目录是否安全。
+Skill 投放所有权与主资产指纹记录在 SQLite settings 的 `skill_placement_registry_v1`，通用设置命令禁止改写该键。它与目录实时状态共同决定能否操作，不能只凭旧 `apps` 布尔值判断目录是否安全。 缺少归属的旧安装由显式导入预览确认补登记，复用原数据库行；revision 同时覆盖安装记录、目录内容、设置和归属记录。登记与投放失败时恢复检查点，不能通过该入口重置已有受管指纹。
 
 ## 目录与身份
 

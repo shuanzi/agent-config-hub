@@ -505,7 +505,21 @@ export function InstalledSkillsPanel({
     isFetching: refreshingPlacements,
     refetch: refetchPlacements,
   } = useSkillPlacements(context);
-  const { data: placementTargets = [] } = useSkillPlacementTargets(operationTarget);
+  const {
+    data: placementTargets = [],
+    isPlaceholderData: placementTargetsStale,
+    isFetching: fetchingPlacementTargets,
+    isError: placementTargetsError,
+  } = useSkillPlacementTargets(operationTarget);
+  const zipTargetsReady =
+    !placementTargetsStale && !fetchingPlacementTargets && !placementTargetsError;
+  const zipLocationValid =
+    zipTargetsReady &&
+    zipInitialLocation !== null &&
+    placementTargets.some(
+      (target) =>
+        target.location === zipInitialLocation || target.aliases.includes(zipInitialLocation),
+    );
   const setPlacementMutation = useSetSkillPlacement();
   const uninstallMutation = useUninstallSkill();
   const {
@@ -910,7 +924,7 @@ export function InstalledSkillsPanel({
     const target = requireOperationTarget();
     if (target === null) return;
     const initialLocation = zipInitialLocation;
-    if (initialLocation === null) {
+    if (initialLocation === null || !zipLocationValid) {
       setErrorMessage('请选择 ZIP 安装后的初始投放位置。');
       return;
     }
@@ -1336,12 +1350,15 @@ export function InstalledSkillsPanel({
           targetText={operationTarget ? targetLabel(operationTarget, projects) : null}
           projects={projects}
           allowTargetChange={context.kind === 'all'}
-          targets={placementTargets}
-          initialLocation={zipInitialLocation}
+          targets={zipTargetsReady ? placementTargets : []}
+          initialLocation={zipLocationValid ? zipInitialLocation : null}
           pending={installFromZipMutation.isPending}
           errorMessage={errorMessage}
           onChoose={handleChooseZip}
-          onTargetChange={setAllOperationTarget}
+          onTargetChange={(target) => {
+            setAllOperationTarget(target);
+            setZipInitialLocation(null);
+          }}
           onInitialLocationChange={setZipInitialLocation}
           onInstall={() => void handleInstallFromZip()}
           onClose={() => {

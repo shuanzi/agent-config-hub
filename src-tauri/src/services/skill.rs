@@ -3349,7 +3349,31 @@ impl SkillService {
         let metadata_path = backup_path.join("meta.json");
         let content =
             fs::read_to_string(&metadata_path).map_err(|e| AppError::io(&metadata_path, e))?;
-        serde_json::from_str(&content).map_err(|e| AppError::json(&metadata_path, e))
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct StoredMetadata {
+            skill: InstalledSkill,
+            backup_created_at: i64,
+            source_path: String,
+            locations: Option<Vec<SkillLocation>>,
+        }
+        let stored: StoredMetadata =
+            serde_json::from_str(&content).map_err(|e| AppError::json(&metadata_path, e))?;
+        let locations = stored.locations.unwrap_or_else(|| {
+            stored
+                .skill
+                .apps
+                .enabled_apps()
+                .into_iter()
+                .map(Into::into)
+                .collect()
+        });
+        Ok(SkillBackupMetadata {
+            skill: stored.skill,
+            backup_created_at: stored.backup_created_at,
+            source_path: stored.source_path,
+            locations,
+        })
     }
 
     fn create_uninstall_backup_for_target(
@@ -4944,6 +4968,65 @@ mod tests {
 
         let backups = SkillService::list_backups().expect("list backups");
         assert_eq!(backups.len(), 1);
+    }
+
+    #[test]
+    #[serial]
+    fn legacy_backup_metadata_can_be_listed_restored_and_deleted() {
+        let home = tempdir().unwrap();
+        let _guard = TestHomeGuard::set(home.path());
+        let db = Arc::new(Database::memory().unwrap());
+        let mut skill = installed_skill_fixture("local:legacy-backup", "legacy-backup");
+        skill.apps = SkillApps::only(&AgentType::Codex);
+        let root = SkillService::get_backup_dir().unwrap();
+        for id in ["legacy-restore", "legacy-delete"] {
+            let path = root.join(id);
+            write_skill(&path.join("skill"), "Legacy backup");
+            fs::write(
+                path.join("meta.json"),
+                serde_json::to_vec(&serde_json::json!({
+                    "skill": skill, "backupCreatedAt": 1, "sourcePath": "/old/source"
+                }))
+                .unwrap(),
+            )
+            .unwrap();
+        }
+        assert_eq!(SkillService::list_backups().unwrap().len(), 2);
+        let restored = SkillService::restore_from_backup(&db, "legacy-restore").unwrap();
+        assert_eq!(
+            placement::owned_locations(&db, &restored).unwrap(),
+            vec![SkillLocation::Codex]
+        );
+        assert!(config::get_codex_skills_dir()
+            .join("legacy-backup/SKILL.md")
+            .is_file());
+        SkillService::delete_backup("legacy-delete").unwrap();
+        assert!(!root.join("legacy-delete").exists());
+    }
+
+    #[test]
+    #[serial]
+    fn explicit_empty_backup_locations_do_not_restore_legacy_apps() {
+        let home = tempdir().unwrap();
+        let _guard = TestHomeGuard::set(home.path());
+        let db = Arc::new(Database::memory().unwrap());
+        let mut skill = installed_skill_fixture("local:no-placement", "no-placement");
+        skill.apps = SkillApps::only(&AgentType::Codex);
+        let path = SkillService::get_backup_dir().unwrap().join("no-placement");
+        write_skill(&path.join("skill"), "No placement");
+        fs::write(
+            path.join("meta.json"),
+            serde_json::to_vec(&serde_json::json!({
+                "skill": skill, "backupCreatedAt": 1, "sourcePath": "/old/source", "locations": []
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+        let restored = SkillService::restore_from_backup(&db, "no-placement").unwrap();
+        assert!(placement::owned_locations(&db, &restored)
+            .unwrap()
+            .is_empty());
+        assert!(!config::get_codex_skills_dir().join("no-placement").exists());
     }
 
     #[test]
