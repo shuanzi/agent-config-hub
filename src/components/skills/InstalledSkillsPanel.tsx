@@ -511,10 +511,10 @@ export function InstalledSkillsPanel({
     isFetching: fetchingPlacementTargets,
     isError: placementTargetsError,
   } = useSkillPlacementTargets(operationTarget);
-  const zipTargetsReady =
+  const placementTargetsReady =
     !placementTargetsStale && !fetchingPlacementTargets && !placementTargetsError;
   const zipLocationValid =
-    zipTargetsReady &&
+    placementTargetsReady &&
     zipInitialLocation !== null &&
     placementTargets.some(
       (target) =>
@@ -863,11 +863,29 @@ export function InstalledSkillsPanel({
     }
   };
 
+  const requireImportLocations = (selections: ImportSkillSelection[]): boolean => {
+    const valid =
+      placementTargetsReady &&
+      selections.length > 0 &&
+      selections.every(
+        (selection) =>
+          selection.locations.length > 0 &&
+          selection.locations.every((location) =>
+            placementTargets.some(
+              (target) => target.location === location || target.aliases.includes(location),
+            ),
+          ),
+      );
+    if (!valid) setErrorMessage('投放位置尚未就绪或已变化，请重新选择并预览。');
+    return valid;
+  };
+
   const handlePreviewImport = async (
     selections: ImportSkillSelection[],
   ): Promise<SkillImportPreview> => {
     const target = requireOperationTarget();
     if (target === null) throw new Error('未选择操作目标');
+    if (!requireImportLocations(selections)) throw new Error('无效导入投放位置');
     return handlePreviewImportForTarget(selections, target);
   };
 
@@ -889,7 +907,7 @@ export function InstalledSkillsPanel({
 
   const handleImport = async (selections: ImportSkillSelection[], expectedRevision: string) => {
     const target = requireOperationTarget();
-    if (target === null) return;
+    if (target === null || !requireImportLocations(selections)) return;
     await handleImportForTarget(selections, expectedRevision, target);
   };
 
@@ -1296,8 +1314,11 @@ export function InstalledSkillsPanel({
 
       {importDialogOpen && unmanagedSkills !== undefined && (
         <ImportDialog
+          // Invalidate selections and in-flight previews together when the target
+          // or its ready directory list changes. Row takeover uses its own target.
+          key={JSON.stringify([operationTarget, placementTargetsReady ? placementTargets : null])}
           skills={unmanagedSkills}
-          targets={placementTargets}
+          targets={placementTargetsReady ? placementTargets : []}
           targetText={operationTarget ? targetLabel(operationTarget, projects) : '当前操作目标'}
           errorMessage={errorMessage}
           pending={importMutation.isPending}
@@ -1350,7 +1371,7 @@ export function InstalledSkillsPanel({
           targetText={operationTarget ? targetLabel(operationTarget, projects) : null}
           projects={projects}
           allowTargetChange={context.kind === 'all'}
-          targets={zipTargetsReady ? placementTargets : []}
+          targets={placementTargetsReady ? placementTargets : []}
           initialLocation={zipLocationValid ? zipInitialLocation : null}
           pending={installFromZipMutation.isPending}
           errorMessage={errorMessage}

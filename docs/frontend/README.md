@@ -27,7 +27,7 @@ React Query hooks 位于 [src/hooks](../../src/hooks)，命令薄封装位于 [s
 | Skill 安装 | `install_skill({skill, target, initialLocation})`；`initialLocation` 为 Agent 目录或全局 `shared`；位置查询就绪且选中位置属于当前目标后才允许提交，不能使用前一目标的占位数据 |
 | ZIP 安装 | `install_skills_from_zip({filePath, initialLocation, target})`；系统单 ZIP picker 取消时不提交；切换目标清空初始位置，位置加载完成并验证属于当前目标后才可提交 |
 | 投放与撤回 | `set_skill_placement({id, target, location, placed, expectedRevision})`，revision 来自当前目录状态 |
-| 导入 | `preview_skill_import({selections, target})` → revision 与逐路径动作；确认后 `import_skills_from_apps({selections, target, expectedRevision})` |
+| 导入 | `preview_skill_import({selections, target})` → revision 与逐路径动作；确认后 `import_skills_from_apps({selections, target, expectedRevision})`；仅展示当前目标就绪位置，目标或位置清单变化会重置导入草稿及预览，预览和确认均复验选择 |
 | 指令读取／保存 | `get_instruction_documents({context})`；`upsert_instruction_document({target, kind: 'agents', content})`；返回实际 `paths[]` |
 | 原生安装 | `install_native_subagent({subagent, target, agent})`，单个兼容 Agent；不使用 Skill 的 shared 或 initialLocation |
 | 原生接管／保存／启停 | 使用 `identity` 和 `expectedHash`；链接接管还需 `confirmSymlink` |
