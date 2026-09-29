@@ -500,6 +500,15 @@ pub(crate) fn set_agent_override_dir_inner(
         .map(resolve_override_path)
         .unwrap_or_else(|| default_agent_config_dir(&agent));
     let new_root = new_config_dir.join("skills");
+    // 无资产或仅有未投放资产时，也须先校验目录，再保存覆盖值。
+    if let Err(error) = std::fs::create_dir_all(&new_root) {
+        log::warn!("新覆盖目录不可用 {}: {error}", new_root.display());
+        return Err(AppError::Message(format_skill_error(
+            "SETTINGS_VALIDATION_FAILED",
+            &[("field", "configDir"), ("reason", "notWritable")],
+            Some("checkPermission"),
+        )));
+    }
     let new_physical = placement::physical_path(&new_root)?;
     let location = SkillLocation::from(agent);
     let instruction_projection = instruction_projection_for_override(&agent, &new_config_dir);
@@ -1094,6 +1103,96 @@ mod tests {
         // 与当前值相同的提交不受影响
         set_settings_guarded(crate::settings::get_settings())
             .expect("unchanged settings must be accepted");
+    }
+
+    fn assert_override_rejects_file_target(block_skills_child: bool) {
+        for app in ["claude-code", "gemini-cli"] {
+            for with_unplaced_skill in [false, true] {
+                let home = tempdir().unwrap();
+                let _guard = TestHomeGuard::set(home.path());
+                let db = Arc::new(Database::memory().unwrap());
+                let old_dir = home.path().join("old-agent");
+                fs::create_dir_all(old_dir.join("skills")).unwrap();
+                set_agent_config_dir_override(app, Some(old_dir.display().to_string())).unwrap();
+                let source = SkillService::get_ssot_dir().unwrap().join("unplaced");
+                if with_unplaced_skill {
+                    write_skill(&source, "Unplaced");
+                    let mut skill = skill_fixture("unplaced");
+                    skill.apps = SkillApps::default();
+                    db.save_skill(&skill).unwrap();
+                    register_source_fixture(&db, &ScopeTarget::Global, "unplaced").unwrap();
+                }
+                let before_source =
+                    with_unplaced_skill.then(|| placement::fingerprint(&source).unwrap());
+                let before_settings = serde_json::to_value(get_settings()).unwrap();
+                let settings_path = config::get_hub_dir().join("settings.json");
+                let settings_bytes = fs::read(&settings_path).unwrap();
+                let registry = db.get_setting("skill_placement_registry_v1").unwrap();
+                let next = home.path().join("next-agent");
+                let occupied = if block_skills_child {
+                    fs::create_dir_all(&next).unwrap();
+                    next.join("skills")
+                } else {
+                    next.clone()
+                };
+                fs::write(&occupied, "user file must remain unchanged").unwrap();
+                let error =
+                    set_agent_override_dir_inner(app, Some(next.display().to_string()), &db)
+                        .expect_err("invalid directory must fail even without placed Skills");
+                assert!(error.to_string().contains("SETTINGS_VALIDATION_FAILED"));
+                assert_eq!(
+                    serde_json::to_value(get_settings()).unwrap(),
+                    before_settings
+                );
+                assert_eq!(fs::read(&settings_path).unwrap(), settings_bytes);
+                assert_eq!(
+                    db.get_setting("skill_placement_registry_v1").unwrap(),
+                    registry
+                );
+                assert_eq!(
+                    fs::read_to_string(&occupied).unwrap(),
+                    "user file must remain unchanged"
+                );
+                assert!(old_dir.join("skills").is_dir());
+                if let Some(before) = before_source {
+                    assert_eq!(placement::fingerprint(&source).unwrap(), before);
+                }
+            }
+        }
+    }
+
+    #[test]
+    #[serial]
+    fn set_agent_override_rejects_config_file_without_placements() {
+        assert_override_rejects_file_target(false);
+    }
+
+    #[test]
+    #[serial]
+    fn set_agent_override_rejects_skills_file_without_placements() {
+        assert_override_rejects_file_target(true);
+    }
+
+    #[test]
+    #[serial]
+    fn set_agent_override_creates_skills_directory_without_assets() {
+        let home = tempdir().unwrap();
+        let _guard = TestHomeGuard::set(home.path());
+        let db = Arc::new(Database::memory().unwrap());
+        for app in ["claude-code", "gemini-cli"] {
+            let next = home.path().join(app).join("new-config");
+            set_agent_override_dir_inner(app, Some(next.display().to_string()), &db).unwrap();
+            assert!(next.join("skills").is_dir());
+            assert_eq!(
+                current_override_for(&AgentType::from_str(app).unwrap()),
+                Some(next.display().to_string())
+            );
+            crate::settings::reset_settings_store_for_test();
+            assert_eq!(
+                current_override_for(&AgentType::from_str(app).unwrap()),
+                Some(next.display().to_string())
+            );
+        }
     }
 
     #[test]
