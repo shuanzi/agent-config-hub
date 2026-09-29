@@ -24,7 +24,7 @@ React Query hooks 位于 [src/hooks](../../src/hooks)，命令薄封装位于 [s
 
 | 场景 | 当前请求与结果 |
 | --- | --- |
-| Skill 安装 | `install_skill({skill, target, initialLocation})`；`initialLocation` 为 Agent 目录或全局 `shared` |
+| Skill 安装 | `install_skill({skill, target, initialLocation})`；`initialLocation` 为 Agent 目录或全局 `shared`；位置查询就绪且选中位置属于当前目标后才允许提交，不能使用前一目标的占位数据 |
 | ZIP 安装 | `install_skills_from_zip({filePath, initialLocation, target})`；系统单 ZIP picker 取消时不提交；切换目标清空初始位置，位置加载完成并验证属于当前目标后才可提交 |
 | 投放与撤回 | `set_skill_placement({id, target, location, placed, expectedRevision})`，revision 来自当前目录状态 |
 | 导入 | `preview_skill_import({selections, target})` → revision 与逐路径动作；确认后 `import_skills_from_apps({selections, target, expectedRevision})` |

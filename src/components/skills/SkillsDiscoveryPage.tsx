@@ -275,7 +275,20 @@ export function SkillsDiscoveryPage({ context, projects }: SkillsDiscoveryPagePr
     refetch: refetchDiscoverable,
   } = useDiscoverableSkills(discoveryTarget);
   const { data: installedSkills } = useInstalledSkills(context);
-  const { data: placementTargets = [] } = useSkillPlacementTargets(discoveryTarget);
+  const {
+    data: placementTargets = [],
+    isPlaceholderData: placementTargetsStale,
+    isFetching: fetchingPlacementTargets,
+    isError: placementTargetsError,
+  } = useSkillPlacementTargets(discoveryTarget);
+  const installTargetsReady =
+    !placementTargetsStale && !fetchingPlacementTargets && !placementTargetsError;
+  const installLocationValid =
+    installTargetsReady &&
+    initialLocation !== null &&
+    placementTargets.some(
+      (target) => target.location === initialLocation || target.aliases.includes(initialLocation),
+    );
   const { data: repos = [] } = useSkillRepos();
   const installMutation = useInstallSkill();
   const uninstallMutation = useUninstallSkill();
@@ -439,7 +452,7 @@ export function SkillsDiscoveryPage({ context, projects }: SkillsDiscoveryPagePr
     const target = requireDiscoveryTarget();
     if (target === null) return;
     const selectedInitialLocation = initialLocation;
-    if (selectedInitialLocation === null) {
+    if (selectedInitialLocation === null || !installLocationValid) {
       setErrorMessage('请选择安装后的初始投放位置。');
       return;
     }
@@ -686,8 +699,8 @@ export function SkillsDiscoveryPage({ context, projects }: SkillsDiscoveryPagePr
         <SkillInstallDialog
           skill={skills.find((skill) => skill.key === installDialogKey) ?? null}
           targetText={discoveryTarget ? targetLabel(discoveryTarget, projects) : null}
-          targets={placementTargets}
-          initialLocation={initialLocation}
+          targets={installTargetsReady ? placementTargets : []}
+          initialLocation={installLocationValid ? initialLocation : null}
           pending={installMutation.isPending}
           errorMessage={errorMessage}
           onInitialLocationChange={setInitialLocation}

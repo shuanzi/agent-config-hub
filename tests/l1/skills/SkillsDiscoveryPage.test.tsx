@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
 import type {
@@ -177,6 +177,114 @@ describe('SkillsDiscoveryPage 配置目标合同', () => {
       ),
     );
   });
+
+  it('切换到项目后重新打开安装框，不展示查询期间保留的全局位置', async () => {
+    let resolveProject!: (targets: SkillPlacementTarget[]) => void;
+    mockApi.getSkillPlacementTargets.mockImplementation((target: ScopeTarget) =>
+      target.scope === 'global'
+        ? Promise.resolve(placementTargets(target))
+        : new Promise<SkillPlacementTarget[]>((resolve) => {
+            resolveProject = resolve;
+          }),
+    );
+    const Page = await loadPage();
+    renderPage(Page, queryClient, allContext);
+    fireEvent.change(screen.getByLabelText('选择 Skill 发现目标'), { target: { value: 'global' } });
+    fireEvent.click(await screen.findByRole('button', { name: '安装' }));
+    let dialog = await screen.findByRole('dialog', { name: '安装 TestSkill' });
+    await within(dialog).findByRole('radio', { name: /共享目录/ });
+    fireEvent.click(within(dialog).getByRole('button', { name: '取消' }));
+    fireEvent.change(screen.getByLabelText('选择 Skill 发现目标'), {
+      target: { value: 'project:project-alpha' },
+    });
+    fireEvent.click(await screen.findByRole('button', { name: '安装' }));
+    dialog = await screen.findByRole('dialog', { name: '安装 TestSkill' });
+    const confirm = within(dialog).getByRole('button', { name: '确认安装' });
+    expect(within(dialog).queryAllByRole('radio')).toHaveLength(0);
+    expect(confirm).toHaveProperty('disabled', true);
+    fireEvent.click(confirm);
+    expect(mockApi.installSkill).not.toHaveBeenCalled();
+    await act(async () => resolveProject(placementTargets(projectTarget)));
+    expect(await within(dialog).findAllByRole('radio')).toHaveLength(4);
+    expect(within(dialog).queryByRole('radio', { name: /共享目录/ })).toBeNull();
+    expect(confirm).toHaveProperty('disabled', true);
+    fireEvent.click(within(dialog).getByRole('radio', { name: /Codex/ }));
+    fireEvent.click(confirm);
+    await waitFor(() =>
+      expect(mockApi.installSkill).toHaveBeenCalledWith(
+        expect.objectContaining({ key: 'a/b:skill' }),
+        projectTarget,
+        'codex',
+      ),
+    );
+    expect(mockApi.installSkill).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['removed', 'failed'] as const)(
+    '位置刷新中及所选位置失效时禁止安装：%s',
+    async (outcome) => {
+      const Page = await loadPage();
+      renderPage(Page, queryClient);
+      fireEvent.click(await screen.findByRole('button', { name: '安装' }));
+      const dialog = await screen.findByRole('dialog', { name: '安装 TestSkill' });
+      fireEvent.click(await within(dialog).findByRole('radio', { name: /共享目录/ }));
+      const confirm = within(dialog).getByRole('button', { name: '确认安装' });
+      expect(confirm).toHaveProperty('disabled', false);
+      let resolveTargets!: (targets: SkillPlacementTarget[]) => void;
+      let rejectTargets!: (error: Error) => void;
+      mockApi.getSkillPlacementTargets.mockImplementationOnce(
+        () =>
+          new Promise<SkillPlacementTarget[]>((resolve, reject) => {
+            resolveTargets = resolve;
+            rejectTargets = reject;
+          }),
+      );
+      let refresh!: Promise<void>;
+      act(() => {
+        refresh = queryClient.invalidateQueries({ queryKey: ['skills', 'placement-targets'] });
+      });
+      await waitFor(() => expect(confirm).toHaveProperty('disabled', true));
+      expect(within(dialog).queryAllByRole('radio')).toHaveLength(0);
+      fireEvent.click(confirm);
+      expect(mockApi.installSkill).not.toHaveBeenCalled();
+      await act(async () => {
+        if (outcome === 'failed') rejectTargets(new Error('placement query failed'));
+        else
+          resolveTargets(
+            placementTargets(globalTarget).filter((target) => target.location !== 'shared'),
+          );
+        await refresh;
+      });
+      if (outcome === 'removed') {
+        expect(await within(dialog).findAllByRole('radio')).toHaveLength(4);
+      }
+      expect(confirm).toHaveProperty('disabled', true);
+      expect(within(dialog).queryByRole('radio', { name: /共享目录/ })).toBeNull();
+      fireEvent.click(confirm);
+      expect(mockApi.installSkill).not.toHaveBeenCalled();
+      if (outcome === 'removed') {
+        fireEvent.click(within(dialog).getByRole('radio', { name: /Codex/ }));
+        fireEvent.click(confirm);
+        await waitFor(() =>
+          expect(mockApi.installSkill).toHaveBeenCalledWith(
+            expect.objectContaining({ key: 'a/b:skill' }),
+            globalTarget,
+            'codex',
+          ),
+        );
+      } else {
+        // Reopening after a failed refetch must not expose the cached options.
+        fireEvent.click(within(dialog).getByRole('button', { name: '取消' }));
+        fireEvent.click(screen.getByRole('button', { name: '安装' }));
+        const reopened = await screen.findByRole('dialog', { name: '安装 TestSkill' });
+        expect(within(reopened).queryAllByRole('radio')).toHaveLength(0);
+        expect(within(reopened).getByRole('button', { name: '确认安装' })).toHaveProperty(
+          'disabled',
+          true,
+        );
+      }
+    },
+  );
 
   it('卸载发现项时从已安装记录派生 target', async () => {
     mockApi.discoverAvailableSkills.mockResolvedValue([discoverable({ installed: true })]);
