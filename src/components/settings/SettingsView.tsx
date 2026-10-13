@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useRef, useState } from 'react';
 import { Check, Copy, Folder, HardDrive, Link2, Loader2, Save } from 'lucide-react';
 import type { AgentType, AppSettings, SyncMethod, StorageLocation } from '../../types';
 import { useInstalledSkills } from '../../hooks/useSkills';
@@ -45,16 +45,13 @@ export function SettingsView() {
   const migrateMutation = useMigrateStorage();
   const overrideMutation = useSetAgentOverrideDir();
 
-  const [draft, setDraft] = useState<AppSettings | null>(null);
+  const [overrideDraft, setOverrideDraft] = useState<Partial<Record<OverrideKey, string>>>({});
+  const [savingOverrides, setSavingOverrides] = useState(false);
+  const savingOverridesRef = useRef(false);
+  const draft: AppSettings | null = settings ? { ...settings, ...overrideDraft } : null;
   const [pendingStorage, setPendingStorage] = useState<StorageLocation | null>(null);
   const [errorMessage, setErrorMessage] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
-
-  useEffect(() => {
-    if (settings !== undefined) {
-      setDraft(settings);
-    }
-  }, [settings]);
 
   if (settingsLoading || draft === null) {
     return (
@@ -76,7 +73,6 @@ export function SettingsView() {
     clearMessages();
     try {
       await syncMethodMutation.mutateAsync(value);
-      setDraft({ ...draft, syncMethod: value });
       setSuccessMessage('同步方式已保存。');
     } catch (error) {
       const userError = toUserError(error);
@@ -105,7 +101,6 @@ export function SettingsView() {
       } else {
         setSuccessMessage(`迁移完成 ${totalMigrated} 项。`);
       }
-      setDraft({ ...draft, storageLocation: value });
     } catch (error) {
       const userError = toUserError(error);
       setErrorMessage([userError.message, userError.suggestion].filter(Boolean).join('\n'));
@@ -113,25 +108,36 @@ export function SettingsView() {
   };
 
   const handleOverrideChange = (key: OverrideKey, value: string) => {
-    setDraft({ ...draft, [key]: value || undefined });
+    setOverrideDraft((current) => ({ ...current, [key]: value }));
   };
 
   // 覆盖路径变更需要搬迁受管投影：逐个 Agent 调用专用命令
   // （set_settings_command 会在后端拒绝 storageLocation/覆盖字段的变更）。
   const handleSaveOverrides = async () => {
+    if (savingOverridesRef.current) return;
+    savingOverridesRef.current = true;
+    setSavingOverrides(true);
     clearMessages();
     try {
       for (const { key, app } of AGENT_FIELDS) {
         const previous = settings?.[key] ?? null;
-        const next = draft[key] ?? null;
+        const next = draft[key] || null;
         if (previous !== next) {
           await overrideMutation.mutateAsync({ app, dir: next });
         }
       }
+      setOverrideDraft((current) =>
+        Object.fromEntries(
+          Object.entries(current).filter(([key, value]) => value !== draft[key as OverrideKey]),
+        ),
+      );
       setSuccessMessage('Agent 覆盖路径已保存。');
     } catch (error) {
       const userError = toUserError(error);
       setErrorMessage([userError.message, userError.suggestion].filter(Boolean).join('\n'));
+    } finally {
+      savingOverridesRef.current = false;
+      setSavingOverrides(false);
     }
   };
 
@@ -139,9 +145,9 @@ export function SettingsView() {
     <div className="settings-view">
       <header className="settings-page-header">
         <div>
-          <p>工作台设置</p>
+          <p>SETTINGS</p>
           <h2>设置</h2>
-          <span>管理投影方式、单一事实源和 Agent 配置目录。</span>
+          <span>同步策略、数据目录与 Agent 覆盖路径</span>
         </div>
       </header>
 
@@ -163,7 +169,7 @@ export function SettingsView() {
           </span>
           <div>
             <h3 id="sync-method-heading">同步方式</h3>
-            <p>决定 Skill 与 Subagent 投影到各 Agent 目录时使用符号链接还是实体复制。</p>
+            <p>选择后立即保存，并用于后续配置同步。</p>
           </div>
         </header>
         <div className="settings-options" role="group" aria-label="同步方式">
@@ -202,14 +208,14 @@ export function SettingsView() {
             <HardDrive size={18} strokeWidth={1.8} />
           </span>
           <div>
-            <h3 id="storage-heading">SSOT 存储位置</h3>
-            <p>切换 Skill 单一事实源（SSOT）的根目录。切换将触发迁移。</p>
+            <h3 id="storage-heading">配置数据目录</h3>
+            <p>Hub 与统一目录代表不同的数据归属，迁移会移动现有配置。</p>
           </div>
         </header>
         <div
           className="settings-options settings-storage-options"
           role="group"
-          aria-label="SSOT 存储位置"
+          aria-label="配置数据目录"
         >
           {STORAGE_OPTIONS.map(({ value, label, description }) => {
             const selected = draft.storageLocation === value;
@@ -285,9 +291,9 @@ export function SettingsView() {
             type="button"
             className="primary"
             onClick={handleSaveOverrides}
-            disabled={syncMethodMutation.isPending || overrideMutation.isPending}
+            disabled={syncMethodMutation.isPending || savingOverrides}
           >
-            {overrideMutation.isPending ? (
+            {savingOverrides ? (
               <Loader2 size={15} className="spin" aria-hidden="true" />
             ) : (
               <Save size={15} aria-hidden="true" />

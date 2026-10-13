@@ -5,11 +5,16 @@ use std::sync::Arc;
 
 use crate::error::{format_skill_error, is_structured_error_payload, AppError};
 use crate::services::project::{ConfigContext, ScopeTarget};
+use crate::services::skill::{skill_state_read_guard, skill_state_write_guard, SkillImportPreview};
 use crate::services::skill::{
-    AgentType, DiscoverableSkill, ImportSkillSelection, InstalledSkill, SkillBackupEntry,
-    SkillRepo, SkillService, SkillUninstallResult, SkillUpdateInfo, UnmanagedSkill,
+    DiscoverableSkill, ImportSkillSelection, InstalledSkill, SkillBackupEntry, SkillRepo,
+    SkillService, SkillUninstallResult, SkillUpdateInfo, UnmanagedSkill,
+};
+use crate::services::skill_placement::{
+    self as placement, SkillLocation, SkillPlacement, SkillPlacementTarget,
 };
 use crate::AppState;
+use serde::Serialize;
 
 fn map_err(err: AppError) -> String {
     if let AppError::Message(payload) = &err {
@@ -18,18 +23,11 @@ fn map_err(err: AppError) -> String {
         }
     }
 
+    if let AppError::Conflict(message) = &err {
+        return format_skill_error("SKILL_PLACEMENT_CONFLICT", &[("message", message)], None);
+    }
     log::warn!("Skill 命令未映射错误: {err:#}");
     format_skill_error("SKILL_INTERNAL", &[], Some("checkLogs"))
-}
-
-fn parse_app_type(app: &str) -> Result<AgentType, String> {
-    AgentType::from_str(app).map_err(|e| {
-        format_skill_error(
-            "INVALID_APP_TYPE",
-            &[("app", app), ("message", &e.to_string())],
-            Some("checkAppType"),
-        )
-    })
 }
 
 #[tauri::command]
@@ -58,15 +56,13 @@ pub async fn discover_available_skills(
 pub async fn install_skill(
     skill: DiscoverableSkill,
     target: ScopeTarget,
-    initial_app: String,
+    initial_location: SkillLocation,
     service: tauri::State<'_, SkillServiceState>,
     app_state: tauri::State<'_, AppState>,
 ) -> Result<InstalledSkill, String> {
-    let app_type = parse_app_type(&initial_app)?;
-
     service
         .0
-        .install_for_target(&app_state.db, &target, &skill, &app_type)
+        .install_for_target(&app_state.db, &target, &skill, &initial_location)
         .await
         .map_err(map_err)
 }
@@ -80,17 +76,73 @@ pub fn uninstall_skill(
     SkillService::uninstall_for_target(&app_state.db, &target, &id).map_err(map_err)
 }
 
-#[tauri::command]
-pub fn toggle_skill_app(
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillPlacementAsset {
     id: String,
     target: ScopeTarget,
-    app: String,
-    enabled: bool,
+    placements: Vec<SkillPlacement>,
+}
+
+#[tauri::command]
+pub fn get_skill_placement_targets(
+    target: ScopeTarget,
+    app_state: tauri::State<'_, AppState>,
+) -> Result<Vec<SkillPlacementTarget>, String> {
+    let _guard = skill_state_read_guard();
+    placement::targets(&app_state.db, &target).map_err(map_err)
+}
+
+#[tauri::command]
+pub fn get_skill_placements(
+    context: ConfigContext,
+    app_state: tauri::State<'_, AppState>,
+) -> Result<Vec<SkillPlacementAsset>, String> {
+    let _guard = skill_state_read_guard();
+    SkillService::get_installed_for_context(&app_state.db, &context)
+        .map_err(map_err)?
+        .into_iter()
+        .map(|skill| {
+            let placements = placement::placements(&app_state.db, &skill).map_err(map_err)?;
+            Ok(SkillPlacementAsset {
+                id: skill.id,
+                target: skill.target,
+                placements,
+            })
+        })
+        .collect()
+}
+
+#[tauri::command]
+pub fn set_skill_placement(
+    id: String,
+    target: ScopeTarget,
+    location: SkillLocation,
+    placed: bool,
+    expected_revision: String,
     app_state: tauri::State<'_, AppState>,
 ) -> Result<(), String> {
-    let app_type = parse_app_type(&app)?;
-    SkillService::toggle_app_for_target(&app_state.db, &target, &id, &app_type, enabled)
-        .map_err(map_err)
+    let _guard = skill_state_write_guard();
+    let skill = app_state
+        .db
+        .get_installed_skill_for_target(&id, &target)
+        .map_err(map_err)?
+        .ok_or_else(|| format_skill_error("SKILL_NOT_FOUND", &[], None))?;
+    let states = placement::placements(&app_state.db, &skill).map_err(map_err)?;
+    let state = states
+        .iter()
+        .find(|p| p.target.aliases.contains(&location))
+        .ok_or_else(|| format_skill_error("SKILL_LOCATION_INVALID", &[], None))?;
+    if state.revision != expected_revision {
+        return Err(format_skill_error("SKILL_EXTERNAL_MODIFICATION", &[], None));
+    }
+    if placed {
+        placement::sync(&app_state.db, &skill, location)
+    } else {
+        placement::withdraw(&app_state.db, &skill, location)
+    }
+    .map(|_| ())
+    .map_err(map_err)
 }
 
 #[tauri::command]
@@ -155,25 +207,40 @@ pub fn scan_unmanaged_skills(
 }
 
 #[tauri::command]
-pub fn import_skills_from_apps(
+pub fn preview_skill_import(
     selections: Vec<ImportSkillSelection>,
     target: ScopeTarget,
     app_state: tauri::State<'_, AppState>,
+) -> Result<SkillImportPreview, String> {
+    SkillService::preview_import_for_target(&app_state.db, &target, &selections).map_err(map_err)
+}
+
+#[tauri::command]
+pub fn import_skills_from_apps(
+    selections: Vec<ImportSkillSelection>,
+    target: ScopeTarget,
+    expected_revision: String,
+    app_state: tauri::State<'_, AppState>,
 ) -> Result<Vec<InstalledSkill>, String> {
-    SkillService::import_from_apps_for_target(&app_state.db, &target, selections).map_err(map_err)
+    SkillService::import_from_apps_for_target(
+        &app_state.db,
+        &target,
+        selections,
+        &expected_revision,
+    )
+    .map_err(map_err)
 }
 
 #[tauri::command]
 pub fn install_skills_from_zip(
     file_path: String,
-    initial_app: String,
+    initial_location: SkillLocation,
     target: ScopeTarget,
     app_state: tauri::State<'_, AppState>,
 ) -> Result<Vec<InstalledSkill>, String> {
-    let app_type = parse_app_type(&initial_app)?;
     let path = Path::new(&file_path);
 
-    SkillService::install_from_zip_for_target(&app_state.db, &target, path, &app_type)
+    SkillService::install_from_zip_for_target(&app_state.db, &target, path, &initial_location)
         .map_err(map_err)
 }
 

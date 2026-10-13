@@ -14,9 +14,13 @@ describe('共享品牌入口视觉回归', () => {
       await $('[data-workbench-rail="asset-type"]').waitForDisplayed();
       await $("//*[@data-workbench-rail='asset-type']//button[normalize-space()='Skills']").click();
       await $("//nav[@aria-label='配置上下文']//button[normalize-space()='全局配置']").click();
-      await $('.skill-count-bar').waitForDisplayed();
+      await $('.skill-placement-controls.is-inline').waitForDisplayed();
       const marks = await browser.execute(() =>
-        [...document.querySelectorAll<HTMLImageElement>('.skill-count-bar img')].map((image) => {
+        [
+          ...document
+            .querySelector('.skill-placement-controls.is-inline')!
+            .querySelectorAll<HTMLImageElement>('img'),
+        ].map((image) => {
           const rect = image.getBoundingClientRect();
           const parent = image.parentElement!.getBoundingClientRect();
           return {
@@ -27,8 +31,8 @@ describe('共享品牌入口视觉回归', () => {
       );
       expect(marks.length).toBe(4);
       expect(marks.every((mark) => mark.ready && mark.centered)).toBe(true);
-      await mkdir('output/playwright', { recursive: true });
-      await browser.saveScreenshot(`output/playwright/brands-skills-${width}.png`);
+      await mkdir('/tmp/acm-polished-evidence', { recursive: true });
+      await browser.saveScreenshot(`/tmp/acm-polished-evidence/brands-skills-${width}.png`);
 
       // Reload to exercise the narrow single-surface navigation from its first step.
       await browser.url('/tests/l2/workbench.html?fixture=visual');
@@ -42,10 +46,13 @@ describe('共享品牌入口视觉回归', () => {
       await $('[data-instruction-kind="agents"]').waitForDisplayed();
       await $('[data-instruction-kind="agents"]').click();
       await $('#instruction-document-content').waitForDisplayed();
-      expect(await $('.instructions-panel [data-agent-brand="codex"] img').isDisplayed()).toBe(
-        true,
+      expect(await $('.instruction-document-paths').getText()).toContain(
+        '/isolated/.codex/AGENTS.md',
       );
-      await browser.saveScreenshot(`output/playwright/brands-instructions-${width}.png`);
+      expect(await $('.instruction-document-paths').getText()).toContain(
+        '/isolated/.config/opencode/AGENTS.md',
+      );
+      await browser.saveScreenshot(`/tmp/acm-polished-evidence/brands-instructions-${width}.png`);
 
       await browser.url('/tests/l2/workbench.html?fixture=visual');
       await $(
@@ -58,7 +65,7 @@ describe('共享品牌入口视觉回归', () => {
       expect(await browser.execute(() => document.documentElement.scrollWidth > innerWidth)).toBe(
         false,
       );
-      await browser.saveScreenshot(`output/playwright/project-picker-${width}.png`);
+      await browser.saveScreenshot(`/tmp/acm-polished-evidence/project-picker-${width}.png`);
     });
   }
 });

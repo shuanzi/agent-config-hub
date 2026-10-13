@@ -1,10 +1,10 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import * as skillsApi from '../lib/api/skills';
 import type {
-  AgentType,
   ConfigContext,
   DiscoverableSkill,
   ScopeTarget,
+  SkillLocation,
   SkillRepo,
   SkillUpdateInfo,
 } from '../types';
@@ -16,6 +16,9 @@ const keys = {
   backups: (target: ScopeTarget | null) => ['skills', 'backups', target] as const,
   unmanaged: (target: ScopeTarget | null) => ['skills', 'unmanaged', target] as const,
   updates: (target: ScopeTarget | null) => ['skills', 'updates', target] as const,
+  placementTargets: (target: ScopeTarget | null) =>
+    ['skills', 'placement-targets', target] as const,
+  placements: (context: ConfigContext) => ['skills', 'placements', context] as const,
 };
 
 function invalidateSkillQueries(queryClient: ReturnType<typeof useQueryClient>) {
@@ -27,6 +30,26 @@ export function useInstalledSkills(context: ConfigContext = { kind: 'global' }) 
     queryKey: keys.installed(context),
     queryFn: () => skillsApi.getInstalledSkills(context),
     staleTime: Infinity,
+    placeholderData: keepPreviousData,
+  });
+}
+
+export function useSkillPlacementTargets(target: ScopeTarget | null) {
+  return useQuery({
+    queryKey: keys.placementTargets(target),
+    queryFn: () =>
+      target === null ? Promise.resolve([]) : skillsApi.getSkillPlacementTargets(target),
+    enabled: target !== null,
+    staleTime: 30 * 1000,
+    placeholderData: keepPreviousData,
+  });
+}
+
+export function useSkillPlacements(context: ConfigContext = { kind: 'global' }) {
+  return useQuery({
+    queryKey: keys.placements(context),
+    queryFn: () => skillsApi.getSkillPlacements(context),
+    staleTime: 30 * 1000,
     placeholderData: keepPreviousData,
   });
 }
@@ -85,12 +108,12 @@ export function useInstallSkill() {
     mutationFn: ({
       skill,
       target,
-      initialApp,
+      initialLocation,
     }: {
       skill: DiscoverableSkill;
       target: ScopeTarget;
-      initialApp: AgentType;
-    }) => skillsApi.installSkill(skill, target, initialApp),
+      initialLocation: SkillLocation;
+    }) => skillsApi.installSkill(skill, target, initialLocation),
     onSettled: () => invalidateSkillQueries(queryClient),
   });
 }
@@ -104,20 +127,22 @@ export function useUninstallSkill() {
   });
 }
 
-export function useToggleSkillApp() {
+export function useSetSkillPlacement() {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: ({
       id,
       target,
-      app,
-      enabled,
+      location,
+      placed,
+      expectedRevision,
     }: {
       id: string;
       target: ScopeTarget;
-      app: AgentType;
-      enabled: boolean;
-    }) => skillsApi.toggleSkillApp(id, target, app, enabled),
+      location: SkillLocation;
+      placed: boolean;
+      expectedRevision: string;
+    }) => skillsApi.setSkillPlacement(id, target, location, placed, expectedRevision),
     onSettled: () => invalidateSkillQueries(queryClient),
   });
 }
@@ -141,13 +166,13 @@ export function useInstallSkillsFromZip() {
   return useMutation({
     mutationFn: ({
       filePath,
-      initialApp,
+      initialLocation,
       target,
     }: {
       filePath: string;
-      initialApp: AgentType;
+      initialLocation: SkillLocation;
       target: ScopeTarget;
-    }) => skillsApi.installSkillsFromZip(filePath, initialApp, target),
+    }) => skillsApi.installSkillsFromZip(filePath, initialLocation, target),
     onSettled: () => invalidateSkillQueries(queryClient),
   });
 }
@@ -158,11 +183,25 @@ export function useImportSkillsFromApps() {
     mutationFn: ({
       selections,
       target,
+      expectedRevision,
     }: {
       selections: Parameters<typeof skillsApi.importSkillsFromApps>[0];
       target: ScopeTarget;
-    }) => skillsApi.importSkillsFromApps(selections, target),
+      expectedRevision: string;
+    }) => skillsApi.importSkillsFromApps(selections, target, expectedRevision),
     onSettled: () => invalidateSkillQueries(queryClient),
+  });
+}
+
+export function usePreviewSkillImport() {
+  return useMutation({
+    mutationFn: ({
+      selections,
+      target,
+    }: {
+      selections: Parameters<typeof skillsApi.previewSkillImport>[0];
+      target: ScopeTarget;
+    }) => skillsApi.previewSkillImport(selections, target),
   });
 }
 

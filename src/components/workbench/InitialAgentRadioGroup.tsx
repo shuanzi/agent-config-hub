@@ -8,6 +8,8 @@ interface InitialAgentRadioGroupProps {
   disabled?: boolean;
   disabledApps?: readonly AgentType[];
   description?: string;
+  legend?: string;
+  optionHints?: Partial<Record<AgentType, string>>;
 }
 
 export function InitialAgentRadioGroup({
@@ -17,10 +19,12 @@ export function InitialAgentRadioGroup({
   disabled = false,
   disabledApps = [],
   description,
+  legend = '初始 Agent',
+  optionHints,
 }: InitialAgentRadioGroupProps) {
   return (
     <fieldset className="initial-agent-radio-group">
-      <legend>初始 Agent</legend>
+      <legend>{legend}</legend>
       <div className="initial-agent-radio-options">
         {WORKBENCH_AGENTS.map((app) => {
           const unsupported = disabledApps.includes(app);
@@ -41,7 +45,10 @@ export function InitialAgentRadioGroup({
                 }
               />
               <AgentBrandMark app={app} size={16} />
-              <span>{agentLabels[app]}</span>
+              <span>
+                {agentLabels[app]}
+                {optionHints?.[app] && <small>{optionHints[app]}</small>}
+              </span>
             </label>
           );
         })}

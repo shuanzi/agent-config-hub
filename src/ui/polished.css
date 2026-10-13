@@ -1,0 +1,1541 @@
+/* Implementation of docs/design/agent-config-manager-ui/polished; shared visual tokens
+   live in workbench.css. No fixture-only styling: native and browser use this file. */
+body {
+  font-size: 14px;
+  line-height: 1.45;
+}
+.app-header {
+  padding: 0 24px;
+  border-bottom: 1px solid var(--wb-line);
+}
+.app-header-brand {
+  align-items: center;
+  gap: 16px;
+}
+.app-brand-icon {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  color: white;
+  background: var(--wb-blue);
+}
+.app-title {
+  font-weight: 650;
+}
+.app-header-page-title {
+  padding-left: 16px;
+  border-left: 1px solid var(--wb-line);
+  font-size: 14px;
+}
+.workbench-layout {
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+.asset-type-rail {
+  padding: 16px 12px 12px;
+}
+.asset-type-rail-footer {
+  border: 0;
+  padding: 0;
+}
+.rail-button {
+  min-height: 40px;
+  font-size: 14px;
+  gap: 12px;
+}
+.rail-button.is-selected {
+  box-shadow: none;
+  font-weight: 600;
+}
+.rail-button.is-selected::before {
+  display: none;
+}
+.config-context-rail {
+  padding: 20px 16px;
+}
+.config-context-header {
+  margin: 0 0 12px;
+}
+.config-context-heading {
+  color: var(--wb-ink);
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 20px;
+  letter-spacing: 0;
+}
+.config-project-heading {
+  margin: 14px 0 8px;
+  font-family: inherit;
+  letter-spacing: 0;
+  font-weight: 500;
+}
+.config-context-option {
+  min-height: 40px;
+  font-size: 14px;
+}
+.config-context-option:not(:has(.config-project-name)) {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.config-project-row {
+  position: relative;
+}
+.config-project-row .config-context-option {
+  padding: 8px 10px;
+}
+.config-project-path {
+  margin-top: 4px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  font-size: 12px;
+  line-height: 18px;
+}
+.config-project-actions {
+  position: absolute;
+  right: 0;
+  top: 6px;
+  opacity: 0;
+  background: var(--wb-panel-muted);
+}
+.config-project-row:hover .config-project-actions,
+.config-project-row:focus-within .config-project-actions {
+  opacity: 1;
+}
+.app-main-surface {
+  background: var(--wb-bg);
+}
+.sub-tabs {
+  margin: 18px 24px 0;
+  padding: 0;
+  min-height: 40px;
+  gap: 8px;
+  background: transparent;
+}
+.sub-tab {
+  min-height: 36px;
+  min-width: 88px;
+  font-size: 14px;
+  border: 0;
+  font-weight: 600;
+}
+.sub-tab.active {
+  border: 0;
+}
+.skills-view-content,
+.subagents-view-content {
+  padding: 12px 24px 24px;
+}
+.skill-panel {
+  gap: 12px;
+}
+.skill-panel-heading > div {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+}
+.skill-panel-heading h2,
+.settings-page-header h2,
+.polished-page-heading h2 {
+  font-size: 22px;
+  line-height: 30px;
+  font-weight: 650;
+  letter-spacing: 0;
+}
+.skill-panel-heading p {
+  margin: 0;
+  font-size: 12px;
+}
+.skill-installed-toolbar {
+  display: grid;
+  gap: 8px;
+}
+.skill-toolbar-top,
+.skill-toolbar-bottom,
+.skill-desktop-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.skill-toolbar-top .skill-search-field {
+  max-width: none;
+}
+.skill-search-field input {
+  height: 36px;
+  font-size: 14px;
+}
+.skill-target-field {
+  font-size: 12px;
+}
+.skill-target-field select {
+  min-width: 0;
+  max-width: 240px;
+  height: 36px;
+  padding: 0 10px;
+  border: 1px solid var(--wb-line-strong);
+  border-radius: 6px;
+  background: var(--wb-panel);
+  color: var(--wb-ink);
+  font-size: 14px;
+}
+.skill-target-hint {
+  font-size: 12px;
+  color: var(--wb-muted);
+}
+.skill-mobile-actions {
+  display: none;
+}
+.skill-button,
+.subagent-button {
+  min-height: 36px;
+  font-size: 14px;
+  padding-inline: 12px;
+}
+.skill-scope-groups {
+  gap: 0;
+  border: 1px solid var(--wb-line);
+  border-radius: 9px;
+  overflow: clip;
+  background: white;
+}
+.skill-list {
+  border: 0;
+  border-radius: 0;
+}
+.skill-table th {
+  padding: 6px 12px;
+  font-size: 12px;
+  line-height: 18px;
+  font-weight: 400;
+  border: 0;
+}
+.skill-table th:nth-child(1) {
+  width: 29%;
+}
+.skill-table th:nth-child(2) {
+  width: 21%;
+}
+.skill-table th:nth-child(3) {
+  width: 15%;
+}
+.skill-table th:nth-child(4) {
+  width: 200px;
+}
+.skill-table th:nth-child(5) {
+  width: 110px;
+}
+.skill-table .skill-group-row th {
+  width: auto;
+  font-weight: 500;
+}
+.skill-table .skill-row {
+  height: 64px;
+}
+.skill-table .skill-row > td {
+  padding: 8px 12px;
+}
+.skill-table .skill-row-actions {
+  padding: 8px 10px 8px 0;
+  overflow: visible;
+}
+.skill-row-title {
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 20px;
+}
+.skill-row-description {
+  line-height: 18px;
+}
+.skill-row-description.is-warning {
+  color: var(--wb-amber);
+}
+.skill-row-source > span:first-child {
+  font-family: inherit;
+  font-size: 12px;
+}
+.skill-row-source > span:nth-child(2) {
+  margin-top: 3px;
+}
+.skill-table .skill-row-target {
+  font-size: 12px;
+  white-space: normal;
+}
+.skill-row-target > span {
+  display: block;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.skill-target-origin {
+  margin-top: 3px;
+  color: var(--wb-muted);
+}
+.skill-row-detail {
+  min-height: 32px;
+  margin-right: 8px;
+  padding: 0 12px;
+  font-size: 13px;
+}
+.skill-row-detail svg,
+.skill-table .skill-mobile-target {
+  display: none;
+}
+.skill-row-more {
+  border: 0;
+  background: transparent;
+  color: var(--wb-muted);
+  min-width: 24px;
+  width: 24px;
+}
+.skill-placement-controls.is-inline {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 6px;
+  align-items: center;
+}
+.tooltip-trigger {
+  display: inline-flex;
+  min-width: 0;
+}
+.skill-placement-icon {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid var(--wb-line);
+  border-radius: 7px;
+  background: var(--wb-panel);
+  color: var(--wb-muted);
+  cursor: pointer;
+}
+.skill-placement-icon .agent-brand-mark img {
+  opacity: 0.65;
+  filter: grayscale(1);
+}
+.skill-placement-icon.is-placed {
+  background: var(--wb-blue-soft);
+  border-color: #dbeafe;
+}
+.skill-placement-icon.is-placed .agent-brand-mark img {
+  opacity: 1;
+  filter: none;
+}
+.skill-placement-icon.is-unmanaged {
+  background: #fffbeb;
+  border-color: #fcd34d;
+}
+.skill-placement-icon.is-conflict {
+  background: #fef2f2;
+  border-color: #fecaca;
+}
+.skill-placement-icon[aria-disabled='true'] {
+  cursor: not-allowed;
+}
+.skill-placement-indicator {
+  position: absolute;
+  bottom: -1px;
+  right: -1px;
+  display: grid;
+  place-items: center;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 1px solid var(--wb-line-strong);
+  background: white;
+  color: var(--wb-line-strong);
+}
+.is-placed .skill-placement-indicator {
+  color: white;
+  background: var(--wb-blue);
+  border-color: white;
+}
+.is-unmanaged .skill-placement-indicator {
+  color: white;
+  background: #d97706;
+  border-color: white;
+}
+.is-conflict .skill-placement-indicator {
+  color: white;
+  background: #dc2626;
+  border-color: white;
+}
+.workbench-tooltip {
+  position: fixed;
+  z-index: 200;
+  width: max-content;
+  max-width: min(300px, calc(100vw - 16px));
+  padding: 10px 12px;
+  background: var(--wb-ink);
+  color: white;
+  border-radius: 8px;
+  font-size: 12px;
+  line-height: 18px;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+  pointer-events: none;
+  box-shadow: 0 4px 16px #17203322;
+}
+.skill-action-menu {
+  display: grid;
+  gap: 12px;
+}
+.skill-action-menu > button {
+  justify-content: flex-start;
+}
+.has-detail > .skill-panel-heading,
+.has-detail > .skill-installed-toolbar,
+.has-detail > .skill-placement-note {
+  display: none;
+}
+.skill-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  border: 0;
+  background: transparent;
+}
+.skill-detail-header {
+  grid-template-columns: 1fr auto;
+  padding: 0;
+  gap: 16px;
+  border: 0;
+}
+.skill-back-button {
+  justify-self: start;
+  min-height: 36px;
+  padding: 0 12px;
+  border: 1px solid var(--wb-line-strong);
+  background: white;
+  color: var(--wb-ink);
+}
+.skill-detail-heading {
+  grid-row: 2;
+  grid-column: 1 / -1;
+}
+.skill-detail-heading h2 {
+  font-size: 24px;
+  line-height: 32px;
+}
+.skill-detail-actions {
+  grid-row: 1;
+  grid-column: 2;
+}
+.skill-detail-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  padding: 16px;
+  gap: 16px;
+  border: 1px solid var(--wb-line);
+  border-radius: 10px;
+  background: white;
+}
+.skill-detail-grid > div {
+  padding: 0;
+  border: 0 !important;
+}
+.skill-detail-grid dt {
+  font-size: 12px;
+  font-weight: 400;
+}
+.skill-detail-grid dd {
+  font-size: 14px;
+}
+.skill-detail-section {
+  padding: 16px;
+  border: 1px solid var(--wb-line);
+  border-radius: 10px;
+  background: white;
+}
+.skill-detail-section h3 {
+  font-size: 18px;
+}
+.skill-detail-metadata {
+  order: 5;
+  font-size: 12px;
+  color: var(--wb-muted);
+}
+.skill-detail-metadata summary {
+  cursor: pointer;
+  padding: 4px 0;
+}
+.skill-placement-row {
+  min-height: 58px;
+  border: 0;
+  border-bottom: 1px solid var(--wb-line);
+  border-radius: 0;
+  padding: 8px 0;
+  background: white;
+}
+.skill-placement-controls:not(.is-inline) {
+  gap: 0;
+}
+.skill-placement-name {
+  font-size: 14px;
+  font-weight: 500;
+  gap: 8px;
+}
+.skill-placement-identity code {
+  font-family: inherit;
+  font-size: 12px;
+}
+.skill-placement-state {
+  font-size: 12px;
+}
+.skill-placement-switch {
+  width: 32px;
+  height: 20px;
+}
+.skill-placement-switch > span::after {
+  width: 14px;
+  height: 14px;
+}
+.skill-placement-switch input:checked + span::after {
+  transform: translateX(12px);
+}
+.skill-location-options > label {
+  padding: 8px 12px;
+}
+.skill-location-options .skill-placement-identity {
+  gap: 2px;
+}
+.skill-location-options legend {
+  font-size: 14px;
+}
+.focused-dialog {
+  width: min(620px, 100%);
+  border-radius: 12px;
+  max-height: calc(100dvh - 48px);
+}
+.focused-dialog-header,
+.focused-dialog-footer {
+  padding: 18px 24px;
+}
+.focused-dialog-header h2 {
+  font-size: 20px;
+}
+.focused-dialog-body {
+  padding: 24px;
+}
+.skill-toolbar,
+.subagent-toolbar {
+  background: transparent;
+  padding: 0;
+  border: 0;
+  flex-wrap: wrap;
+}
+.polished-page-heading {
+  margin: 0;
+  flex: 0 0 auto;
+}
+.polished-page-heading h2 {
+  margin: 0 0 4px;
+}
+.polished-page-heading p {
+  margin: 0;
+  color: var(--wb-muted);
+  font-size: 12px;
+}
+/* Documents keep one logical AGENTS.md per target. */
+.instructions-panel {
+  padding: 24px;
+  gap: 16px;
+  background: var(--wb-bg);
+}
+.instructions-body {
+  grid-template-columns: 205px minmax(0, 1fr);
+  gap: 16px;
+}
+.instructions-list-pane {
+  border: 0;
+  background: transparent;
+}
+.instructions-list-header {
+  padding: 0 0 10px;
+  border: 0;
+}
+.instructions-list-header .instructions-list-eyebrow {
+  display: none;
+}
+.instructions-list-header h2 {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--wb-muted);
+}
+.instructions-list-header > div > p:last-child {
+  display: none;
+}
+.instructions-document-groups {
+  padding: 0;
+  gap: 12px;
+}
+.instructions-document-group > header {
+  display: none;
+}
+.instruction-row {
+  min-height: 98px;
+  padding: 12px;
+  border: 1px solid var(--wb-line);
+  border-radius: 10px;
+  background: white;
+  gap: 8px;
+}
+.instruction-row.is-selected {
+  border-color: var(--wb-blue);
+  box-shadow: 0 0 0 0.5px var(--wb-blue);
+}
+.instruction-row-target {
+  color: var(--wb-ink);
+  font-weight: 600;
+  font-size: 14px;
+}
+.instruction-row .asset-name {
+  font-size: 14px;
+}
+.instruction-row-summary {
+  white-space: normal;
+  font-size: 12px;
+}
+.instructions-detail-pane {
+  padding: 16px;
+  border: 1px solid var(--wb-line);
+  border-radius: 10px;
+}
+.instructions-detail-header h2 {
+  font-size: 24px;
+  font-weight: 650;
+}
+.instruction-document-paths {
+  padding: 12px;
+  background: white;
+}
+.instruction-document-paths code {
+  font-family: inherit;
+}
+.instructions-editor-surface {
+  background: white;
+  grid-template-rows: auto minmax(220px, 1fr) auto;
+  border-color: var(--wb-line);
+}
+.instructions-editor-surface > header {
+  border: 0;
+  padding: 12px;
+}
+.instructions-editor-surface > header h3 {
+  font-size: 12px;
+  color: var(--wb-muted);
+}
+.instructions-editor-surface textarea {
+  min-height: 220px;
+  background: white;
+  font-size: 14px;
+  line-height: 1.8;
+}
+.instruction-document-actions {
+  border: 0;
+}
+.instruction-document-actions button {
+  font-size: 14px;
+  min-height: 36px;
+}
+/* Native definitions use the existing master/detail behavior and source editor. */
+.native-panel {
+  gap: 12px;
+}
+.native-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.native-summary .native-actions {
+  flex: none;
+}
+.native-panel > .subagent-summary-row {
+  display: none;
+}
+.native-master-detail {
+  grid-template-columns: 220px minmax(0, 1fr);
+  gap: 16px;
+  border: 0;
+  overflow: visible;
+  min-height: 0;
+  height: auto;
+  max-height: none;
+}
+.native-list {
+  border: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.native-list .subagent-search-field {
+  width: 100%;
+  flex: none;
+  max-width: none;
+}
+.native-row {
+  padding: 12px;
+  gap: 10px;
+  border: 1px solid var(--wb-line);
+  border-radius: 10px;
+}
+.native-row.is-selected {
+  border-color: var(--wb-blue);
+  box-shadow: 0 0 0 0.5px var(--wb-blue);
+}
+.native-row-title strong {
+  font-weight: 600;
+}
+.native-state {
+  color: var(--wb-muted);
+}
+.native-detail {
+  padding: 16px;
+  background: white;
+  border: 1px solid var(--wb-line);
+  border-radius: 10px;
+  gap: 12px;
+}
+.native-detail-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.native-detail-title .agent-brand-mark {
+  width: 28px;
+  height: 28px;
+}
+.native-editor textarea {
+  min-height: 190px;
+  font-size: 13px;
+}
+/* Settings keep three independent write paths. */
+.settings-view {
+  padding: 24px;
+  grid-template-columns: minmax(300px, 0.8fr) minmax(0, 1.2fr);
+  grid-template-rows: auto auto 1fr;
+  gap: 16px;
+  background: var(--wb-bg);
+}
+.settings-page-header,
+.settings-view > .settings-error,
+.settings-view > .settings-success {
+  grid-column: 1/-1;
+}
+.settings-page-header p {
+  font-size: 12px;
+  margin-bottom: 6px;
+}
+.settings-page-header h2 {
+  margin-bottom: 6px;
+}
+.settings-section {
+  padding: 20px;
+  border-color: var(--wb-line);
+  border-radius: 10px;
+  background: white;
+}
+.settings-section:nth-of-type(1) {
+  grid-column: 1;
+}
+.settings-section:nth-of-type(2) {
+  grid-column: 1;
+}
+.settings-section:nth-of-type(3) {
+  grid-column: 2;
+  grid-row: 2 / span 2;
+}
+.settings-section-icon {
+  display: none;
+}
+.settings-section h3 {
+  font-size: 18px;
+  font-weight: 600;
+  margin: 0 0 12px;
+}
+.settings-options {
+  background: var(--wb-panel-muted);
+  border-radius: 8px;
+  padding: 4px;
+  gap: 4px;
+}
+.settings-option {
+  justify-content: center;
+  align-items: center;
+  min-height: 36px;
+  padding: 6px;
+  border-color: transparent;
+  background: transparent;
+}
+.settings-option strong {
+  font-size: 14px;
+}
+.settings-option:not(.settings-storage-options .settings-option) small,
+.settings-option > svg {
+  display: none;
+}
+.settings-option.active {
+  background: white;
+  border-color: var(--wb-line);
+}
+.settings-hint {
+  padding: 12px;
+  color: var(--wb-blue);
+  border-radius: 8px;
+  background: var(--wb-blue-soft);
+}
+.settings-storage-options {
+  background: transparent;
+  grid-template-columns: 1fr;
+  padding: 0;
+  gap: 12px;
+}
+.settings-storage-options .settings-option {
+  justify-content: flex-start;
+  min-height: 68px;
+  padding: 12px;
+  background: var(--wb-panel-muted);
+  border-color: var(--wb-line);
+}
+.settings-storage-options .settings-option.active {
+  background: var(--wb-blue-soft);
+  border-color: #dbeafe;
+}
+.settings-storage-options .settings-option > svg {
+  display: block;
+}
+.settings-option small {
+  font-size: 12px;
+}
+.settings-override-row {
+  grid-template-columns: minmax(120px, 0.5fr) minmax(0, 1fr);
+  padding-block: 20px;
+}
+.settings-override-row label {
+  font-size: 14px;
+}
+.settings-override-row input {
+  height: 36px;
+  font-size: 12px;
+  background: var(--wb-panel-muted);
+  border-color: var(--wb-line);
+}
+.settings-actions button {
+  min-height: 36px;
+  font-size: 14px;
+}
+@media (min-width: 1440px) {
+  .instructions-body {
+    grid-template-columns: 240px minmax(0, 1fr);
+  }
+  .native-master-detail {
+    grid-template-columns: 250px minmax(0, 1fr);
+  }
+}
+@media (max-width: 1199px) {
+  .app-header {
+    height: 58px;
+    min-height: 58px;
+    padding: 0 16px;
+  }
+  .app-header-back {
+    width: 38px;
+    height: 44px;
+    padding: 0;
+    justify-content: flex-start;
+  }
+  .app-header-back svg {
+    width: 22px;
+    height: 22px;
+  }
+  .app-header-brand {
+    gap: 10px;
+  }
+  .app-header-page-title {
+    padding: 0;
+    border: 0;
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--wb-ink);
+  }
+  .app-header:has(.app-header-back) .app-title,
+  .app-header:has(.app-header-back) .app-brand-icon {
+    display: none;
+  }
+  .app-header:not(:has(.app-header-back)) .app-header-page-title {
+    display: none;
+  }
+  .app-title {
+    max-width: none;
+    font-size: 16px;
+  }
+  .workbench-layout {
+    margin: 0;
+  }
+  .asset-type-rail {
+    padding: 16px;
+  }
+  .asset-type-rail .rail-button {
+    min-height: 52px;
+  }
+  .config-context-rail {
+    padding: 16px;
+  }
+  .config-project-actions {
+    position: static;
+    opacity: 1;
+  }
+  .sub-tabs {
+    margin: 16px 16px 0;
+    min-height: 44px;
+  }
+  .sub-tab {
+    flex: 1;
+    min-height: 44px;
+  }
+  .skills-view-content,
+  .subagents-view-content {
+    padding: 12px 16px 24px;
+  }
+  .skill-panel-heading {
+    flex-direction: row;
+  }
+  .skill-panel-heading > div {
+    width: 100%;
+    justify-content: space-between;
+  }
+  .skill-panel-heading p {
+    max-width: 48%;
+    text-align: right;
+  }
+  .skill-desktop-actions {
+    display: none;
+  }
+  .skill-toolbar-top .skill-search-field {
+    flex-basis: 100%;
+  }
+  .skill-search-field input,
+  .skill-target-field select {
+    height: 44px;
+  }
+  .skill-toolbar-bottom .skill-target-field {
+    flex: 1;
+    min-width: 0;
+  }
+  .skill-target-field select {
+    width: 100%;
+    max-width: 100%;
+  }
+  .skill-toolbar-bottom .skill-target-field > span {
+    position: absolute;
+    clip-path: inset(50%);
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+  }
+  .skill-mobile-actions {
+    display: inline-flex;
+    min-height: 44px;
+  }
+  .skill-table,
+  .skill-table tbody {
+    display: block;
+  }
+  .skill-table thead {
+    position: absolute;
+    clip-path: inset(50%);
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+  }
+  .skill-table .skill-group-row {
+    display: block;
+    background: var(--wb-panel-muted);
+  }
+  .skill-table .skill-group-row th {
+    display: block;
+    font-size: 12px;
+  }
+  .skill-table .skill-row {
+    position: relative;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 32px;
+    grid-template-rows: 28px 24px 24px 44px;
+    grid-template-areas: 'name detail' 'source source' 'description description' 'agents actions';
+    gap: 0;
+    height: 140px;
+    min-height: 140px;
+    padding: 10px 12px;
+    border: 0;
+    border-bottom: 1px solid var(--wb-line);
+    border-radius: 0;
+    overflow: visible;
+  }
+  .skill-table .skill-row > td {
+    display: block;
+    border: 0;
+    padding: 0;
+    overflow: visible;
+  }
+  .skill-table .skill-row-name {
+    grid-area: name;
+  }
+  .skill-table .skill-row-select {
+    width: 100%;
+    height: 28px;
+  }
+  .skill-row-description {
+    position: absolute;
+    top: 62px;
+    left: 12px;
+    right: 12px;
+    font-size: 12px;
+  }
+  .skill-table .skill-row-source {
+    grid-area: source;
+    font-size: 12px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .skill-row-source > span:first-child {
+    font-size: 12px;
+  }
+  .skill-table .skill-row-source > span {
+    display: inline;
+  }
+  .skill-table .skill-row-source > span:nth-child(2),
+  .skill-table .skill-row-target {
+    display: none;
+  }
+  .skill-table .skill-mobile-target {
+    display: inline;
+  }
+  .skill-table .skill-row-agent-cell {
+    grid-area: agents;
+  }
+  .skill-table .skill-row-actions {
+    grid-area: actions;
+  }
+  .skill-placement-icon {
+    width: 44px;
+    height: 44px;
+  }
+  .skill-placement-controls.is-inline {
+    gap: 6px;
+  }
+  .skill-row-detail {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    width: 40px;
+    height: 40px;
+    margin: 0;
+    border: 0;
+    background: transparent;
+    padding: 0;
+  }
+  .skill-row-detail span {
+    display: none;
+  }
+  .skill-row-detail svg {
+    display: block;
+    color: var(--wb-muted);
+  }
+  .skill-row-more {
+    width: 32px;
+    height: 44px;
+  }
+  .skill-detail-header {
+    padding: 0;
+    grid-template-columns: 1fr;
+  }
+  .skill-detail-actions {
+    grid-row: auto;
+    grid-column: 1;
+    justify-content: flex-start;
+  }
+  .skill-detail-grid {
+    grid-template-columns: 1fr;
+    padding: 14px;
+  }
+  .skill-detail-section {
+    padding: 14px;
+  }
+  .skill-placement-row {
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    min-height: 72px;
+  }
+  .skill-placement-state {
+    font-size: 11px;
+  }
+  .skill-placement-switch {
+    width: 44px;
+    height: 44px;
+    align-items: center;
+  }
+  .skill-placement-switch > span {
+    position: relative;
+    width: 32px;
+    height: 20px;
+  }
+  .focused-dialog-backdrop {
+    padding: 16px;
+  }
+  .focused-dialog {
+    max-height: calc(100dvh - 32px);
+  }
+  .focused-dialog-header,
+  .focused-dialog-footer,
+  .focused-dialog-body {
+    padding: 16px;
+  }
+  .focused-dialog-close,
+  .focused-dialog .skill-button,
+  .focused-dialog .subagent-button {
+    min-width: 44px;
+    min-height: 44px;
+  }
+  .instructions-panel {
+    padding: 16px;
+  }
+  .instructions-panel[data-instructions-surface='detail'] > .polished-page-heading {
+    display: none;
+  }
+  .instructions-detail-pane {
+    padding: 14px;
+  }
+  .instructions-list-header {
+    padding: 0 0 12px;
+  }
+  .instructions-document-editor {
+    min-height: 0;
+  }
+  .instructions-editor-surface {
+    min-height: 360px;
+  }
+  .instructions-detail-header {
+    flex-direction: row;
+  }
+  .instruction-document-actions {
+    flex-direction: row;
+    align-items: center;
+    padding-inline: 8px;
+  }
+  .instruction-document-actions button {
+    min-height: 44px;
+  }
+  .native-master-detail {
+    display: block;
+  }
+  .native-master-detail.has-selection .native-list {
+    display: none;
+  }
+  .native-master-detail:not(.has-selection) .native-detail {
+    display: none;
+  }
+  .native-detail .subagent-detail-back {
+    display: inline-flex;
+    min-height: 44px;
+  }
+  .native-summary {
+    flex-wrap: wrap;
+  }
+  .native-summary .native-actions {
+    flex-wrap: wrap;
+  }
+  .native-panel .subagent-button {
+    min-height: 44px;
+  }
+  .settings-view {
+    display: flex;
+    flex-direction: column;
+    padding: 20px 16px;
+  }
+  .settings-section {
+    padding: 16px;
+  }
+  .settings-options {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .settings-storage-options {
+    grid-template-columns: 1fr;
+  }
+  .settings-option {
+    min-height: 44px;
+  }
+  .settings-override-row {
+    grid-template-columns: 1fr;
+    gap: 10px;
+    padding-block: 14px;
+  }
+  .settings-override-row input,
+  .settings-actions button {
+    min-height: 44px;
+  }
+}
+
+@media (min-width: 1200px) {
+  .skill-table .skill-row-source > .skill-mobile-target {
+    display: none;
+  }
+}
+
+.skill-group-row h3 {
+  font: inherit;
+  margin: 0;
+}
+
+@media (max-width: 1199px) {
+  .skill-table .skill-row > .skill-row-target {
+    display: none;
+  }
+}
+
+.instructions-detail-header > div {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.instructions-detail-header h2 {
+  order: -1;
+  margin: 0;
+}
+.instructions-detail-breadcrumb {
+  font-size: 12px;
+}
+.instructions-editor-surface textarea {
+  height: 100%;
+  min-height: 0;
+}
+.instruction-row-path {
+  font-size: 12px;
+  color: var(--wb-muted);
+  overflow-wrap: anywhere;
+}
+@media (min-width: 1200px) {
+  .instructions-editor-surface {
+    grid-template-rows: auto minmax(140px, 1fr) auto;
+  }
+}
+
+@media (min-width: 1200px) {
+  .instruction-document-editor {
+    height: 100%;
+    min-height: 0;
+  }
+}
+/* Discovery keeps target selection separate from filtering and installation. */
+.skill-discovery-panel .skill-panel-heading > div {
+  display: block;
+}
+.skill-discovery-panel .skill-panel-heading h2 {
+  margin: 3px 0 8px;
+}
+.skill-discovery-panel .skill-panel-heading p:last-child,
+.native-page-heading p {
+  color: var(--text-muted);
+  font-size: 13px;
+}
+.discovery-target-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #fff;
+}
+.discovery-target-card > svg {
+  flex-shrink: 0;
+  color: #64748b;
+}
+.discovery-target-copy {
+  flex: 1;
+}
+.discovery-target-copy p {
+  margin: 5px 0 0;
+  color: #64748b;
+  font-size: 12px;
+}
+.discovery-target-card select {
+  width: 260px;
+  max-width: 100%;
+  min-height: 38px;
+}
+.skill-discovery-panel .skill-toolbar {
+  padding: 14px;
+  margin-bottom: 0;
+  background: white;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px 10px 0 0;
+}
+.skill-discovery-panel .skill-empty {
+  flex: 1;
+  min-height: 330px;
+  border: 1px solid #e2e8f0;
+  border-top: 0;
+  border-radius: 0 0 10px 10px;
+  background: white;
+  margin-top: -12px;
+}
+.skill-discovery-panel .skill-empty > svg {
+  color: #64748b;
+  margin-bottom: 10px;
+}
+.native-discovery-target .subagent-target-field {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+}
+.native-discovery-target select {
+  width: 100%;
+}
+.native-discovery-target button {
+  align-self: flex-end;
+}
+.native-discovery-filters {
+  gap: 12px;
+}
+.native-discovery-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  overflow: auto;
+}
+.native-discovery-card {
+  padding: 20px;
+  background: white;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+}
+.native-discovery-card-heading {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.native-discovery-card-heading > div {
+  flex: 1;
+  min-width: 0;
+}
+.native-discovery-card h3 {
+  font-size: 16px;
+  margin: 0 0 6px;
+}
+.native-discovery-card p {
+  margin: 12px 0 0;
+  font-size: 13px;
+  line-height: 1.6;
+}
+.native-discovery-card-heading p {
+  margin: 0;
+  color: #64748b;
+  font-size: 12px;
+}
+@media (min-width: 1200px) {
+  .skill-table .col-skill {
+    width: 29%;
+  }
+  .skill-table .col-source {
+    width: 21%;
+  }
+  .skill-table .col-target {
+    width: 15%;
+  }
+  .skill-table .col-placements {
+    width: 200px;
+  }
+  .skill-table .col-actions {
+    width: 110px;
+  }
+}
+@media (max-width: 1199px) {
+  .skill-table colgroup {
+    display: none;
+  }
+  .discovery-target-card {
+    align-items: stretch;
+    flex-wrap: wrap;
+  }
+  .discovery-target-card > label {
+    flex-basis: 100%;
+  }
+  .discovery-target-card select {
+    width: 100%;
+  }
+  .native-discovery-card {
+    padding: 14px;
+  }
+  .skill-discovery-panel .skill-toolbar {
+    flex-wrap: wrap;
+  }
+  .skill-discovery-panel .skill-toolbar .skill-search-field {
+    flex-basis: 100%;
+  }
+}
+@media (min-width: 1200px) {
+  .sub-tabs {
+    margin-top: 24px;
+  }
+  .skill-discovery-panel .discovery-target-card {
+    min-height: 104px;
+  }
+}
+.skill-discovery-panel .skill-empty {
+  align-content: center;
+  gap: 16px;
+  background: #f8fafc;
+}
+.skill-discovery-panel .skill-empty > svg,
+.skill-discovery-panel .discovery-target-card > svg {
+  box-sizing: content-box;
+  padding: 12px;
+  border-radius: 12px;
+  background: #eff6ff;
+  color: #2563eb;
+}
+.skill-discovery-panel .skill-panel-heading p:last-child,
+.native-page-heading p {
+  color: var(--wb-muted);
+}
+@media (max-width: 1199px) {
+  .instruction-document-editor {
+    height: 100%;
+    min-height: 0;
+  }
+  .instructions-editor-surface {
+    min-height: 280px;
+    grid-template-rows: auto minmax(140px, 1fr) auto;
+  }
+  .instructions-editor-surface textarea {
+    height: 100%;
+    min-height: 140px;
+  }
+  .app-main-surface:has(.skill-detail) .sub-tabs,
+  .app-main-surface:has(.native-master-detail.has-selection) .sub-tabs {
+    display: none;
+  }
+  .native-panel:has(.native-master-detail.has-selection) > .native-summary {
+    display: none;
+  }
+}
+@media (max-width: 1199px) {
+  .instructions-panel[data-instructions-surface='detail'] .instructions-detail-pane {
+    display: flex;
+    flex-direction: column;
+  }
+  .instructions-detail-back {
+    flex-shrink: 0;
+  }
+  .instruction-document-editor {
+    flex: 1;
+    height: auto;
+  }
+  .native-panel:has(.native-master-detail.has-selection) > .native-page-heading {
+    display: none;
+  }
+}
+.native-update-dialog,
+.native-backup-dialog {
+  width: min(740px, 100%);
+}
+@media (min-width: 1200px) {
+  .skill-discovery-panel {
+    min-height: 100%;
+  }
+}
+.native-page-heading h2 {
+  margin: 4px 0 8px;
+  font-size: 22px;
+  line-height: 30px;
+}
+.native-page-heading p {
+  margin: 0;
+}
+.discovery-target-card {
+  border-color: var(--wb-line);
+}
+
+/* Installation dialogs share the stacked fields in the polished reference. */
+.skill-zip-dialog-fields,
+.skill-dialog-field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.skill-zip-dialog-fields {
+  gap: 20px;
+}
+.skill-dialog-field > span,
+.skill-dialog-field-hint {
+  color: var(--wb-muted);
+  font-size: 12px;
+}
+.skill-dialog-field select,
+.native-install-target {
+  width: 100%;
+  min-height: 40px;
+  padding: 10px 12px;
+  border: 1px solid var(--wb-line-strong);
+  border-radius: 6px;
+  background: var(--wb-panel);
+  color: var(--wb-ink);
+  font: inherit;
+  overflow-wrap: anywhere;
+}
+.skill-zip-dialog-file {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid var(--wb-line-strong);
+  border-radius: 10px;
+  padding: 12px;
+}
+.skill-zip-dialog-file output {
+  grid-column: 1 / -1;
+  color: var(--wb-muted);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.native-install-dialog .focused-dialog-body {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+.native-install-dialog .native-source {
+  margin: 0;
+}
+.native-install-dialog .initial-agent-radio-options {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
+}
+.native-install-dialog .initial-agent-radio-options label {
+  width: 100%;
+  min-height: 60px;
+  padding: 12px;
+  border-radius: 8px;
+}
+.native-install-dialog .initial-agent-radio-options label > span:last-child {
+  min-width: 0;
+}
+.native-install-dialog .initial-agent-radio-options small {
+  display: block;
+  margin-top: 4px;
+  color: var(--wb-muted);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}

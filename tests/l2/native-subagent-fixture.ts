@@ -2,10 +2,11 @@ import type { AgentType, ConfigContext } from '../../src/types';
 import type {
   NativeSubagentBackup,
   NativeSubagentDefinition,
+  NativeSubagentDiscovery,
 } from '../../src/lib/api/nativeSubagents';
 
 /** L2 专用内存模型，不接触真实目录。真实格式/事务由 Rust fixtures 验证。 */
-export function createNativeSubagentFixture() {
+export function createNativeSubagentFixture(polished = false) {
   const entries = new Map<string, { definition: NativeSubagentDefinition; content: string }>();
   const backups: (NativeSubagentBackup & {
     content: string;
@@ -36,6 +37,49 @@ export function createNativeSubagentFixture() {
           agent === 'codex'
             ? `name = "${name}"\ndescription = "Fixture agent"\ndeveloper_instructions = "Read and report."\nsandbox_mode = "read-only"\n`
             : '---\ndescription: Fixture agent\nmode: subagent\n---\nRead and report.\n',
+      });
+    }
+  }
+  if (polished) {
+    entries.clear();
+    for (const [index, agent] of (['codex', 'claude-code', 'opencode'] as const).entries()) {
+      const name = ['repo-reviewer', 'security-reviewer', 'docs-writer'][index];
+      const project = index === 0;
+      const format = agent === 'codex' ? 'toml' : 'markdown';
+      const sourcePath = project
+        ? `/workspaces/visual-alpha/.codex/agents/${name}.toml`
+        : `/Users/mock/${agent === 'claude-code' ? '.claude' : '.config/opencode'}/agents/${name}.md`;
+      const definition: NativeSubagentDefinition = {
+        identity: `${agent}:${name}`,
+        name,
+        description: '检查正确性、回归与遗漏测试。',
+        agent,
+        target: project
+          ? { scope: 'project', projectId: 'visual-project-alpha' }
+          : { scope: 'global' },
+        format,
+        sourceKind: 'file',
+        sourcePath,
+        managementStatus: index === 0 ? 'managed' : index === 1 ? 'unmanaged' : 'disabled',
+        enabled: index !== 2,
+        contentHash: `hash-${revision++}`,
+        isSymlink: false,
+        diagnostics: [],
+        ...(project
+          ? {
+              repoOwner: 'team',
+              repoName: 'agents',
+              repoPath: 'repo-reviewer.toml',
+              repoBranch: 'main',
+            }
+          : {}),
+      };
+      entries.set(definition.identity, {
+        definition,
+        content:
+          format === 'toml'
+            ? `name = "${name}"\ndescription = "审查仓库变更"\ndeveloper_instructions = """\n检查正确性、回归与遗漏测试。\n"""\n`
+            : `---\nname: ${name}\ndescription: 审查仓库变更\n---\n检查正确性、回归与遗漏测试。\n`,
       });
     }
   }
@@ -96,31 +140,68 @@ export function createNativeSubagentFixture() {
           format: 'toml',
           compatibleAgents: ['codex'],
         },
+        ...(polished
+          ? [
+              {
+                key: 'team/agents:security-reviewer.md',
+                name: 'security-reviewer',
+                description: '审阅常见安全风险与依赖边界。',
+                directory: 'security-reviewer',
+                path: 'security-reviewer.md',
+                repoOwner: 'team',
+                repoName: 'agents',
+                repoBranch: 'main',
+                installed: false,
+                format: 'markdown',
+                compatibleAgents: ['claude-code'],
+              },
+            ]
+          : []),
       ];
     if (command === 'install_native_subagent') {
+      const candidate = args.subagent as NativeSubagentDiscovery;
       const agent = args.agent as AgentType;
-      const identity = `installed:${agent}:${JSON.stringify(args.target)}`;
+      const target = args.target as NativeSubagentDefinition['target'];
+      const identity = `installed:${agent}:${candidate.key}:${JSON.stringify(target)}`;
+      const root =
+        target.scope === 'global'
+          ? '/Users/mock'
+          : target.projectId === 'visual-project-alpha'
+            ? '/workspaces/visual-alpha'
+            : '/workspaces/visual-beta';
+      const folder =
+        agent === 'codex'
+          ? '.codex'
+          : agent === 'claude-code'
+            ? '.claude'
+            : agent === 'opencode'
+              ? '.opencode'
+              : '.gemini';
       const definition: NativeSubagentDefinition = {
         identity,
-        name: 'repo-reviewer',
+        name: candidate.name,
+        description: candidate.description,
         agent,
-        target: args.target as NativeSubagentDefinition['target'],
-        format: 'toml',
+        target,
+        format: candidate.format === 'toml' ? 'toml' : 'markdown',
         sourceKind: 'file',
-        sourcePath: '/fixture/project/.codex/agents/reviewer.toml',
+        sourcePath: `${root}/${folder}/agents/${candidate.name}.${candidate.format === 'toml' ? 'toml' : 'md'}`,
         managementStatus: 'managed',
         enabled: true,
         contentHash: `hash-${revision++}`,
         isSymlink: false,
         diagnostics: [],
-        repoOwner: 'example',
-        repoName: 'agents',
-        repoPath: 'reviewer.toml',
+        repoOwner: candidate.repoOwner,
+        repoName: candidate.repoName,
+        repoPath: candidate.path,
+        repoBranch: candidate.repoBranch,
       };
       entries.set(identity, {
         definition,
         content:
-          'name = "repo-reviewer"\ndescription = "Repo fixture"\ndeveloper_instructions = "Review."\n',
+          candidate.format === 'toml'
+            ? `name = "${candidate.name}"\ndescription = "Repo fixture"\ndeveloper_instructions = "Review."\n`
+            : `---\nname: ${candidate.name}\ndescription: Repo fixture\n---\nReview.\n`,
       });
       return definition;
     }
@@ -135,7 +216,7 @@ export function createNativeSubagentFixture() {
         nextContent: `${entry.content}# Updated\n`,
         currentHash: entry.definition.contentHash,
         remoteHash: 'remote-next',
-        locallyModified: false,
+        locallyModified: polished,
       };
     if (args.expectedHash !== entry.definition.contentHash)
       return error('文件已被外部修改，请重新加载');

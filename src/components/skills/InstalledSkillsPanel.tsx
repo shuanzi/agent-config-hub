@@ -1,25 +1,26 @@
 import { useEffect, useMemo, useRef, useState, type RefObject } from 'react';
-import { open as openFileDialog } from '@tauri-apps/plugin-dialog';
+import { open as openFileDialog } from '../../lib/dialog';
 import {
-  ArchiveRestore,
   ArrowLeft,
-  Compass,
   Download,
-  FolderInput,
   Loader2,
+  MoreHorizontal,
+  ChevronRight,
   RefreshCw,
   Search,
   Trash2,
 } from 'lucide-react';
 import type {
-  AgentType,
   ConfigContext,
   ImportSkillSelection,
   InstalledSkill,
   ProjectSummary,
   ScopeTarget,
-  SkillApps,
   SkillBackupEntry,
+  SkillImportPreview,
+  SkillLocation,
+  SkillPlacement,
+  SkillPlacementTarget,
   UnmanagedSkill,
 } from '../../types';
 import {
@@ -28,17 +29,24 @@ import {
   useImportSkillsFromApps,
   useInstallSkillsFromZip,
   useInstalledSkills,
+  usePreviewSkillImport,
   useRestoreSkillBackup,
   useScanUnmanagedSkills,
+  useSetSkillPlacement,
   useSkillBackups,
-  useToggleSkillApp,
+  useSkillPlacements,
+  useSkillPlacementTargets,
   useUninstallSkill,
   useUpdateSkill,
 } from '../../hooks/useSkills';
 import { toUserError } from '../../lib/errors';
-import { AgentBrandMark, agentLabels, WORKBENCH_AGENTS } from '../workbench/AgentBrandMark';
 import { FocusedDialog } from '../workbench/FocusedDialog';
-import { InitialAgentRadioGroup } from '../workbench/InitialAgentRadioGroup';
+import {
+  SkillLocationCheckboxGroup,
+  SkillLocationRadioGroup,
+  SkillPlacementControls,
+  skillLocationLabels,
+} from './SkillPlacementControls';
 import './skills.css';
 
 interface InstalledSkillsPanelProps {
@@ -140,7 +148,7 @@ function groupSkills(
         label: `此项目拥有：${projectLabel(context.projectId, projects)}`,
         skills: projectSkills,
       },
-      { key: 'global-applicable', label: '全局配置，可用于此项目', skills: globalSkills },
+      { key: 'global-applicable', label: '已投放的全局资产', skills: globalSkills },
     ];
   }
 
@@ -151,57 +159,9 @@ function skillSelectionId(skill: InstalledSkill): string {
   return `${targetValue(skill.target)}:${skill.id}`;
 }
 
-function mapAppField(app: AgentType): keyof SkillApps {
-  switch (app) {
-    case 'claude-code':
-      return 'claudeCode';
-    case 'codex':
-      return 'codex';
-    case 'gemini-cli':
-      return 'geminiCli';
-    case 'opencode':
-      return 'opencode';
-  }
-}
-
 function formatDate(unixSeconds: number): string {
   const date = new Date(unixSeconds * 1000);
   return Number.isNaN(date.getTime()) ? String(unixSeconds) : date.toLocaleString();
-}
-
-function AppToggleGroup({
-  apps,
-  onToggle,
-  disabled,
-  legend = '启用的 Agent',
-  labelPrefix,
-}: {
-  apps: SkillApps;
-  onToggle: (app: AgentType, enabled: boolean) => void;
-  disabled?: boolean;
-  legend?: string;
-  labelPrefix?: string;
-}) {
-  return (
-    <fieldset className="skill-toggle-group">
-      <legend className="skill-toggle-label">{legend}</legend>
-      <div className="skill-toggle-options">
-        {WORKBENCH_AGENTS.map((app) => (
-          <label key={app} className="skill-toggle">
-            <input
-              type="checkbox"
-              checked={apps[mapAppField(app)]}
-              onChange={(event) => onToggle(app, event.target.checked)}
-              disabled={disabled}
-              aria-label={`${labelPrefix ? `${labelPrefix}，` : ''}${agentLabels[app]}`}
-            />
-            <AgentBrandMark app={app} size={16} />
-            <span className="skill-visually-hidden">{agentLabels[app]}</span>
-          </label>
-        ))}
-      </div>
-    </fieldset>
-  );
 }
 
 function SkillFeedback({
@@ -229,25 +189,34 @@ function SkillFeedback({
 
 function InstalledSkillRow({
   skill,
+  placements,
   targetText,
   updateAvailable,
   selected,
   onSelect,
   onUpdate,
   onUninstall,
-  onToggle,
+  onSetPlacement,
   pending,
 }: {
   skill: InstalledSkill;
+  placements: readonly SkillPlacement[];
   targetText: string;
   updateAvailable: boolean;
   selected: boolean;
   onSelect: () => void;
   onUpdate: () => void;
   onUninstall: () => void;
-  onToggle: (app: AgentType, enabled: boolean) => void;
+  onSetPlacement: (placement: SkillPlacement, placed: boolean) => void;
+  onTakeover: (placement: SkillPlacement) => void;
   pending: boolean;
 }) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const unmanaged = placements.filter((item) => item.state === 'unmanaged').length;
+  const conflicts = placements.filter((item) => item.state === 'conflict').length;
+  const exception = [unmanaged ? `${unmanaged} 待接管` : '', conflicts ? `${conflicts} 冲突` : '']
+    .filter(Boolean)
+    .join(' · ');
   return (
     <tr
       className={selected ? 'skill-row skill-card is-selected' : 'skill-row skill-card'}
@@ -268,66 +237,97 @@ function InstalledSkillRow({
               <span className="skill-row-title skill-card-title">{skill.name}</span>
               {updateAvailable && <span className="skill-update-badge">可更新</span>}
             </span>
-            {skill.description && (
-              <span className="skill-row-description">{skill.description}</span>
-            )}
+            <span className={`skill-row-description${exception ? ' is-warning' : ''}`}>
+              {exception || skill.description}
+            </span>
           </span>
         </button>
       </td>
       <td className="skill-row-source">
-        <span>{skill.directory}</span>
         <span>{repositoryLabel(skill)}</span>
-      </td>
-      <td className="skill-row-target">
-        <span className="skill-target-badge">{targetText}</span>
-      </td>
-      <td className="skill-row-agent-cell">
-        <span className="skill-row-agents" role="group" aria-label={`${skill.name} Agent 启用状态`}>
-          {WORKBENCH_AGENTS.map((app) => (
-            <label
-              key={app}
-              className="skill-row-agent-toggle"
-              title={`${agentLabels[app]}：${skill.apps[mapAppField(app)] ? '已启用' : '未启用'}`}
-            >
-              <input
-                type="checkbox"
-                checked={skill.apps[mapAppField(app)]}
-                onChange={(event) => onToggle(app, event.target.checked)}
-                disabled={pending}
-                aria-label={`${skill.name}，${targetText}，${agentLabels[app]}`}
-              />
-              <AgentBrandMark
-                app={app}
-                size={15}
-                className={skill.apps[mapAppField(app)] ? 'is-enabled' : 'is-disabled'}
-              />
-            </label>
-          ))}
+        <span>{skill.repoOwner ? `GitHub · ${skill.repoBranch ?? 'main'}` : '本地主副本'}</span>
+        <span className="skill-mobile-target">
+          {' '}
+          · {skill.target.scope === 'global' ? '全局' : targetText}
         </span>
       </td>
+      <td className="skill-row-target">
+        <span title={targetText}>
+          {skill.target.scope === 'global' ? '全局配置' : targetText.split(' · ')[0]}
+        </span>
+        <span className="skill-target-origin">
+          {skill.target.scope === 'global' ? '全局适用' : '项目自有'}
+        </span>
+      </td>
+      <td className="skill-row-agent-cell">
+        <SkillPlacementControls
+          compact
+          skillName={skill.name}
+          placements={placements}
+          pending={pending}
+          onSetPlacement={onSetPlacement}
+          onTakeover={() => onSelect()}
+        />
+      </td>
       <td className="skill-row-actions" aria-label={`${skill.name} 操作`}>
-        {updateAvailable && (
-          <button
-            type="button"
-            className="skill-icon-button"
-            onClick={onUpdate}
-            disabled={pending}
-            aria-label={`更新 ${skill.name}，${targetText}`}
-            title="更新"
-          >
-            <RefreshCw size={15} aria-hidden="true" />
-          </button>
-        )}
         <button
-          type="button"
-          className="skill-icon-button is-danger uninstall"
-          onClick={onUninstall}
-          disabled={pending}
-          aria-label={`卸载 ${skill.name}，${targetText}`}
-          title="卸载"
+          className="skill-button skill-row-detail"
+          onClick={onSelect}
+          aria-label={`详情 ${skill.name}，${targetText}`}
         >
-          <Trash2 size={15} aria-hidden="true" />
+          <span>详情</span>
+          <ChevronRight size={18} />
         </button>
+        <button
+          className="skill-icon-button skill-row-more"
+          aria-label={`更多操作 ${skill.name}，${targetText}`}
+          onClick={() => setMenuOpen(true)}
+        >
+          <MoreHorizontal size={18} />
+        </button>
+        {menuOpen && (
+          <FocusedDialog
+            open
+            title={`${skill.name} · 更多操作`}
+            onClose={() => setMenuOpen(false)}
+            className="skill-row-menu"
+          >
+            <div className="skill-action-menu">
+              <button
+                className="skill-button"
+                onClick={() => {
+                  setMenuOpen(false);
+                  onSelect();
+                }}
+              >
+                查看详情
+              </button>
+              {updateAvailable && (
+                <button
+                  className="skill-button"
+                  disabled={pending}
+                  onClick={() => {
+                    setMenuOpen(false);
+                    onUpdate();
+                  }}
+                >
+                  更新 {skill.name}
+                </button>
+              )}
+              <button
+                className="skill-button danger uninstall"
+                disabled={pending}
+                onClick={() => {
+                  setMenuOpen(false);
+                  onUninstall();
+                }}
+                aria-label={`卸载 ${skill.name}，${targetText}`}
+              >
+                卸载
+              </button>
+            </div>
+          </FocusedDialog>
+        )}
       </td>
     </tr>
   );
@@ -335,6 +335,7 @@ function InstalledSkillRow({
 
 function InstalledSkillDetail({
   skill,
+  placements,
   targetText,
   updateAvailable,
   pending,
@@ -342,9 +343,11 @@ function InstalledSkillDetail({
   backButtonRef,
   onUpdate,
   onUninstall,
-  onToggle,
+  onSetPlacement,
+  onTakeover,
 }: {
   skill: InstalledSkill;
+  placements: readonly SkillPlacement[];
   targetText: string;
   updateAvailable: boolean;
   pending: boolean;
@@ -352,7 +355,8 @@ function InstalledSkillDetail({
   backButtonRef: RefObject<HTMLButtonElement>;
   onUpdate: () => void;
   onUninstall: () => void;
-  onToggle: (app: AgentType, enabled: boolean) => void;
+  onSetPlacement: (placement: SkillPlacement, placed: boolean) => void;
+  onTakeover: (placement: SkillPlacement) => void;
 }) {
   return (
     <section
@@ -414,37 +418,47 @@ function InstalledSkillDetail({
           <dt>来源</dt>
           <dd>{repositoryLabel(skill)}</dd>
         </div>
-        {skill.repoBranch && (
-          <div>
-            <dt>分支</dt>
-            <dd>{skill.repoBranch}</dd>
-          </div>
-        )}
-        <div>
-          <dt>安装时间</dt>
-          <dd>{formatDate(skill.installedAt)}</dd>
-        </div>
-        <div>
-          <dt>更新时间</dt>
-          <dd>{formatDate(skill.updatedAt)}</dd>
-        </div>
-        {skill.contentHash && (
-          <div>
-            <dt>内容标识</dt>
-            <dd>
-              <code>{skill.contentHash}</code>
-            </dd>
-          </div>
-        )}
       </dl>
 
+      <details className="skill-detail-metadata">
+        <summary>版本与安装记录</summary>
+        <dl className="skill-detail-grid">
+          {' '}
+          {skill.repoBranch && (
+            <div>
+              <dt>分支</dt>
+              <dd>{skill.repoBranch}</dd>
+            </div>
+          )}
+          <div>
+            <dt>安装时间</dt>
+            <dd>{formatDate(skill.installedAt)}</dd>
+          </div>
+          <div>
+            <dt>更新时间</dt>
+            <dd>{formatDate(skill.updatedAt)}</dd>
+          </div>
+          {skill.contentHash && (
+            <div>
+              <dt>内容标识</dt>
+              <dd>
+                <code>{skill.contentHash}</code>
+              </dd>
+            </div>
+          )}
+        </dl>
+      </details>
       <div className="skill-detail-section">
-        <AppToggleGroup
-          apps={skill.apps}
-          onToggle={onToggle}
-          disabled={pending}
-          legend="启用的 Agent"
-          labelPrefix={`${skill.name}，${targetText}`}
+        <h3>投放位置</h3>
+        <p className="skill-placement-note">
+          关闭一个投放位置，不影响其他位置，也不保证 Agent 不再发现该 Skill。
+        </p>
+        <SkillPlacementControls
+          skillName={skill.name}
+          placements={placements}
+          pending={pending}
+          onSetPlacement={onSetPlacement}
+          onTakeover={onTakeover}
         />
       </div>
     </section>
@@ -459,13 +473,18 @@ export function InstalledSkillsPanel({
   const [searchQuery, setSearchQuery] = useState('');
   const [zipPath, setZipPath] = useState('');
   const [zipDialogOpen, setZipDialogOpen] = useState(false);
-  const [zipInitialApp, setZipInitialApp] = useState<AgentType | null>(null);
+  const [actionsOpen, setActionsOpen] = useState(false);
+  const [zipInitialLocation, setZipInitialLocation] = useState<SkillLocation | null>(null);
   const [errorMessage, setErrorMessage] = useState('');
   const [statusMessage, setStatusMessage] = useState('');
   const [selectedSkillId, setSelectedSkillId] = useState<string | null>(null);
   const [uninstallTarget, setUninstallTarget] = useState<InstalledSkill | null>(null);
   const [importDialogOpen, setImportDialogOpen] = useState(false);
   const [backupsDialogOpen, setBackupsDialogOpen] = useState(false);
+  const [takeoverTarget, setTakeoverTarget] = useState<{
+    skill: InstalledSkill;
+    placement: SkillPlacement;
+  } | null>(null);
   const [allOperationTarget, setAllOperationTarget] = useState<ScopeTarget | null>(null);
   const detailBackButtonRef = useRef<HTMLButtonElement>(null);
   const detailReturnFocusIdRef = useRef<string | null>(null);
@@ -474,8 +493,34 @@ export function InstalledSkillsPanel({
   const scopedTarget = targetForContext(context);
   const operationTarget = scopedTarget ?? allOperationTarget;
 
-  const { data: skills, isLoading, error: installedSkillsError } = useInstalledSkills(context);
-  const toggleAppMutation = useToggleSkillApp();
+  const {
+    data: skills,
+    isLoading,
+    isFetching: refreshingSkills,
+    error: installedSkillsError,
+    refetch: refetchInstalledSkills,
+  } = useInstalledSkills(context);
+  const {
+    data: placementAssets = [],
+    isFetching: refreshingPlacements,
+    refetch: refetchPlacements,
+  } = useSkillPlacements(context);
+  const {
+    data: placementTargets = [],
+    isPlaceholderData: placementTargetsStale,
+    isFetching: fetchingPlacementTargets,
+    isError: placementTargetsError,
+  } = useSkillPlacementTargets(operationTarget);
+  const placementTargetsReady =
+    !placementTargetsStale && !fetchingPlacementTargets && !placementTargetsError;
+  const zipLocationValid =
+    placementTargetsReady &&
+    zipInitialLocation !== null &&
+    placementTargets.some(
+      (target) =>
+        target.location === zipInitialLocation || target.aliases.includes(zipInitialLocation),
+    );
+  const setPlacementMutation = useSetSkillPlacement();
   const uninstallMutation = useUninstallSkill();
   const {
     data: updates,
@@ -488,6 +533,7 @@ export function InstalledSkillsPanel({
     { enabled: false },
   );
   const importMutation = useImportSkillsFromApps();
+  const previewImportMutation = usePreviewSkillImport();
   const installFromZipMutation = useInstallSkillsFromZip();
   const { data: backups, refetch: refetchBackups } = useSkillBackups(operationTarget);
   const restoreMutation = useRestoreSkillBackup();
@@ -501,20 +547,23 @@ export function InstalledSkillsPanel({
     return map;
   }, [updates]);
 
-  const enabledCounts = useMemo(() => {
-    const counts: Record<AgentType, number> = {
-      'claude-code': 0,
-      codex: 0,
-      'gemini-cli': 0,
-      opencode: 0,
-    };
-    for (const skill of skills ?? []) {
-      for (const app of WORKBENCH_AGENTS) {
-        if (skill.apps[mapAppField(app)]) counts[app] += 1;
-      }
+  const placementsBySkill = useMemo(() => {
+    const result = new Map<string, readonly SkillPlacement[]>();
+    for (const asset of placementAssets) {
+      result.set(`${targetValue(asset.target)}:${asset.id}`, asset.placements);
     }
-    return counts;
-  }, [skills]);
+    return result;
+  }, [placementAssets]);
+
+  const placedCount = useMemo(
+    () =>
+      placementAssets.reduce(
+        (count, asset) =>
+          count + asset.placements.filter((placement) => placement.state === 'placed').length,
+        0,
+      ),
+    [placementAssets],
+  );
 
   const filteredSkills = useMemo(() => {
     if (skills === undefined) return [];
@@ -574,7 +623,8 @@ export function InstalledSkillsPanel({
     setBackupsDialogOpen(false);
     setZipDialogOpen(false);
     setZipPath('');
-    setZipInitialApp(null);
+    setZipInitialLocation(null);
+    setTakeoverTarget(null);
     window.setTimeout(() => panelHeadingRef.current?.focus(), 0);
   }, [context]);
 
@@ -588,13 +638,14 @@ export function InstalledSkillsPanel({
   }, [allOperationTarget, projects]);
 
   const pending =
-    toggleAppMutation.isPending ||
+    setPlacementMutation.isPending ||
     uninstallMutation.isPending ||
     updateSkillMutation.isPending ||
     importMutation.isPending ||
     installFromZipMutation.isPending ||
     restoreMutation.isPending ||
-    deleteBackupMutation.isPending;
+    deleteBackupMutation.isPending ||
+    previewImportMutation.isPending;
 
   const clearFeedback = () => {
     setErrorMessage('');
@@ -634,12 +685,24 @@ export function InstalledSkillsPanel({
     }, 0);
   };
 
-  const handleToggleApp = async (skill: InstalledSkill, app: AgentType, enabled: boolean) => {
+  const handleSetPlacement = async (
+    skill: InstalledSkill,
+    placement: SkillPlacement,
+    placed: boolean,
+  ) => {
     clearFeedback();
     try {
-      await toggleAppMutation.mutateAsync({ id: skill.id, target: skill.target, app, enabled });
+      await setPlacementMutation.mutateAsync({
+        id: skill.id,
+        target: skill.target,
+        location: placement.location,
+        placed,
+        expectedRevision: placement.revision,
+      });
       setStatusMessage(
-        `${skill.name}（${targetLabel(skill.target, projects)}）已${enabled ? '启用' : '停用'} ${agentLabels[app]}。`,
+        placed
+          ? `${skill.name} 已投放到 ${skillLocationLabels[placement.location]}。`
+          : `${skill.name} 已从 ${skillLocationLabels[placement.location]} 撤回投放。`,
       );
     } catch (error) {
       const userError = toUserError(error);
@@ -697,6 +760,16 @@ export function InstalledSkillsPanel({
       setStatusMessage(
         count === 0 ? '当前没有可更新的 Skill。' : `发现 ${count} 个可更新的 Skill。`,
       );
+    } catch (error) {
+      reportError(error);
+    }
+  };
+
+  const handleRefreshPlacements = async () => {
+    clearFeedback();
+    try {
+      await Promise.all([refetchInstalledSkills(), refetchPlacements()]);
+      setStatusMessage('已重新读取目录投放状态。');
     } catch (error) {
       reportError(error);
     }
@@ -777,17 +850,65 @@ export function InstalledSkillsPanel({
     }
   };
 
-  const handleImport = async (selections: ImportSkillSelection[]) => {
+  const handlePreviewImportForTarget = async (
+    selections: ImportSkillSelection[],
+    target: ScopeTarget,
+  ): Promise<SkillImportPreview> => {
     clearFeedback();
-    const target = requireOperationTarget();
-    if (target === null) return;
     try {
-      await importMutation.mutateAsync({ selections, target });
+      return await previewImportMutation.mutateAsync({ selections, target });
+    } catch (error) {
+      reportError(error);
+      throw error;
+    }
+  };
+
+  const requireImportLocations = (selections: ImportSkillSelection[]): boolean => {
+    const valid =
+      placementTargetsReady &&
+      selections.length > 0 &&
+      selections.every(
+        (selection) =>
+          selection.locations.length > 0 &&
+          selection.locations.every((location) =>
+            placementTargets.some(
+              (target) => target.location === location || target.aliases.includes(location),
+            ),
+          ),
+      );
+    if (!valid) setErrorMessage('投放位置尚未就绪或已变化，请重新选择并预览。');
+    return valid;
+  };
+
+  const handlePreviewImport = async (
+    selections: ImportSkillSelection[],
+  ): Promise<SkillImportPreview> => {
+    const target = requireOperationTarget();
+    if (target === null) throw new Error('未选择操作目标');
+    if (!requireImportLocations(selections)) throw new Error('无效导入投放位置');
+    return handlePreviewImportForTarget(selections, target);
+  };
+
+  const handleImportForTarget = async (
+    selections: ImportSkillSelection[],
+    expectedRevision: string,
+    target: ScopeTarget,
+  ) => {
+    clearFeedback();
+    try {
+      await importMutation.mutateAsync({ selections, target, expectedRevision });
       setImportDialogOpen(false);
-      setStatusMessage(`已导入 ${selections.length} 个本地 Skill。`);
+      setTakeoverTarget(null);
+      setStatusMessage(`已接管 ${selections.length} 个本地 Skill。`);
     } catch (error) {
       reportError(error);
     }
+  };
+
+  const handleImport = async (selections: ImportSkillSelection[], expectedRevision: string) => {
+    const target = requireOperationTarget();
+    if (target === null || !requireImportLocations(selections)) return;
+    await handleImportForTarget(selections, expectedRevision, target);
   };
 
   const handleChooseZip = async () => {
@@ -811,7 +932,7 @@ export function InstalledSkillsPanel({
     clearFeedback();
     if (requireOperationTarget() === null) return;
     setZipPath('');
-    setZipInitialApp(null);
+    setZipInitialLocation(null);
     setZipDialogOpen(true);
   };
 
@@ -820,21 +941,21 @@ export function InstalledSkillsPanel({
     if (zipPath.trim() === '') return;
     const target = requireOperationTarget();
     if (target === null) return;
-    const initialApp = zipInitialApp;
-    if (initialApp === null) {
-      setErrorMessage('请选择 ZIP 安装后要启用的初始 Agent。');
+    const initialLocation = zipInitialLocation;
+    if (initialLocation === null || !zipLocationValid) {
+      setErrorMessage('请选择 ZIP 安装后的初始投放位置。');
       return;
     }
     try {
       await installFromZipMutation.mutateAsync({
         filePath: zipPath.trim(),
-        initialApp,
+        initialLocation,
         target,
       });
       setZipDialogOpen(false);
       setZipPath('');
-      setZipInitialApp(null);
-      setStatusMessage(`已从 ZIP 安装 Skill，并启用 ${agentLabels[initialApp]}。`);
+      setZipInitialLocation(null);
+      setStatusMessage(`已从 ZIP 安装 Skill，并投放到 ${skillLocationLabels[initialLocation]}。`);
     } catch (error) {
       reportError(error);
     }
@@ -890,125 +1011,222 @@ export function InstalledSkillsPanel({
   const allTargetMissing = context.kind === 'all' && operationTarget === null;
 
   return (
-    <section className="skill-panel" aria-label="已安装 Skills">
+    <section
+      className={`skill-panel${selectedSkill ? ' has-detail' : ''}`}
+      aria-label="已安装 Skills"
+    >
       <div className="skill-panel-heading">
         <div>
-          <p className="skill-eyebrow">Skills</p>
           <h2 ref={panelHeadingRef} tabIndex={-1}>
             已安装
           </h2>
-          <p>{skills?.length ?? 0} 个目标记录</p>
-        </div>
-        <div className="skill-count-bar" aria-label="各 Agent 启用的目标记录数">
-          {WORKBENCH_AGENTS.map((app) => (
-            <span key={app} className="count-item">
-              <AgentBrandMark app={app} size={15} />
-              <span className="count-value">{enabledCounts[app]}</span>
-            </span>
-          ))}
+          <p>
+            {skills?.length ?? 0} 个受管 Skill · {placedCount} 处目录投放
+          </p>
         </div>
       </div>
 
-      <div className="skill-toolbar">
-        <label className="skill-search-field" htmlFor="skill-installed-search">
-          <Search size={15} aria-hidden="true" />
-          <input
-            id="skill-installed-search"
-            type="search"
-            placeholder="搜索已安装 Skill"
-            value={searchQuery}
-            onChange={(event) => setSearchQuery(event.target.value)}
-          />
-        </label>
-        <div className="skill-toolbar-actions">
-          <button
-            type="button"
-            className="skill-button"
-            onClick={handleCheckUpdates}
-            disabled={isCheckingUpdates || pending || allTargetMissing}
-          >
-            {isCheckingUpdates ? <Loader2 size={15} className="spin" /> : <RefreshCw size={15} />}
-            检查更新
-          </button>
-          {(updates ?? []).length > 0 && (
+      <div className="skill-installed-toolbar">
+        <div className="skill-toolbar-top">
+          <label className="skill-search-field" htmlFor="skill-installed-search">
+            <Search size={16} aria-hidden="true" />
+            <input
+              id="skill-installed-search"
+              type="search"
+              placeholder="搜索名称、描述或来源"
+              value={searchQuery}
+              onChange={(event) => setSearchQuery(event.target.value)}
+            />
+          </label>
+          <div className="skill-desktop-actions">
             <button
-              type="button"
-              className="skill-button primary"
-              onClick={handleUpdateAll}
+              className="skill-button"
+              onClick={handleCheckUpdates}
+              disabled={isCheckingUpdates || pending || allTargetMissing}
+            >
+              {isCheckingUpdates ? '检查中…' : '检查更新'}
+            </button>
+            <button
+              className="skill-button"
+              onClick={() => void handleRefreshPlacements()}
+              disabled={refreshingSkills || refreshingPlacements || pending}
+            >
+              {refreshingPlacements ? '读取中…' : '重新读取投放状态'}
+            </button>
+            <button className="skill-button primary" onClick={onOpenDiscovery}>
+              发现技能
+            </button>
+          </div>
+        </div>
+        <div className="skill-toolbar-bottom">
+          {context.kind === 'all' ? (
+            <label className="skill-target-field" htmlFor="skill-installed-target">
+              <span>操作目标</span>
+              <select
+                id="skill-installed-target"
+                aria-label="选择 Skill 操作目标"
+                value={targetValue(allOperationTarget)}
+                onChange={(event) => setAllOperationTarget(targetFromValue(event.target.value))}
+              >
+                <option value="">选择操作目标</option>
+                <option value="global">全局配置</option>
+                {projects.map((project) => (
+                  <option key={project.projectId} value={`project:${project.projectId}`}>
+                    {targetLabel({ scope: 'project', projectId: project.projectId }, projects)}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : (
+            <span className="skill-target-field">
+              操作目标：{operationTarget ? targetLabel(operationTarget, projects) : ''}
+            </span>
+          )}
+          <div className="skill-desktop-actions">
+            <button
+              className="skill-button"
+              onClick={handleOpenImport}
               disabled={pending || allTargetMissing}
             >
-              <RefreshCw size={15} />
-              全部更新 ({updates!.length})
+              导入已有
             </button>
-          )}
+            <button
+              className="skill-button"
+              onClick={handleOpenBackups}
+              disabled={pending || allTargetMissing}
+            >
+              从备份恢复
+            </button>
+            <button
+              className="skill-button"
+              onClick={handleOpenZip}
+              disabled={pending || allTargetMissing}
+            >
+              从 ZIP 安装
+            </button>
+            {(updates ?? []).length > 0 && (
+              <button
+                className="skill-button primary"
+                onClick={handleUpdateAll}
+                disabled={pending || allTargetMissing}
+              >
+                全部更新 ({updates!.length})
+              </button>
+            )}
+          </div>
           <button
-            type="button"
-            className="skill-button"
-            onClick={handleOpenImport}
-            disabled={pending || allTargetMissing}
+            className="skill-button skill-mobile-actions"
+            onClick={() => setActionsOpen(true)}
           >
-            <FolderInput size={15} />
-            导入已有
-          </button>
-          <button
-            type="button"
-            className="skill-button"
-            onClick={handleOpenBackups}
-            disabled={pending || allTargetMissing}
-          >
-            <ArchiveRestore size={15} />
-            从备份恢复
+            更多操作
           </button>
         </div>
-        {context.kind === 'all' && (
-          <label className="skill-target-field" htmlFor="skill-installed-target">
-            <span>操作目标</span>
-            <select
-              id="skill-installed-target"
-              aria-label="选择 Skill 操作目标"
-              value={targetValue(allOperationTarget)}
-              onChange={(event) => setAllOperationTarget(targetFromValue(event.target.value))}
-            >
-              <option value="">选择全局或项目配置</option>
-              <option value="global">全局配置</option>
-              {projects.map((project) => (
-                <option key={project.projectId} value={`project:${project.projectId}`}>
-                  {targetLabel({ scope: 'project', projectId: project.projectId }, projects)}
-                </option>
-              ))}
-            </select>
-          </label>
-        )}
-        <button
-          type="button"
-          className="skill-button"
-          onClick={handleOpenZip}
-          disabled={pending || allTargetMissing}
-        >
-          <Download size={15} />从 ZIP 安装
-        </button>
-        <button type="button" className="skill-button" onClick={onOpenDiscovery}>
-          <Compass size={15} />
-          发现技能
-        </button>
         {allTargetMissing && (
           <span className="skill-target-hint" role="status">
             请先选择操作目标，检查更新、导入已有、备份恢复或 ZIP 安装才会启用。
           </span>
         )}
       </div>
+      {actionsOpen && (
+        <FocusedDialog
+          open
+          title="Skills · 更多操作"
+          onClose={() => setActionsOpen(false)}
+          className="skill-actions-dialog"
+        >
+          <div className="skill-action-menu">
+            <button
+              className="skill-button"
+              disabled={isCheckingUpdates || pending || allTargetMissing}
+              onClick={() => {
+                setActionsOpen(false);
+                void handleCheckUpdates();
+              }}
+            >
+              检查更新
+            </button>
+            <button
+              className="skill-button"
+              disabled={refreshingSkills || refreshingPlacements || pending}
+              onClick={() => {
+                setActionsOpen(false);
+                void handleRefreshPlacements();
+              }}
+            >
+              重新读取投放状态
+            </button>
+            <button
+              className="skill-button"
+              disabled={pending || allTargetMissing}
+              onClick={() => {
+                setActionsOpen(false);
+                handleOpenImport();
+              }}
+            >
+              导入已有
+            </button>
+            <button
+              className="skill-button"
+              disabled={pending || allTargetMissing}
+              onClick={() => {
+                setActionsOpen(false);
+                handleOpenBackups();
+              }}
+            >
+              从备份恢复
+            </button>
+            <button
+              className="skill-button"
+              disabled={pending || allTargetMissing}
+              onClick={() => {
+                setActionsOpen(false);
+                handleOpenZip();
+              }}
+            >
+              从 ZIP 安装
+            </button>
+            {(updates ?? []).length > 0 && (
+              <button
+                className="skill-button"
+                disabled={pending || allTargetMissing}
+                onClick={() => {
+                  setActionsOpen(false);
+                  void handleUpdateAll();
+                }}
+              >
+                全部更新 ({updates!.length})
+              </button>
+            )}
+            <button
+              className="skill-button primary"
+              onClick={() => {
+                setActionsOpen(false);
+                onOpenDiscovery();
+              }}
+            >
+              发现技能
+            </button>
+          </div>
+        </FocusedDialog>
+      )}
 
       <SkillFeedback
         errorMessage={
           installedSkillsErrorMessage ||
-          (zipDialogOpen || importDialogOpen || backupsDialogOpen ? '' : errorMessage)
+          (zipDialogOpen || importDialogOpen || backupsDialogOpen || takeoverTarget
+            ? ''
+            : errorMessage)
         }
         statusMessage={statusMessage}
       />
+      <p className="skill-placement-note">
+        图标控制目录投放；完整路径与异常处理见详情。关闭一个位置不保证 Agent 停止加载。
+      </p>
 
       {selectedSkill !== null ? (
         <InstalledSkillDetail
           skill={selectedSkill}
+          placements={placementsBySkill.get(skillSelectionId(selectedSkill)) ?? []}
           targetText={targetLabel(selectedSkill.target, projects)}
           updateAvailable={hasUpdate(selectedSkill)}
           pending={pending}
@@ -1016,7 +1234,10 @@ export function InstalledSkillsPanel({
           backButtonRef={detailBackButtonRef}
           onUpdate={() => void handleUpdateSkill(selectedSkill)}
           onUninstall={() => requestUninstall(selectedSkill)}
-          onToggle={(app, enabled) => void handleToggleApp(selectedSkill, app, enabled)}
+          onSetPlacement={(placement, placed) =>
+            void handleSetPlacement(selectedSkill, placement, placed)
+          }
+          onTakeover={(placement) => setTakeoverTarget({ skill: selectedSkill, placement })}
         />
       ) : isLoading ? (
         <div className="skill-empty" role="status">
@@ -1034,41 +1255,53 @@ export function InstalledSkillsPanel({
         </div>
       ) : (
         <div className="skill-scope-groups" aria-label="已安装 Skill 列表">
-          {skillGroups.map((group) => (
+          {skillGroups.map((group, groupIndex) => (
             <section
               key={group.key}
               className="skill-scope-group"
               aria-labelledby={`skill-group-${group.key}`}
             >
-              <h3 id={`skill-group-${group.key}`} className="skill-scope-group-heading">
-                {group.label}
-                <span>{group.skills.length}</span>
-              </h3>
               <table className="skill-list skill-table">
+                <colgroup>
+                  <col className="col-skill" />
+                  <col className="col-source" />
+                  <col className="col-target" />
+                  <col className="col-placements" />
+                  <col className="col-actions" />
+                </colgroup>
                 <caption className="sr-only">{group.label} Skill 列表</caption>
-                <thead>
+                <thead className={groupIndex > 0 ? 'sr-only' : undefined}>
                   <tr>
                     <th scope="col">Skill</th>
                     <th scope="col">来源</th>
                     <th scope="col">目标</th>
-                    <th scope="col">Agent</th>
-                    <th scope="col">
-                      <span className="sr-only">操作</span>
-                    </th>
+                    <th scope="col">投放位置</th>
+                    <th scope="col">操作</th>
                   </tr>
                 </thead>
                 <tbody>
+                  <tr className="skill-group-row">
+                    <th colSpan={5}>
+                      <h3 id={`skill-group-${group.key}`}>
+                        {group.label} · {group.skills.length} 个 Skill
+                      </h3>
+                    </th>
+                  </tr>
                   {group.skills.map((skill) => (
                     <InstalledSkillRow
                       key={`${targetValue(skill.target)}:${skill.id}`}
                       skill={skill}
+                      placements={placementsBySkill.get(skillSelectionId(skill)) ?? []}
                       targetText={targetLabel(skill.target, projects)}
                       updateAvailable={hasUpdate(skill)}
                       selected={selectedSkillId === skillSelectionId(skill)}
                       onSelect={() => selectSkill(skill)}
                       onUpdate={() => void handleUpdateSkill(skill)}
                       onUninstall={() => requestUninstall(skill)}
-                      onToggle={(app, enabled) => void handleToggleApp(skill, app, enabled)}
+                      onSetPlacement={(placement, placed) =>
+                        void handleSetPlacement(skill, placement, placed)
+                      }
+                      onTakeover={(placement) => setTakeoverTarget({ skill, placement })}
                       pending={pending}
                     />
                   ))}
@@ -1081,9 +1314,15 @@ export function InstalledSkillsPanel({
 
       {importDialogOpen && unmanagedSkills !== undefined && (
         <ImportDialog
+          // Invalidate selections and in-flight previews together when the target
+          // or its ready directory list changes. Row takeover uses its own target.
+          key={JSON.stringify([operationTarget, placementTargetsReady ? placementTargets : null])}
           skills={unmanagedSkills}
+          targets={placementTargetsReady ? placementTargets : []}
           targetText={operationTarget ? targetLabel(operationTarget, projects) : '当前操作目标'}
           errorMessage={errorMessage}
+          pending={importMutation.isPending}
+          onPreview={handlePreviewImport}
           onImport={handleImport}
           onClose={() => {
             setImportDialogOpen(false);
@@ -1092,6 +1331,39 @@ export function InstalledSkillsPanel({
         />
       )}
 
+      {takeoverTarget !== null &&
+        (() => {
+          const { skill, placement } = takeoverTarget;
+          const sourcePath = `${placement.path.replace(/\/+$/, '')}/${skill.directory.replace(/^\/+/, '')}`;
+          return (
+            <ImportDialog
+              title={`接管 ${skill.name} 的已有投放`}
+              skills={[
+                {
+                  directory: skill.directory,
+                  name: skill.name,
+                  description: skill.description,
+                  foundIn: [placement.location],
+                  path: sourcePath,
+                },
+              ]}
+              targets={[placement]}
+              targetText={targetLabel(skill.target, projects)}
+              errorMessage={errorMessage}
+              pending={importMutation.isPending}
+              preselected={{ sourcePath, location: placement.location }}
+              onPreview={(selections) => handlePreviewImportForTarget(selections, skill.target)}
+              onImport={(selections, expectedRevision) =>
+                void handleImportForTarget(selections, expectedRevision, skill.target)
+              }
+              onClose={() => {
+                setTakeoverTarget(null);
+                clearFeedback();
+              }}
+            />
+          );
+        })()}
+
       {zipDialogOpen && (
         <ZipInstallDialog
           path={zipPath}
@@ -1099,17 +1371,21 @@ export function InstalledSkillsPanel({
           targetText={operationTarget ? targetLabel(operationTarget, projects) : null}
           projects={projects}
           allowTargetChange={context.kind === 'all'}
-          initialApp={zipInitialApp}
+          targets={placementTargetsReady ? placementTargets : []}
+          initialLocation={zipLocationValid ? zipInitialLocation : null}
           pending={installFromZipMutation.isPending}
           errorMessage={errorMessage}
           onChoose={handleChooseZip}
-          onTargetChange={setAllOperationTarget}
-          onInitialAppChange={setZipInitialApp}
+          onTargetChange={(target) => {
+            setAllOperationTarget(target);
+            setZipInitialLocation(null);
+          }}
+          onInitialLocationChange={setZipInitialLocation}
           onInstall={() => void handleInstallFromZip()}
           onClose={() => {
             setZipDialogOpen(false);
             setZipPath('');
-            setZipInitialApp(null);
+            setZipInitialLocation(null);
             clearFeedback();
           }}
         />
@@ -1154,7 +1430,7 @@ export function InstalledSkillsPanel({
         {uninstallTarget !== null && (
           <p className="skill-dialog-copy">
             确定要卸载 {uninstallTarget.name}（{targetLabel(uninstallTarget.target, projects)}）
-            吗？该 Skill 将从该配置目标的所有 Agent 移除。
+            吗？这会删除受管主资产及其受管投放；未接管条目不在清理范围内。
           </p>
         )}
       </FocusedDialog>
@@ -1164,31 +1440,43 @@ export function InstalledSkillsPanel({
 
 function ImportDialog({
   skills,
+  targets,
   targetText,
   errorMessage,
+  pending,
+  title = '导入已有 Skill',
+  preselected,
+  onPreview,
   onImport,
   onClose,
 }: {
   skills: UnmanagedSkill[];
+  targets: readonly SkillPlacementTarget[];
   targetText: string;
   errorMessage: string;
-  onImport: (selections: ImportSkillSelection[]) => void;
+  pending: boolean;
+  title?: string;
+  preselected?: { sourcePath: string; location: SkillLocation };
+  onPreview: (selections: ImportSkillSelection[]) => Promise<SkillImportPreview>;
+  onImport: (selections: ImportSkillSelection[], expectedRevision: string) => void;
   onClose: () => void;
 }) {
   const firstSelectionRef = useRef<HTMLInputElement>(null);
   const selectionKey = (skill: UnmanagedSkill) => `${skill.directory}::${skill.path}`;
   const directoryKey = (skill: UnmanagedSkill) => skill.directory.toLowerCase();
   const [selected, setSelected] = useState<Set<string>>(() => {
-    const seenDirectories = new Set<string>();
-    const initial = new Set<string>();
-    for (const skill of skills) {
-      if (!seenDirectories.has(directoryKey(skill))) {
-        seenDirectories.add(directoryKey(skill));
-        initial.add(selectionKey(skill));
-      }
-    }
-    return initial;
+    const match = preselected
+      ? skills.find((skill) => skill.path === preselected.sourcePath)
+      : undefined;
+    return match ? new Set([selectionKey(match)]) : new Set();
   });
+  const [locationsBySkill, setLocationsBySkill] = useState<Record<string, SkillLocation[]>>(() => {
+    if (!preselected) return {};
+    const match = skills.find((skill) => skill.path === preselected.sourcePath);
+    return match ? { [selectionKey(match)]: [preselected.location] } : {};
+  });
+  const [preview, setPreview] = useState<SkillImportPreview | null>(null);
+  const [previewing, setPreviewing] = useState(false);
   const conflictDirectories = useMemo(() => {
     const counts = new Map<string, number>();
     for (const skill of skills) {
@@ -1199,21 +1487,9 @@ function ImportDialog({
       [...counts.entries()].filter(([, count]) => count > 1).map(([directory]) => directory),
     );
   }, [skills]);
-  const [appsBySkill, setAppsBySkill] = useState<Record<string, SkillApps>>(() => {
-    const initial: Record<string, SkillApps> = {};
-    for (const skill of skills) {
-      initial[selectionKey(skill)] = {
-        claudeCode: skill.foundIn.includes('claude-code'),
-        codex: skill.foundIn.includes('codex'),
-        geminiCli: skill.foundIn.includes('gemini-cli'),
-        opencode: skill.foundIn.includes('opencode'),
-      };
-    }
-    return initial;
-  });
-
   const toggleSelect = (skill: UnmanagedSkill) => {
     const key = selectionKey(skill);
+    setPreview(null);
     setSelected((previous) => {
       const next = new Set(previous);
       if (next.has(key)) {
@@ -1228,51 +1504,80 @@ function ImportDialog({
     });
   };
 
-  const toggleApp = (key: string, app: AgentType, enabled: boolean) => {
-    setAppsBySkill((previous) => ({
+  const setLocations = (key: string, locations: SkillLocation[]) => {
+    setLocationsBySkill((previous) => ({
       ...previous,
-      [key]: { ...previous[key], [mapAppField(app)]: enabled },
+      [key]: locations,
     }));
+    setPreview(null);
   };
 
-  const handleImport = () => {
-    onImport(
-      skills
-        .filter((skill) => selected.has(selectionKey(skill)))
-        .map((skill) => ({
-          directory: skill.directory,
-          sourcePath: skill.path,
-          apps: appsBySkill[selectionKey(skill)] ?? {
-            claudeCode: false,
-            codex: false,
-            geminiCli: false,
-            opencode: false,
-          },
-        })),
-    );
+  const selections = skills
+    .filter((skill) => selected.has(selectionKey(skill)))
+    .map((skill) => ({
+      directory: skill.directory,
+      sourcePath: skill.path,
+      locations: locationsBySkill[selectionKey(skill)] ?? [],
+    }));
+  const selectionReady =
+    selections.length > 0 && selections.every((selection) => selection.locations.length > 0);
+
+  const handlePreview = async () => {
+    if (!selectionReady) return;
+    setPreviewing(true);
+    try {
+      setPreview(await onPreview(selections));
+    } catch {
+      // 外层统一呈现结构化错误，保留当前选择以便重新预览。
+    } finally {
+      setPreviewing(false);
+    }
   };
 
   return (
     <FocusedDialog
       open
-      title="导入已有 Skill"
+      title={title}
       onClose={onClose}
       initialFocusRef={firstSelectionRef}
       closeLabel="关闭导入已有 Skill 对话框"
       className="skill-dialog"
       footer={
         <>
-          <button type="button" className="skill-button" onClick={onClose}>
-            取消
-          </button>
-          <button
-            type="button"
-            className="skill-button primary"
-            onClick={handleImport}
-            disabled={selected.size === 0}
-          >
-            导入选中项 ({selected.size})
-          </button>
+          {preview ? (
+            <>
+              <button
+                type="button"
+                className="skill-button"
+                onClick={() => setPreview(null)}
+                disabled={pending}
+              >
+                返回修改
+              </button>
+              <button
+                type="button"
+                className="skill-button primary"
+                onClick={() => onImport(selections, preview.revision)}
+                disabled={pending}
+              >
+                确认接管
+              </button>
+            </>
+          ) : (
+            <>
+              <button type="button" className="skill-button" onClick={onClose}>
+                取消
+              </button>
+              <button
+                type="button"
+                className="skill-button primary"
+                onClick={() => void handlePreview()}
+                disabled={!selectionReady || previewing}
+              >
+                {previewing ? '生成预览中…' : `预览接管 (${selected.size})`}
+              </button>
+            </>
+          )}
         </>
       }
     >
@@ -1281,40 +1586,84 @@ function ImportDialog({
           {errorMessage}
         </div>
       )}
-      <div className="skill-import-list">
-        {skills.map((skill, index) => {
-          const key = selectionKey(skill);
-          return (
-            <div key={key} className="skill-import-item">
-              <label className="skill-import-select">
-                <input
-                  ref={index === 0 ? firstSelectionRef : undefined}
-                  type="checkbox"
-                  checked={selected.has(key)}
-                  onChange={() => toggleSelect(skill)}
-                  aria-label={`选择 ${skill.name}，来源 ${skill.path}`}
-                />
-              </label>
-              <div className="skill-import-item-info">
-                <div className="skill-import-item-name">{skill.name}</div>
-                {skill.description && (
-                  <div className="skill-import-description">{skill.description}</div>
-                )}
-                <div className="skill-import-item-path">{skill.path}</div>
-                {conflictDirectories.has(directoryKey(skill)) && (
-                  <div className="skill-import-warning">同名 Skill 一次只能导入一个来源</div>
-                )}
-                <AppToggleGroup
-                  apps={appsBySkill[key]}
-                  onToggle={(app, enabled) => toggleApp(key, app, enabled)}
-                  legend="导入到 Agent"
-                  labelPrefix={`${skill.name}，${targetText}`}
-                />
+      {preview ? (
+        <div className="skill-import-preview">
+          <p className="skill-dialog-copy">
+            请核对复制到受管位置、原件保留或原路径替换等实际动作。确认时会再次检查这些路径是否变化。
+          </p>
+          {preview.items.map((item) => (
+            <section
+              key={`${item.directory}:${item.sourcePath}`}
+              className="skill-import-preview-item"
+            >
+              <h3>{item.directory}</h3>
+              <dl>
+                <div>
+                  <dt>来源原件</dt>
+                  <dd>
+                    <code>{item.sourcePath}</code>
+                  </dd>
+                </div>
+                <div>
+                  <dt>受管位置</dt>
+                  <dd>
+                    <code>{item.storagePath}</code>
+                  </dd>
+                </div>
+              </dl>
+              <ul>
+                {item.actions.map((action, index) => (
+                  <li key={`${action.path}:${index}`}>
+                    <code>{action.path}</code>
+                    <span>{action.action}</span>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ))}
+        </div>
+      ) : (
+        <div className="skill-import-list">
+          <p className="skill-dialog-copy">
+            请选择要接管的来源和投放位置。发现位置不会自动取得所有权；下一步会先展示实际文件动作。
+          </p>
+          {skills.map((skill, index) => {
+            const key = selectionKey(skill);
+            return (
+              <div key={key} className="skill-import-item">
+                <label className="skill-import-select">
+                  <input
+                    ref={index === 0 ? firstSelectionRef : undefined}
+                    type="checkbox"
+                    checked={selected.has(key)}
+                    onChange={() => toggleSelect(skill)}
+                    aria-label={`选择 ${skill.name}，来源 ${skill.path}`}
+                  />
+                </label>
+                <div className="skill-import-item-info">
+                  <div className="skill-import-item-name">{skill.name}</div>
+                  {skill.description && (
+                    <div className="skill-import-description">{skill.description}</div>
+                  )}
+                  <div className="skill-import-item-path">{skill.path}</div>
+                  {conflictDirectories.has(directoryKey(skill)) && (
+                    <div className="skill-import-warning">同名 Skill 一次只能导入一个来源</div>
+                  )}
+                  {selected.has(key) && (
+                    <SkillLocationCheckboxGroup
+                      targets={targets}
+                      value={locationsBySkill[key] ?? []}
+                      onChange={(locations) => setLocations(key, locations)}
+                      legend="接管并投放到"
+                      labelPrefix={`${skill.name}，${targetText}`}
+                    />
+                  )}
+                </div>
               </div>
-            </div>
-          );
-        })}
-      </div>
+            );
+          })}
+        </div>
+      )}
     </FocusedDialog>
   );
 }
@@ -1325,12 +1674,13 @@ function ZipInstallDialog({
   targetText,
   projects,
   allowTargetChange,
-  initialApp,
+  targets,
+  initialLocation,
   pending,
   errorMessage,
   onChoose,
   onTargetChange,
-  onInitialAppChange,
+  onInitialLocationChange,
   onInstall,
   onClose,
 }: {
@@ -1339,12 +1689,13 @@ function ZipInstallDialog({
   targetText: string | null;
   projects: readonly ProjectSummary[];
   allowTargetChange: boolean;
-  initialApp: AgentType | null;
+  targets: readonly SkillPlacementTarget[];
+  initialLocation: SkillLocation | null;
   pending: boolean;
   errorMessage: string;
   onChoose: () => void;
   onTargetChange: (target: ScopeTarget | null) => void;
-  onInitialAppChange: (app: AgentType | null) => void;
+  onInitialLocationChange: (location: SkillLocation | null) => void;
   onInstall: () => void;
   onClose: () => void;
 }) {
@@ -1372,7 +1723,7 @@ function ZipInstallDialog({
             type="button"
             className="skill-button primary"
             onClick={onInstall}
-            disabled={pending || path.trim() === '' || target === null || initialApp === null}
+            disabled={pending || path.trim() === '' || target === null || initialLocation === null}
           >
             {pending ? <Loader2 size={15} className="spin" /> : <Download size={15} />}
             {pending ? '安装中…' : '安装'}
@@ -1386,6 +1737,13 @@ function ZipInstallDialog({
         </div>
       )}
       <div className="skill-zip-dialog-fields">
+        <div className="skill-zip-dialog-file">
+          <span>{path ? path.split(/[\\/]/).pop() : 'ZIP 文件'}</span>
+          <button type="button" className="skill-button" onClick={onChoose} disabled={pending}>
+            选择 ZIP 文件
+          </button>
+          <output aria-live="polite">{path || '尚未选择文件'}</output>
+        </div>
         <label className="skill-dialog-field" htmlFor="skill-zip-target">
           <span>安装目标</span>
           <select
@@ -1406,19 +1764,13 @@ function ZipInstallDialog({
             <span className="skill-dialog-field-hint">当前上下文：{targetText}</span>
           )}
         </label>
-        <InitialAgentRadioGroup
-          name="skill-zip-initial-agent"
-          value={initialApp}
-          onChange={onInitialAppChange}
+        <SkillLocationRadioGroup
+          name="skill-zip-initial-location"
+          targets={targets}
+          value={initialLocation}
+          onChange={onInitialLocationChange}
           disabled={pending}
         />
-        <div className="skill-zip-dialog-file">
-          <span>ZIP 文件</span>
-          <button type="button" className="skill-button" onClick={onChoose} disabled={pending}>
-            选择 ZIP 文件
-          </button>
-          <output aria-live="polite">{path || '尚未选择文件'}</output>
-        </div>
       </div>
     </FocusedDialog>
   );

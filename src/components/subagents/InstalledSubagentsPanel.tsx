@@ -90,34 +90,28 @@ function NativePanel({ context, projects }: Props) {
           ))}
         </div>
       </div>
-      <div className="subagent-toolbar">
-        <label className="subagent-search-field">
-          <Search size={16} aria-hidden="true" />
-          <input
-            aria-label="搜索本地 Subagent"
-            placeholder="搜索名称、Agent 或来源路径"
-            value={search}
-            onChange={(event) => setSearch(event.target.value)}
-            type="search"
-          />
-        </label>
-        <button
-          className="subagent-button"
-          onClick={() => void scan.refetch()}
-          disabled={scan.isFetching}
-        >
-          <RefreshCw size={14} className={scan.isFetching ? 'spin' : ''} aria-hidden="true" />
-          {scan.isFetching ? '扫描中…' : '刷新扫描'}
-        </button>
-        <button className="subagent-button" onClick={() => setShowBackups(true)}>
-          <ArchiveRestore size={14} aria-hidden="true" />
-          备份恢复
-        </button>
+      <div className="native-summary">
+        <header className="polished-page-heading">
+          <h2>已安装</h2>
+          <p>按原生 Agent 管理定义、源码和备份。</p>
+        </header>
+        <div className="native-actions">
+          {' '}
+          <button
+            className="subagent-button"
+            onClick={() => void scan.refetch()}
+            disabled={scan.isFetching}
+          >
+            <RefreshCw size={14} className={scan.isFetching ? 'spin' : ''} aria-hidden="true" />
+            {scan.isFetching ? '扫描中…' : '刷新扫描'}
+          </button>
+          <button className="subagent-button" onClick={() => setShowBackups(true)}>
+            <ArchiveRestore size={14} aria-hidden="true" />
+            备份恢复
+          </button>
+        </div>
       </div>
-      <p className="native-help">
-        按各 Agent 原生格式管理。文件已配置不代表运行中的 Agent
-        已加载；本地定义需显式纳入管理后才能修改。
-      </p>
+
       {notice && (
         <p role="status" className="subagent-status-message">
           {notice}
@@ -142,6 +136,17 @@ function NativePanel({ context, projects }: Props) {
       {definitions.length > 0 && (
         <div className={`native-master-detail${active ? ' has-selection' : ''}`}>
           <div className="native-list" aria-label="本地 Subagent 列表">
+            {' '}
+            <label className="subagent-search-field">
+              <Search size={16} aria-hidden="true" />
+              <input
+                aria-label="搜索本地 Subagent"
+                placeholder="搜索名称、Agent 或来源路径"
+                value={search}
+                onChange={(event) => setSearch(event.target.value)}
+                type="search"
+              />
+            </label>
             {visible.length === 0 && <p className="native-help">没有匹配的定义。</p>}
             {visible.map((item) => (
               <button
@@ -256,7 +261,10 @@ function NativeDetail({
         <p className="subagent-eyebrow">
           {agentLabels[current.agent]} · {current.format}
         </p>
-        <h2>{current.name}</h2>
+        <div className="native-detail-title">
+          <AgentBrandMark app={current.agent} size={28} />
+          <h2>{current.name}</h2>
+        </div>
         <p className="native-help">{current.description}</p>
       </header>
       <dl className="native-facts">
@@ -540,6 +548,7 @@ function NativeBackups({
     <FocusedDialog
       open
       title="Subagent 备份恢复"
+      className="native-backup-dialog"
       onClose={() => {
         if (!busy) onClose();
       }}
@@ -693,6 +702,7 @@ function NativeUpdate({
       <FocusedDialog
         open={preview !== null}
         title="审阅 Subagent 更新"
+        className="native-update-dialog"
         onClose={() => {
           if (!apply.isPending) setPreview(null);
         }}

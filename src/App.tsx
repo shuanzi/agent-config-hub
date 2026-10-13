@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
-import { open as openDirectoryDialog } from '@tauri-apps/plugin-dialog';
+import { open as openDirectoryDialog } from './lib/dialog';
 import {
   Blocks,
+  Library,
+  Globe,
+  Layers,
   Bot,
   ChevronLeft,
   FileText,
@@ -48,7 +51,7 @@ interface ViewNavigationItem {
 }
 
 const viewNavigation: readonly ViewNavigationItem[] = [
-  { view: 'skills', label: 'Skills', icon: Blocks },
+  { view: 'skills', label: 'Skills', icon: Library },
   { view: 'instructions', label: '长期指令', icon: FileText },
   { view: 'subagents', label: 'Subagents', icon: Bot },
 ];
@@ -340,6 +343,7 @@ function ConfigContextRail({
           ref={(node) => onContextButtonRef({ kind: 'all' }, node)}
           aria-current={isCurrentContext(context, { kind: 'all' }) ? 'page' : undefined}
         >
+          <Layers size={17} aria-hidden="true" />
           全部
         </button>
         <button
@@ -353,6 +357,7 @@ function ConfigContextRail({
           ref={(node) => onContextButtonRef({ kind: 'global' }, node)}
           aria-current={isCurrentContext(context, { kind: 'global' }) ? 'page' : undefined}
         >
+          <Globe size={17} aria-hidden="true" />
           全局配置
         </button>
 
@@ -585,12 +590,22 @@ function AssetSubViewTabs({
   );
 }
 
-export function App() {
-  const [currentView, setCurrentView] = useState<View>('skills');
-  const [skillsSubView, setSkillsSubView] = useState<SkillsSubView>('installed');
-  const [subagentsSubView, setSubagentsSubView] = useState<SubagentsSubView>('installed');
+export interface InitialNavigation {
+  view?: View;
+  subView?: AssetSubView;
+  narrowStep?: NarrowStep;
+}
+
+export function App({ initialNavigation = {} }: { initialNavigation?: InitialNavigation }) {
+  const [currentView, setCurrentView] = useState<View>(initialNavigation.view ?? 'skills');
+  const [skillsSubView, setSkillsSubView] = useState<SkillsSubView>(
+    initialNavigation.subView ?? 'installed',
+  );
+  const [subagentsSubView, setSubagentsSubView] = useState<SubagentsSubView>(
+    initialNavigation.subView ?? 'installed',
+  );
   const [configContext, setConfigContext] = useState<ConfigContext>({ kind: 'all' });
-  const [narrowStep, setNarrowStep] = useState<NarrowStep>('type');
+  const [narrowStep, setNarrowStep] = useState<NarrowStep>(initialNavigation.narrowStep ?? 'type');
   const isNarrow = useNarrowWorkbench();
   const wasNarrowRef = useRef(isNarrow);
   const narrowTitleRef = useRef<HTMLSpanElement>(null);
@@ -712,10 +727,13 @@ export function App() {
             aria-label="返回上一步"
           >
             <ChevronLeft size={18} strokeWidth={1.8} aria-hidden="true" />
-            <span>返回</span>
+            <span className="sr-only">返回</span>
           </button>
         )}
         <div className="app-header-brand">
+          <span className="app-brand-icon" aria-hidden="true">
+            <Blocks size={18} />
+          </span>
           <h1 className="app-title">Agent Config Manager</h1>
           <span
             ref={narrowTitleRef}
@@ -723,7 +741,7 @@ export function App() {
             aria-live="polite"
             tabIndex={isNarrow ? -1 : undefined}
           >
-            {isNarrow ? compactTitle : title}
+            {isNarrow ? compactTitle : viewLabels[currentView]}
           </span>
         </div>
       </header>

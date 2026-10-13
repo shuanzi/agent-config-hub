@@ -182,7 +182,7 @@ describe('Workbench shell and visual fixture', () => {
       const table = document.querySelector<HTMLElement>('.skill-table');
       const row = document.querySelector<HTMLElement>('.skill-table .skill-row');
       const cell = document.querySelector<HTMLElement>('.skill-table .skill-row > td');
-      const headers = Array.from(table?.querySelectorAll<HTMLElement>('th') ?? []);
+      const headers = Array.from(table?.querySelectorAll<HTMLElement>('thead th') ?? []);
       const tableRect = table?.getBoundingClientRect();
       return {
         tableDisplay: table ? getComputedStyle(table).display : '',
@@ -194,9 +194,9 @@ describe('Workbench shell and visual fixture', () => {
         viewportWidth: window.innerWidth,
       };
     });
-    expect(tableLayout.tableDisplay).toBe('table');
-    expect(tableLayout.rowDisplay).toBe('table-row');
-    expect(tableLayout.cellDisplay).toBe('table-cell');
+    expect(tableLayout.tableDisplay).toBe('block');
+    expect(tableLayout.rowDisplay).toBe('grid');
+    expect(tableLayout.cellDisplay).toBe('block');
     expect(tableLayout.headerCount).toBe(5);
     expect(tableLayout.tableLeft).toBeGreaterThanOrEqual(0);
     expect(tableLayout.tableRight).toBeLessThanOrEqual(tableLayout.viewportWidth + 1);
@@ -232,7 +232,7 @@ describe('Workbench shell and visual fixture', () => {
         tableDisplay: table ? getComputedStyle(table).display : '',
         headPosition: head ? getComputedStyle(head).position : '',
         rowDisplay: row ? getComputedStyle(row).display : '',
-        agentCount: row?.querySelectorAll("input[type='checkbox']").length ?? 0,
+        agentCount: row?.querySelectorAll('.skill-placement-icon').length ?? 0,
         rowLeft: rowRect?.left ?? Number.NaN,
         rowRight: rowRect?.right ?? Number.NaN,
         viewportWidth: window.innerWidth,
@@ -241,7 +241,7 @@ describe('Workbench shell and visual fixture', () => {
     expect(compactTableLayout.tableDisplay).toBe('block');
     expect(compactTableLayout.headPosition).toBe('absolute');
     expect(compactTableLayout.rowDisplay).toBe('grid');
-    expect(compactTableLayout.agentCount).toBe(4);
+    expect(compactTableLayout.agentCount).toBe(5);
     expect(compactTableLayout.rowLeft).toBeGreaterThanOrEqual(0);
     expect(compactTableLayout.rowRight).toBeLessThanOrEqual(compactTableLayout.viewportWidth + 1);
 

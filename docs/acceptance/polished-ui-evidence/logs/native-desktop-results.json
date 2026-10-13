@@ -1,0 +1,15 @@
+{
+  "zipInstall": "passed; on-disk bytes equal fixture",
+  "projectFolderPicker": "passed; visual-alpha persisted",
+  "cancelFileAndFolderPickers": "passed; parent dialog retained, field unchanged",
+  "appRestart": "passed; same isolation home without terminal environment",
+  "hostConfigFingerprintsUnchanged": true,
+  "hostConfigFileCount": 8,
+  "projects": [
+    [
+      "a07cc1f2189a745c43e8e8589045457b",
+      "visual-alpha",
+      "<repo>/.artifacts/acceptance/home/projects/visual-alpha"
+    ]
+  ]
+}

@@ -8,6 +8,9 @@ import type {
   InstalledSubagent,
   ScopeTarget,
   SkillBackupEntry,
+  SkillLocation,
+  SkillPlacementAsset,
+  SkillPlacementTarget,
   SkillRepo,
   SkillUpdateInfo,
   SubagentBackupEntry,
@@ -23,10 +26,11 @@ declare global {
   }
 }
 
-interface MockState {
+export interface MockState {
   projects: ProjectSummaryFixture[];
   repos: SkillRepo[];
   installed: InstalledSkill[];
+  skillPlacements: SkillPlacementAsset[];
   discoverable: DiscoverableSkill[];
   backups: SkillBackupEntry[];
   subagentRepos: SubagentRepo[];
@@ -45,12 +49,12 @@ interface ProjectSummaryFixture {
   rootPath: string;
 }
 
-type InstructionKind = 'claude' | 'agents';
+type InstructionKind = 'agents';
 
 interface InstructionDocumentFixture {
   kind: InstructionKind;
-  fileName: 'CLAUDE.md' | 'AGENTS.md';
-  appliesTo: readonly ('claude-code' | 'codex' | 'opencode')[];
+  fileName: 'AGENTS.md';
+  paths: string[];
   target: { scope: 'global' } | { scope: 'project'; projectId: string };
   content: string;
   exists: boolean;
@@ -69,9 +73,14 @@ function requireInitialApp(value: unknown): AgentType {
   throw new Error('INVALID_APP_TYPE');
 }
 
+function requireSkillLocation(value: unknown): SkillLocation {
+  if (value === 'shared') return value;
+  return requireInitialApp(value);
+}
+
 function createInstalledSkill(
   skill: DiscoverableSkill,
-  app: AgentType,
+  app: SkillLocation,
   target: ScopeTarget = { scope: 'global' },
 ): InstalledSkill {
   return {
@@ -92,6 +101,74 @@ function createInstalledSkill(
     installedAt: Date.now() / 1000,
     updatedAt: 0,
     target,
+  };
+}
+
+export function skillPlacementTargets(
+  target: ScopeTarget,
+  projects: readonly ProjectSummaryFixture[],
+): SkillPlacementTarget[] {
+  const root =
+    target.scope === 'global'
+      ? '/Users/mock'
+      : (projects.find((project) => project.projectId === target.projectId)?.rootPath ??
+        `/workspaces/${target.projectId}`);
+  const targets: SkillPlacementTarget[] = [
+    {
+      location: 'claude-code',
+      aliases: [],
+      path: `${root}/.claude/skills`,
+      physicalPath: `${root}/.claude/skills`,
+    },
+    {
+      location: 'codex',
+      aliases: [],
+      path: target.scope === 'project' ? `${root}/.agents/skills` : `${root}/.codex/skills`,
+      physicalPath: target.scope === 'project' ? `${root}/.agents/skills` : `${root}/.codex/skills`,
+    },
+    {
+      location: 'gemini-cli',
+      aliases: [],
+      path: `${root}/.gemini/skills`,
+      physicalPath: `${root}/.gemini/skills`,
+    },
+    {
+      location: 'opencode',
+      aliases: [],
+      path:
+        target.scope === 'global' ? `${root}/.config/opencode/skills` : `${root}/.opencode/skills`,
+      physicalPath:
+        target.scope === 'global' ? `${root}/.config/opencode/skills` : `${root}/.opencode/skills`,
+    },
+  ];
+  return target.scope === 'global'
+    ? [
+        {
+          location: 'shared',
+          aliases: [],
+          path: `${root}/.agents/skills`,
+          physicalPath: `${root}/.agents/skills`,
+        },
+        ...targets,
+      ]
+    : targets;
+}
+
+export function createSkillPlacementAsset(
+  skill: InstalledSkill,
+  initialLocation: SkillLocation,
+  projects: readonly ProjectSummaryFixture[],
+): SkillPlacementAsset {
+  return {
+    id: skill.id,
+    target: skill.target,
+    placements: skillPlacementTargets(skill.target, projects).map((placement) => ({
+      ...placement,
+      state: placement.location === initialLocation ? 'placed' : 'absent',
+      withdrawable: placement.location === initialLocation,
+      sourceIsTarget: false,
+      revision: `${skill.id}:${placement.location}:1`,
+    })),
   };
 }
 
@@ -300,25 +377,20 @@ function createVisualInstalledSubagents(): InstalledSubagent[] {
   ];
 }
 
-function createInstructionDocuments(
+export function createInstructionDocuments(
   target: { scope: 'global' } | { scope: 'project'; projectId: string },
-  claudeContent: string,
   agentsContent: string,
 ): InstructionDocumentFixture[] {
   return [
     {
-      kind: 'claude',
-      fileName: 'CLAUDE.md',
-      appliesTo: ['claude-code'],
-      target,
-      content: claudeContent,
-      exists: claudeContent !== '',
-      updatedAt: claudeContent === '' ? undefined : 1725148800,
-    },
-    {
       kind: 'agents',
       fileName: 'AGENTS.md',
-      appliesTo: ['codex', 'opencode'],
+      paths:
+        target.scope === 'global'
+          ? ['/isolated/.codex/AGENTS.md', '/isolated/.config/opencode/AGENTS.md']
+          : [
+              `${visualProjects.find((project) => project.projectId === target.projectId)?.rootPath ?? `/isolated/${target.projectId}`}/AGENTS.md`,
+            ],
       target,
       content: agentsContent,
       exists: agentsContent !== '',
@@ -346,12 +418,18 @@ function projectRootUnavailableError(projectId: string): Error {
 }
 
 export function setupMockInvoke() {
-  const nativeSubagents = createNativeSubagentFixture();
+  const nativeSubagents = createNativeSubagentFixture(
+    new URLSearchParams(window.location.search).get('fixture') === 'polished',
+  );
   const visualFixture = hasVisualFixture();
+  const installed = visualFixture ? createVisualInstalledSkills() : [];
   const state: MockState = {
     projects: visualFixture ? [...visualProjects] : [],
     repos: [...initialRepos],
-    installed: visualFixture ? createVisualInstalledSkills() : [],
+    installed,
+    skillPlacements: installed.map((skill) =>
+      createSkillPlacementAsset(skill, 'codex', visualProjects),
+    ),
     discoverable: visualFixture ? [...visualDiscoverable] : [...initialDiscoverable],
     backups: [],
     subagentRepos: [...initialSubagentRepos],
@@ -362,23 +440,17 @@ export function setupMockInvoke() {
     subagentBackups: [],
     instructionDocuments: visualFixture
       ? {
-          global: createInstructionDocuments(
-            { scope: 'global' },
-            '# Global Claude instructions',
-            '',
-          ),
+          global: createInstructionDocuments({ scope: 'global' }, ''),
           'project:visual-project-alpha': createInstructionDocuments(
             { scope: 'project', projectId: 'visual-project-alpha' },
-            '# Project Claude instructions',
             '# Project shared instructions',
           ),
           'project:visual-project-beta': createInstructionDocuments(
             { scope: 'project', projectId: 'visual-project-beta' },
             '',
-            '',
           ),
         }
-      : { global: createInstructionDocuments({ scope: 'global' }, '', '') },
+      : { global: createInstructionDocuments({ scope: 'global' }, '') },
     skillUpdates: visualFixture
       ? [
           {
@@ -457,6 +529,12 @@ export function setupMockInvoke() {
         return recordsForContext(state.installed, context);
       }
 
+      case 'get_skill_placement_targets':
+        return skillPlacementTargets(args?.target as ScopeTarget, state.projects);
+
+      case 'get_skill_placements':
+        return recordsForContext(state.skillPlacements, args?.context as ConfigContext);
+
       case 'discover_available_skills': {
         const target = args?.target as ScopeTarget;
         return state.discoverable.map((skill) => ({
@@ -470,22 +548,26 @@ export function setupMockInvoke() {
       case 'install_skill': {
         const skill = args?.skill as DiscoverableSkill;
         const target = args?.target as ScopeTarget;
-        const initialApp = requireInitialApp(args?.initialApp);
+        const initialLocation = requireSkillLocation(args?.initialLocation);
         const existingIndex = state.installed.findIndex(
           (installed) => installed.id === skill.key && sameTarget(installed.target, target),
         );
         if (existingIndex >= 0) {
           const existing = state.installed[existingIndex];
-          existing.apps = {
-            claudeCode: existing.apps.claudeCode || initialApp === 'claude-code',
-            codex: existing.apps.codex || initialApp === 'codex',
-            geminiCli: existing.apps.geminiCli || initialApp === 'gemini-cli',
-            opencode: existing.apps.opencode || initialApp === 'opencode',
-          };
+          const placement = state.skillPlacements
+            .find((asset) => asset.id === existing.id && sameTarget(asset.target, target))
+            ?.placements.find((item) => item.location === initialLocation);
+          if (placement) {
+            placement.state = 'placed';
+            placement.withdrawable = true;
+          }
           return existing;
         }
-        const installed = createInstalledSkill(skill, initialApp, target);
+        const installed = createInstalledSkill(skill, initialLocation, target);
         state.installed.push(installed);
+        state.skillPlacements.push(
+          createSkillPlacementAsset(installed, initialLocation, state.projects),
+        );
         return installed;
       }
 
@@ -503,24 +585,25 @@ export function setupMockInvoke() {
             createdAt: Date.now() / 1000,
             skill: removed,
           });
+          state.skillPlacements = state.skillPlacements.filter(
+            (asset) => asset.id !== id || !sameTarget(asset.target, target),
+          );
         }
         return { backupPath: `/tmp/backups/${id}` };
       }
 
-      case 'toggle_skill_app': {
+      case 'set_skill_placement': {
         const id = args?.id as string;
         const target = args?.target as ScopeTarget;
-        const app = args?.app as AgentType;
-        const enabled = args?.enabled as boolean;
-        const skill = state.installed.find(
-          (installed) => installed.id === id && sameTarget(installed.target, target),
-        );
-        if (skill !== undefined) {
-          skill.apps = {
-            ...skill.apps,
-            [app === 'claude-code' ? 'claudeCode' : app === 'gemini-cli' ? 'geminiCli' : app]:
-              enabled,
-          };
+        const location = requireSkillLocation(args?.location);
+        const placed = args?.placed as boolean;
+        const placement = state.skillPlacements
+          .find((asset) => asset.id === id && sameTarget(asset.target, target))
+          ?.placements.find((item) => item.location === location);
+        if (placement !== undefined) {
+          placement.state = placed ? 'placed' : 'absent';
+          placement.withdrawable = placed;
+          placement.revision = `${id}:${location}:${Date.now()}`;
         }
         return undefined;
       }
@@ -607,7 +690,7 @@ export function setupMockInvoke() {
 
       case 'install_skills_from_zip': {
         const filePath = args?.filePath as string;
-        const initialApp = requireInitialApp(args?.initialApp);
+        const initialLocation = requireSkillLocation(args?.initialLocation);
         const target = args?.target as ScopeTarget;
         const directory =
           filePath
@@ -626,17 +709,41 @@ export function setupMockInvoke() {
             repoBranch: 'local',
             installed: false,
           },
-          initialApp,
+          initialLocation,
           target,
         );
         state.installed.push(installed);
+        state.skillPlacements.push(
+          createSkillPlacementAsset(installed, initialLocation, state.projects),
+        );
         return [installed];
+      }
+
+      case 'preview_skill_import': {
+        const selections = args?.selections as Array<{
+          directory: string;
+          sourcePath: string;
+          locations: SkillLocation[];
+        }>;
+        return {
+          revision: `preview:${Date.now()}`,
+          items: selections.map((selection) => ({
+            directory: selection.directory,
+            sourcePath: selection.sourcePath,
+            storagePath: `/Users/mock/.agent-config-manager/skills/${selection.directory}`,
+            actions: selection.locations.map((location) => ({
+              path: `${skillPlacementTargets(args?.target as ScopeTarget, state.projects).find((item) => item.location === location)?.path}/${selection.directory}`,
+              action: '复制到受管位置并创建投放',
+            })),
+          })),
+        };
       }
 
       case 'import_skills_from_apps': {
         const selections = args?.selections as Array<{
           directory: string;
-          apps: InstalledSkill['apps'];
+          sourcePath: string;
+          locations: SkillLocation[];
         }>;
         const target = args?.target as ScopeTarget;
         const imported = selections.map(
@@ -645,13 +752,27 @@ export function setupMockInvoke() {
               id: `import:${selection.directory}`,
               name: selection.directory,
               directory: selection.directory,
-              apps: selection.apps,
+              apps: {
+                claudeCode: false,
+                codex: false,
+                geminiCli: false,
+                opencode: false,
+              },
               installedAt: Date.now() / 1000,
               updatedAt: 0,
               target,
             }) satisfies InstalledSkill,
         );
         state.installed.push(...imported);
+        state.skillPlacements.push(
+          ...imported.map((skill, index) =>
+            createSkillPlacementAsset(
+              skill,
+              selections[index].locations[0] ?? 'codex',
+              state.projects,
+            ),
+          ),
+        );
         return imported;
       }
 

@@ -1,5 +1,7 @@
 # ADR-0003：FrontendGateway 使用三个显式 command 与单一 invalidation event
 
+> 现行适用性（2026-09-27）：**已替代**。由 ADR-0020 的直接 Tauri 命令模型替代。 以下保留历史决策理由；现状见[架构说明](../README.md)，其他决策见[索引](README.md)。
+
 > 状态：Superseded（2026-08-22，由 ADR-0020 取代）
 >
 > 决策日期：2026-07-27

@@ -3,7 +3,6 @@ import { ArrowLeft, Check, FileText, Save } from 'lucide-react';
 import type { ConfigContext, InstructionDocument, ProjectSummary, ScopeTarget } from '../../types';
 import { useInstructionDocuments, useSaveInstructionDocument } from '../../hooks/usePrompts';
 import { toUserError } from '../../lib/errors';
-import { AgentBrandMark, agentLabels } from '../workbench/AgentBrandMark';
 import './instructions.css';
 
 interface InstructionsPanelProps {
@@ -74,7 +73,7 @@ function contextKey(context: ConfigContext): string {
 }
 
 function documentSummary(document: InstructionDocument): string {
-  return document.kind === 'claude' ? '仅对 Claude Code 生效' : '对 Codex、OpenCode 生效';
+  return `${document.paths.length} 个保存位置`;
 }
 
 function groupDocuments(documents: InstructionDocument[]): InstructionDocumentGroup[] {
@@ -93,22 +92,19 @@ function groupDocuments(documents: InstructionDocument[]): InstructionDocumentGr
   return [...groups.values()];
 }
 
-function DocumentAppliesTo({ document }: { document: InstructionDocument }) {
+function DocumentPaths({ document }: { document: InstructionDocument }) {
   return (
-    <div
-      className="instruction-document-applies-to"
-      aria-label={`适用 Agent：${document.appliesTo.map((app) => agentLabels[app]).join('、')}`}
-    >
-      <span>适用于</span>
-      <div>
-        {document.appliesTo.map((app) => (
-          <span key={app} className="instruction-document-agent">
-            <AgentBrandMark app={app} size={16} />
-            {agentLabels[app]}
-          </span>
+    <section className="instruction-document-paths" aria-label="保存位置">
+      <h3>保存位置</h3>
+      <ul>
+        {document.paths.map((path, index) => (
+          <li key={`${index}:${path}`}>
+            <code>{path}</code>
+          </li>
         ))}
-      </div>
-    </div>
+      </ul>
+      <p>Agent 是否加载此文件，由其自身机制和配置决定。</p>
+    </section>
   );
 }
 
@@ -219,6 +215,10 @@ export function InstructionsPanel({ context, projects = [] }: InstructionsPanelP
       data-instructions-surface={isNarrow ? narrowSurface : undefined}
       data-instruction-context={context.kind}
     >
+      <header className="polished-page-heading">
+        <h2>长期指令</h2>
+        <p>按配置目标维护 AGENTS.md，查看每个文档的实际保存位置。</p>
+      </header>
       {errorMessage && (
         <div className="instructions-error" role="alert">
           {errorMessage}
@@ -236,9 +236,9 @@ export function InstructionsPanel({ context, projects = [] }: InstructionsPanelP
             <div>
               <p className="instructions-list-eyebrow">{contextLabel(context, projects)}</p>
               <h2 ref={listHeadingRef} tabIndex={-1}>
-                长期指令
+                文档
               </h2>
-              <p>维护 CLAUDE.md 与 AGENTS.md</p>
+              <p>每个目标一个逻辑文档</p>
             </div>
           </header>
 
@@ -283,12 +283,26 @@ export function InstructionsPanel({ context, projects = [] }: InstructionsPanelP
                             data-instruction-kind={document.kind}
                             data-instruction-target={targetKey(document.target)}
                           >
+                            <span className="instruction-row-target">
+                              {targetLabel(document.target, projects)}
+                            </span>
                             <span className="instruction-row-title">
                               <span className="asset-name">{document.fileName}</span>
                               <span className="instruction-file-state">
                                 {document.exists ? '已创建' : '未创建'}
                               </span>
                             </span>
+                            {document.target.scope === 'project' && (
+                              <span className="instruction-row-path">
+                                {
+                                  projects.find(
+                                    (project) =>
+                                      document.target.scope === 'project' &&
+                                      project.projectId === document.target.projectId,
+                                  )?.rootPath
+                                }
+                              </span>
+                            )}
                             <span className="instruction-row-summary">
                               {documentSummary(document)}
                             </span>
@@ -337,13 +351,13 @@ export function InstructionsPanel({ context, projects = [] }: InstructionsPanelP
                 </span>
               </header>
 
-              <DocumentAppliesTo document={selectedDocument} />
+              <DocumentPaths document={selectedDocument} />
 
               <div className="instructions-editor-surface">
                 <header>
                   <div>
                     <h3>Markdown 内容</h3>
-                    <p>保存后将直接写入 {selectedDocument.fileName}。</p>
+                    <p>保存后将同一内容写入上述 {selectedDocument.paths.length} 个位置。</p>
                   </div>
                   <span>{selectedDocument.fileName}</span>
                 </header>
@@ -363,9 +377,11 @@ export function InstructionsPanel({ context, projects = [] }: InstructionsPanelP
                 />
                 <footer className="instruction-document-actions">
                   <span>
-                    {selectedDocument.exists
-                      ? '编辑并保存当前文件。'
-                      : '填写内容并保存以创建此文件。'}
+                    {draftContent !== selectedDocument.content
+                      ? '有未保存的修改'
+                      : selectedDocument.exists
+                        ? '已保存'
+                        : '填写内容并保存以创建此文件。'}
                   </span>
                   <button
                     type="button"

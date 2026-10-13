@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Polished UI 验收入口</title>
+    <style>
+      body {
+        margin: 0;
+        background: #f6f7f9;
+        color: #172033;
+        font:
+          15px/1.6 system-ui,
+          sans-serif;
+      }
+      main {
+        max-width: 960px;
+        margin: auto;
+        padding: 48px 24px;
+      }
+      h1 {
+        font-size: 28px;
+      }
+      p {
+        color: #64748b;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+        gap: 16px;
+      }
+      section {
+        padding: 24px;
+        border: 1px solid #e2e8f0;
+        border-radius: 12px;
+        background: white;
+      }
+      h2 {
+        font-size: 18px;
+        margin: 0 0 12px;
+      }
+      a {
+        display: block;
+        padding: 8px 0;
+        color: #2563eb;
+      }
+      code {
+        background: #eff6ff;
+        padding: 2px 5px;
+        border-radius: 4px;
+      }
+      aside {
+        margin-top: 24px;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Polished UI 验收入口</h1>
+      <p>
+        浏览器演示使用模拟数据和正式 App
+        组件。所有操作仅修改当前页面内存，刷新恢复样例。真实文件验收请运行
+        <code>npm run accept:app</code>。
+      </p>
+      <div class="grid">
+        <section>
+          <h2>Skills</h2>
+          <a href="../l2/workbench.html?fixture=polished">紧凑列表、详情与投放状态</a
+          ><a href="../l2/workbench.html?fixture=polished&tab=discovery">发现与安装</a>
+          <p>在“全部”先选择操作目标，再打开导入、备份或 ZIP；未接管图标进入详情处理。</p>
+        </section>
+        <section>
+          <h2>长期指令</h2>
+          <a href="../l2/workbench.html?fixture=polished&page=instructions">AGENTS.md 编辑与路径</a>
+          <p>全局两个保存位置，两个同名项目分别编辑；写入后切换目标验证回读。</p>
+        </section>
+        <section>
+          <h2>原生 Subagents</h2>
+          <a href="../l2/workbench.html?fixture=polished&page=subagents">本地定义、编辑与备份</a
+          ><a href="../l2/workbench.html?fixture=polished&page=subagents&tab=discovery"
+            >发现与项目 Codex 安装</a
+          >
+          <p>选择 repo-reviewer 查看源码及更新；security-reviewer 验证接管。</p>
+        </section>
+        <section>
+          <h2>设置</h2>
+          <a href="../l2/workbench.html?fixture=polished&page=settings">同步、迁移与覆盖路径</a>
+          <p>同步方式即时保存；存储迁移需要确认；覆盖路径统一保存。</p>
+        </section>
+        <section>
+          <h2>状态</h2>
+          <a href="../l2/workbench.html?fixture=polished&scenario=empty">Skills 空态</a
+          ><a href="../l2/workbench.html?fixture=polished&scenario=loading">持续加载态</a
+          ><a href="../l2/workbench.html?fixture=polished&scenario=error"
+            >读取失败 → 点击重新读取恢复</a
+          >
+          <p>正常列表包含未接管与冲突位置。文件选择确认框支持选择样例和取消。</p>
+        </section>
+        <section>
+          <h2>窄屏导航</h2>
+          <a href="../l2/workbench.html?fixture=polished&step=type">资产类型入口</a
+          ><a href="../l2/workbench.html?fixture=polished&step=context">配置上下文入口</a>
+          <p>将窗口缩至 390×844，验证逐层返回、44px 操作区域与更多操作弹窗。</p>
+        </section>
+      </div>
+      <aside>
+        对照尺寸：1586×992、1280×800、390×844。示例路径属于模拟数据，桌面应用显示实际隔离目录。
+      </aside>
+    </main>
+  </body>
+</html>

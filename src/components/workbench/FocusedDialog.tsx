@@ -60,6 +60,7 @@ export function FocusedDialog({
     initialFocus.focus();
 
     const handleKeyDown = (event: KeyboardEvent) => {
+      if (Array.from(document.querySelectorAll('[role="dialog"]')).at(-1) !== dialog) return;
       if (event.key === 'Escape') {
         event.preventDefault();
         onCloseRef.current();

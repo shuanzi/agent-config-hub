@@ -1,0 +1,32 @@
+
+> agent-config-manager@0.1.0 accept:app
+> node scripts/acceptance/app.mjs
+
+
+隔离桌面验收
+ACM_HOME=<repo>/.artifacts/acceptance/home
+项目目录：<repo>/.artifacts/acceptance/home/projects
+ZIP：<repo>/.artifacts/acceptance/home/fixtures/acceptance-skill.zip
+重复启动保留数据；--fresh 另建目录。退出后可使用 --home 指定本次目录。
+
+
+> agent-config-manager@0.1.0 build:frontend
+> tsc -b && vite build --outDir <repo>/.artifacts/acceptance/frontend
+
+vite v6.4.3 building for production...
+transforming...
+✓ 1884 modules transformed.
+rendering chunks...
+computing gzip size...
+.artifacts/acceptance/frontend/index.html                             0.74 kB │ gzip:  0.48 kB
+.artifacts/acceptance/frontend/assets/InterVariable-DiVDrmQJ.woff2  352.24 kB
+.artifacts/acceptance/frontend/assets/index-6VCykACn.css             87.36 kB │ gzip: 14.25 kB
+.artifacts/acceptance/frontend/assets/index-ChhXeKG2.js             320.82 kB │ gzip: 94.13 kB
+✓ built in 848ms
+        Info Looking up installed tauri packages to check mismatched versions...
+   Compiling agent-config-manager v0.1.0 (<repo>/src-tauri)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 8.14s
+       Built application at: <repo>/.artifacts/acceptance/target/debug/agent-config-manager
+    Bundling Agent Config Manager UI Acceptance.app (<repo>/.artifacts/acceptance/target/debug/bundle/macos/Agent Config Manager UI Acceptance.app)
+    Finished 1 bundle at:
+        <repo>/.artifacts/acceptance/target/debug/bundle/macos/Agent Config Manager UI Acceptance.app

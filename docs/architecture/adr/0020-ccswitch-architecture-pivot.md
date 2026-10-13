@@ -1,5 +1,7 @@
 # ADR-0020：架构 pivot —— 采用 cc-switch 式直接命令 + SQLite SSOT/投影 资产管理架构
 
+> 现行适用性（2026-09-27）：**部分有效**。直接命令、按资产服务及 React Query 仍适用；指令预设和统一 Subagent 投影已被单一 AGENTS.md 与 ADR-0021 原生模型替代。 以下保留历史决策理由；现状见[架构说明](../README.md)，其他决策见[索引](README.md)。
+
 > 状态：Accepted
 >
 > Subagent 原生管理部分于 2026-09-08 由 [ADR-0021](0021-native-subagent-management.md) 更新；不再把统一 Markdown 跨 Agent 投放。
@@ -8,7 +10,7 @@
 >
 > 取代：ADR-0003、ADR-0004、ADR-0011（均标记 Superseded）
 >
-> 依据：OpenSpec change `adopt-ccswitch-asset-management`（proposal/design/tasks 已冻结）
+> 历史依据：[2026-08 架构调整提案](https://github.com/shuanzi/agent-config-hub/blob/4448ffcfbb89704c7975067de0bff58da4a5c4c7/openspec/changes/archive/2026-08-23-adopt-ccswitch-asset-management/proposal.md)。该历史文件不再承担现行维护入口。
 
 ## 背景
 

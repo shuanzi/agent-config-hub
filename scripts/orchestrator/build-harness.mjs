@@ -1,11 +1,11 @@
 /* global console */
 /**
- * L3 harness 构建（test-tauri.mjs 与 perf.mjs 共用，ARC-06c §3.15/§3.16）。
+ * L3 harness 构建（由 test-tauri.mjs 使用；旧 perf.mjs 不在有效验证链路中）。
  *
- * 顺序（命令固化自 tests/l3/README.md）：
+ * 顺序（环境与证据边界见 docs/development.md）：
  * 1. `corepack npm exec -- tsc -b`（类型检查）；
  * 2. `corepack npm exec -- vite build --config vite.l3.config.ts`
- *    （harness 前端构建：含 tests/l3/contract.html 测试入口；生产
+ *    （harness 前端构建：含 tests/l3 的 smoke/app 测试入口；生产
  *    `build:frontend` 保持单入口，物理不含测试入口）；
  * 3. `tauri build --debug --no-bundle -c src-tauri/tauri.conf.test-harness.json
  *    -- --features test-harness`；

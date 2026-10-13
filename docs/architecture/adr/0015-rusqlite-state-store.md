@@ -1,5 +1,7 @@
 # ADR-0015：采用 rusqlite 与内嵌 forward-only migration
 
+> 现行适用性（2026-09-27）：**部分有效**。rusqlite 与前向迁移仍适用；表结构以当前 schema 为准，旧 StateStore/Gateway 语义已替代。 以下保留历史决策理由；现状见[架构说明](../README.md)，其他决策见[索引](README.md)。
+
 > 状态：Accepted
 >
 > 决策日期：2026-07-27

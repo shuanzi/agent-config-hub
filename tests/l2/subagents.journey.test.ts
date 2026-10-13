@@ -76,7 +76,7 @@ describe('原生 Subagent 管理旅程', () => {
     [1280, 800],
     [390, 844],
   ]) {
-    it(`${width} 宽度四品牌可见、无横向溢出`, async () => {
+    it(`${width} 宽度原生品牌可见、无横向溢出`, async () => {
       await browser.setViewport({ width, height, devicePixelRatio: 1 });
       await openSubagents();
       if (!(await $('.native-row').isDisplayed())) {
@@ -86,24 +86,25 @@ describe('原生 Subagent 管理旅程', () => {
         viewportWidth: window.innerWidth,
         viewportHeight: window.innerHeight,
         overflow: document.documentElement.scrollWidth > window.innerWidth,
-        logos: [...document.querySelectorAll<HTMLImageElement>('.subagent-agent-counts img')].map(
-          (image) => ({
-            complete: image.complete && image.naturalWidth > 0,
-            width: image.getBoundingClientRect().width,
-          }),
-        ),
+        logos: [...document.querySelectorAll<HTMLImageElement>('.native-row img')].map((image) => ({
+          complete: image.complete && image.naturalWidth > 0,
+          width: image.getBoundingClientRect().width,
+        })),
       }));
       expect(result.viewportWidth).toBe(width);
       expect(result.viewportHeight).toBe(height);
       expect(result.overflow).toBe(false);
-      expect(result.logos.length).toBe(4);
+      expect(result.logos.length).toBe(8);
       expect(result.logos.every((logo) => logo.complete && logo.width > 0)).toBe(true);
-      await mkdir('output/playwright', { recursive: true });
-      await browser.saveScreenshot(`output/playwright/native-subagents-${width}.png`);
+      await mkdir('/tmp/acm-polished-evidence', { recursive: true });
+      await browser.saveScreenshot(`/tmp/acm-polished-evidence/native-subagents-${width}.png`);
       await $('[data-native-identity="codex:reviewer"]').click();
       await $("//button[normalize-space()='查看原生源码']").click();
       await $('[aria-label="Subagent 原生源码"]').waitForDisplayed();
-      await browser.saveScreenshot(`output/playwright/native-subagent-detail-${width}.png`);
+      await browser.saveScreenshot(
+        `/tmp/acm-polished-evidence/native-subagent-detail-${width}.png`,
+      );
+      if (width === 390) await $("//button[normalize-space()='返回列表']").click();
       await $("//button[contains(@class,'sub-tab')][normalize-space()='发现']").click();
       const target = $('[aria-label="选择 Subagent 发现目标"]');
       if (await target.isExisting()) await target.selectByAttribute('value', 'global');
@@ -123,7 +124,9 @@ describe('原生 Subagent 管理旅程', () => {
       expect(dialogMetrics.targets.length).toBe(4);
       if (width === 390) expect(dialogMetrics.targets.every((height) => height >= 44)).toBe(true);
       if (width === 390) expect(dialogMetrics.closeHeight).toBeGreaterThanOrEqual(44);
-      await browser.saveScreenshot(`output/playwright/native-subagent-install-${width}.png`);
+      await browser.saveScreenshot(
+        `/tmp/acm-polished-evidence/native-subagent-install-${width}.png`,
+      );
     });
   }
 });

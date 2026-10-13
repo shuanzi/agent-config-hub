@@ -563,6 +563,196 @@
   padding: 18px 20px 20px;
 }
 
+.skill-detail-section h3 {
+  margin: 0 0 6px;
+  color: var(--wb-ink);
+  font-size: 13px;
+}
+
+.skill-placement-note {
+  margin: 0;
+  color: var(--wb-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.skill-detail-section .skill-placement-note {
+  margin-bottom: 12px;
+}
+
+.skill-location-options {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.skill-location-options legend {
+  margin-bottom: 8px;
+  color: var(--wb-ink);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.skill-location-options > label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 8px 9px;
+  border: 1px solid var(--wb-line);
+  border-radius: 7px;
+  background: var(--wb-panel);
+  cursor: pointer;
+}
+
+.skill-location-options > label:has(input:checked) {
+  border-color: color-mix(in srgb, var(--wb-blue) 42%, var(--wb-line));
+  background: var(--wb-blue-soft);
+}
+
+.skill-location-options input {
+  flex: none;
+  margin: 0;
+  accent-color: var(--wb-blue);
+}
+
+.skill-placement-identity {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  flex: 1;
+}
+
+.skill-placement-name,
+.skill-placement-marks {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+
+.skill-placement-name {
+  color: var(--wb-ink);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.skill-shared-mark {
+  display: inline-flex;
+  color: var(--wb-blue);
+}
+
+.skill-placement-identity code {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--wb-muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 10px;
+  font-weight: 400;
+  overflow-wrap: anywhere;
+  text-overflow: ellipsis;
+}
+
+.skill-placement-controls {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+}
+
+.skill-placement-row {
+  display: grid;
+  grid-template-columns: minmax(130px, 1fr) auto auto;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 7px 8px;
+  border: 1px solid var(--wb-line);
+  border-radius: 7px;
+  background: var(--wb-panel-muted);
+}
+
+.skill-placement-row.is-conflict,
+.skill-placement-row.is-unmanaged {
+  border-color: color-mix(in srgb, var(--wb-amber) 32%, var(--wb-line));
+}
+
+.skill-placement-state {
+  color: var(--wb-muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.skill-placement-row.is-placed .skill-placement-state {
+  color: #166534;
+}
+
+.skill-placement-row.is-conflict .skill-placement-state,
+.skill-placement-row.is-unmanaged .skill-placement-state,
+.skill-placement-reason {
+  color: var(--wb-amber);
+}
+
+.skill-placement-reason {
+  grid-column: 1 / -1;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.skill-placement-switch {
+  position: relative;
+  display: inline-flex;
+  width: 30px;
+  height: 18px;
+  cursor: pointer;
+}
+
+.skill-placement-switch input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+
+.skill-placement-switch > span {
+  width: 100%;
+  border-radius: 9px;
+  background: var(--wb-line-strong);
+  transition: background 120ms ease;
+}
+
+.skill-placement-switch > span::after {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #fff;
+  content: '';
+  transition: transform 120ms ease;
+}
+
+.skill-placement-switch input:checked + span {
+  background: var(--wb-blue);
+}
+
+.skill-placement-switch input:checked + span::after {
+  transform: translateX(12px);
+}
+
+.skill-placement-switch:has(input:focus-visible) {
+  outline: 2px solid var(--wb-blue);
+  outline-offset: 2px;
+}
+
+.skill-placement-switch:has(input:disabled) {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
 .skill-toggle-group {
   min-width: 0;
   margin: 0;
@@ -660,6 +850,56 @@
   gap: 8px;
 }
 
+.skill-import-preview,
+.skill-import-preview-item {
+  display: grid;
+  gap: 10px;
+}
+
+.skill-import-preview-item {
+  padding: 11px;
+  border: 1px solid var(--wb-line);
+  border-radius: 7px;
+  background: var(--wb-panel-muted);
+}
+
+.skill-import-preview-item h3,
+.skill-import-preview-item dl,
+.skill-import-preview-item ul {
+  margin: 0;
+}
+
+.skill-import-preview-item dl,
+.skill-import-preview-item li {
+  display: grid;
+  gap: 5px;
+}
+
+.skill-import-preview-item dl {
+  gap: 8px;
+}
+
+.skill-import-preview-item dt,
+.skill-import-preview-item li span {
+  color: var(--wb-faint);
+  font-size: 11px;
+}
+
+.skill-import-preview-item dd {
+  margin: 2px 0 0;
+}
+
+.skill-import-preview-item code {
+  overflow-wrap: anywhere;
+  color: var(--wb-muted);
+  font-size: 11px;
+}
+
+.skill-import-preview-item ul {
+  gap: 8px;
+  padding-left: 18px;
+}
+
 .skill-import-item,
 .skill-backup-item {
   display: flex;
@@ -708,6 +948,10 @@
 
 .skill-import-item .skill-toggle-group {
   margin-top: 8px;
+}
+
+.skill-import-item .skill-location-options {
+  margin-top: 10px;
 }
 
 .skill-import-warning {
@@ -962,29 +1206,29 @@
 }
 
 .skill-table th:nth-child(1) {
-  width: 29%;
+  width: 22%;
 }
 
 .skill-table th:nth-child(2) {
-  width: 20%;
-}
-
-.skill-table th:nth-child(3) {
   width: 16%;
 }
 
+.skill-table th:nth-child(3) {
+  width: 12%;
+}
+
 .skill-table th:nth-child(4) {
-  width: 25%;
+  width: auto;
 }
 
 .skill-table th:nth-child(5) {
-  width: 110px;
+  width: 84px;
 }
 
 .skill-table .skill-row {
   display: table-row;
   min-width: 0;
-  height: 64px;
+  height: auto;
   border: 0;
 }
 
@@ -1034,9 +1278,23 @@
 }
 
 .skill-table .skill-row-target,
-.skill-table .skill-row-agent-cell,
 .skill-table .skill-row-actions {
   white-space: nowrap;
+}
+
+.skill-table .skill-placement-row {
+  grid-template-columns: minmax(100px, 1fr) auto auto;
+  padding: 5px 6px;
+}
+
+.skill-table .skill-placement-name {
+  font-size: 11px;
+}
+
+.skill-table .skill-placement-row .skill-button {
+  min-height: 26px;
+  padding-inline: 7px;
+  font-size: 11px;
 }
 
 .skill-table .skill-target-badge {
@@ -1143,7 +1401,8 @@
     grid-template-areas:
       'name actions'
       'source source'
-      'target agents';
+      'target target'
+      'agents agents';
     min-height: 0;
     height: auto;
     overflow: hidden;
@@ -1175,7 +1434,15 @@
   .skill-table .skill-row-agent-cell {
     grid-area: agents;
     padding-bottom: 10px;
-    text-align: right;
+    text-align: left;
+  }
+
+  .skill-placement-row {
+    grid-template-columns: minmax(0, 1fr) auto auto;
+  }
+
+  .skill-location-options > label {
+    align-items: flex-start;
   }
 
   .skill-table .skill-row-actions {

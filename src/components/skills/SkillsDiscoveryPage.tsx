@@ -8,13 +8,15 @@ import {
   Search,
   Settings,
   Trash2,
+  Crosshair,
 } from 'lucide-react';
 import type {
-  AgentType,
   ConfigContext,
   InstalledSkill,
   ProjectSummary,
   ScopeTarget,
+  SkillLocation,
+  SkillPlacementTarget,
 } from '../../types';
 import {
   useAddSkillRepo,
@@ -23,13 +25,14 @@ import {
   useInstalledSkills,
   useRemoveSkillRepo,
   useSkillRepos,
+  useSkillPlacementTargets,
   useUninstallSkill,
 } from '../../hooks/useSkills';
 import { toUserError } from '../../lib/errors';
 import { FocusedDialog } from '../workbench/FocusedDialog';
-import { InitialAgentRadioGroup } from '../workbench/InitialAgentRadioGroup';
 import { RepoManagerPanel } from './RepoManagerPanel';
 import { SkillCard, type SkillCardSkill } from './SkillCard';
+import { SkillLocationRadioGroup, skillLocationLabels } from './SkillPlacementControls';
 import './skills.css';
 
 interface SkillsDiscoveryPageProps {
@@ -84,19 +87,21 @@ function targetLabel(target: ScopeTarget, projects: readonly ProjectSummary[]): 
 function SkillInstallDialog({
   skill,
   targetText,
-  initialApp,
+  targets,
+  initialLocation,
   pending,
   errorMessage,
-  onInitialAppChange,
+  onInitialLocationChange,
   onConfirm,
   onClose,
 }: {
   skill: SkillCardSkill | null;
   targetText: string | null;
-  initialApp: AgentType | null;
+  targets: readonly SkillPlacementTarget[];
+  initialLocation: SkillLocation | null;
   pending: boolean;
   errorMessage: string;
-  onInitialAppChange: (app: AgentType) => void;
+  onInitialLocationChange: (location: SkillLocation) => void;
   onConfirm: () => void;
   onClose: () => void;
 }) {
@@ -118,7 +123,7 @@ function SkillInstallDialog({
             type="button"
             className="skill-button primary"
             onClick={onConfirm}
-            disabled={pending || targetText === null || initialApp === null}
+            disabled={pending || targetText === null || initialLocation === null}
           >
             {pending ? <Loader2 size={15} className="spin" /> : <Download size={15} />}
             {pending ? '安装中…' : '确认安装'}
@@ -132,13 +137,14 @@ function SkillInstallDialog({
         </div>
       )}
       <p className="skill-dialog-copy">
-        安装后仅启用所选初始 Agent，其他 Agent 可在已安装详情中调整。
+        安装后会投放到所选目录。Agent 是否发现或使用该 Skill，取决于 Agent 自身机制。
       </p>
       <p className="skill-dialog-field-hint">安装目标：{targetText ?? '未选择目标'}</p>
-      <InitialAgentRadioGroup
-        name="skill-install-initial-agent"
-        value={initialApp}
-        onChange={onInitialAppChange}
+      <SkillLocationRadioGroup
+        name="skill-install-initial-location"
+        targets={targets}
+        value={initialLocation}
+        onChange={onInitialLocationChange}
         disabled={pending}
       />
     </FocusedDialog>
@@ -252,7 +258,7 @@ export function SkillsDiscoveryPage({ context, projects }: SkillsDiscoveryPagePr
   const [statusMessage, setStatusMessage] = useState('');
   const [selectedSkillKey, setSelectedSkillKey] = useState<string | null>(null);
   const [installDialogKey, setInstallDialogKey] = useState<string | null>(null);
-  const [initialApp, setInitialApp] = useState<AgentType | null>(null);
+  const [initialLocation, setInitialLocation] = useState<SkillLocation | null>(null);
   const [uninstallTarget, setUninstallTarget] = useState<InstalledSkill | null>(null);
   const [allDiscoveryTarget, setAllDiscoveryTarget] = useState<ScopeTarget | null>(null);
   const detailBackButtonRef = useRef<HTMLButtonElement>(null);
@@ -269,6 +275,20 @@ export function SkillsDiscoveryPage({ context, projects }: SkillsDiscoveryPagePr
     refetch: refetchDiscoverable,
   } = useDiscoverableSkills(discoveryTarget);
   const { data: installedSkills } = useInstalledSkills(context);
+  const {
+    data: placementTargets = [],
+    isPlaceholderData: placementTargetsStale,
+    isFetching: fetchingPlacementTargets,
+    isError: placementTargetsError,
+  } = useSkillPlacementTargets(discoveryTarget);
+  const installTargetsReady =
+    !placementTargetsStale && !fetchingPlacementTargets && !placementTargetsError;
+  const installLocationValid =
+    installTargetsReady &&
+    initialLocation !== null &&
+    placementTargets.some(
+      (target) => target.location === initialLocation || target.aliases.includes(initialLocation),
+    );
   const { data: repos = [] } = useSkillRepos();
   const installMutation = useInstallSkill();
   const uninstallMutation = useUninstallSkill();
@@ -354,7 +374,7 @@ export function SkillsDiscoveryPage({ context, projects }: SkillsDiscoveryPagePr
     setAllDiscoveryTarget(null);
     setSelectedSkillKey(null);
     setInstallDialogKey(null);
-    setInitialApp(null);
+    setInitialLocation(null);
     setUninstallTarget(null);
     window.setTimeout(() => panelHeadingRef.current?.focus(), 0);
   }, [context]);
@@ -375,7 +395,7 @@ export function SkillsDiscoveryPage({ context, projects }: SkillsDiscoveryPagePr
     previousDiscoveryTargetRef.current = nextTargetValue;
     setSelectedSkillKey(null);
     setInstallDialogKey(null);
-    setInitialApp(null);
+    setInitialLocation(null);
     setUninstallTarget(null);
     window.setTimeout(() => panelHeadingRef.current?.focus(), 0);
   }, [discoveryTarget]);
@@ -408,7 +428,7 @@ export function SkillsDiscoveryPage({ context, projects }: SkillsDiscoveryPagePr
     if (skill === undefined || skill.installed) return;
     clearFeedback();
     if (requireDiscoveryTarget() === null) return;
-    setInitialApp(null);
+    setInitialLocation(null);
     setInstallDialogKey(key);
   };
 
@@ -431,16 +451,22 @@ export function SkillsDiscoveryPage({ context, projects }: SkillsDiscoveryPagePr
     clearFeedback();
     const target = requireDiscoveryTarget();
     if (target === null) return;
-    const selectedInitialApp = initialApp;
-    if (selectedInitialApp === null) {
-      setErrorMessage('请选择安装后要启用的初始 Agent。');
+    const selectedInitialLocation = initialLocation;
+    if (selectedInitialLocation === null || !installLocationValid) {
+      setErrorMessage('请选择安装后的初始投放位置。');
       return;
     }
     try {
-      await installMutation.mutateAsync({ skill, target, initialApp: selectedInitialApp });
+      await installMutation.mutateAsync({
+        skill,
+        target,
+        initialLocation: selectedInitialLocation,
+      });
       setInstallDialogKey(null);
-      setInitialApp(null);
-      setStatusMessage(`已安装 ${skill.name}。`);
+      setInitialLocation(null);
+      setStatusMessage(
+        `已安装 ${skill.name}，并投放到 ${skillLocationLabels[selectedInitialLocation]}。`,
+      );
     } catch (error) {
       reportError(error);
     }
@@ -494,21 +520,46 @@ export function SkillsDiscoveryPage({ context, projects }: SkillsDiscoveryPagePr
   };
 
   return (
-    <section className="skill-panel" aria-label="发现 Skills">
+    <section className="skill-panel skill-discovery-panel" aria-label="发现 Skills">
       <div className="skill-panel-heading">
         <div>
           <p className="skill-eyebrow">Skills</p>
           <h2 ref={panelHeadingRef} tabIndex={-1}>
-            发现
+            发现技能
           </h2>
-          <p>{skills.length} 个可安装 Skill</p>
-          <p className="skill-discovery-target-hint">
-            安装状态按当前目标：
-            {discoveryTarget ? targetLabel(discoveryTarget, projects) : '未选择'}
-          </p>
+          <p>从仓库发现 Skills，选择目标后查看安装状态。</p>
         </div>
       </div>
 
+      <div className="discovery-target-card">
+        <Crosshair size={20} aria-hidden="true" />
+        <div className="discovery-target-copy">
+          <strong>发现目标</strong>
+          <p>选择全局配置或项目配置后，展示对应安装状态。</p>
+        </div>
+        {context.kind === 'all' && (
+          <label className="skill-target-field" htmlFor="skill-discovery-target">
+            <span className="sr-only">发现目标</span>
+            <select
+              id="skill-discovery-target"
+              aria-label="选择 Skill 发现目标"
+              value={targetValue(allDiscoveryTarget)}
+              onChange={(event) => setAllDiscoveryTarget(targetFromValue(event.target.value))}
+            >
+              <option value="">选择全局或项目配置</option>
+              <option value="global">全局配置</option>
+              {projects.map((project) => (
+                <option key={project.projectId} value={`project:${project.projectId}`}>
+                  {targetLabel({ scope: 'project', projectId: project.projectId }, projects)}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+        {context.kind !== 'all' && (
+          <strong>{discoveryTarget ? targetLabel(discoveryTarget, projects) : ''}</strong>
+        )}
+      </div>
       <div className="skill-toolbar skill-discovery-toolbar">
         <label className="skill-search-field" htmlFor="skill-discovery-search">
           <Search size={15} aria-hidden="true" />
@@ -547,25 +598,6 @@ export function SkillsDiscoveryPage({ context, projects }: SkillsDiscoveryPagePr
           <option value="installed">已安装</option>
           <option value="uninstalled">未安装</option>
         </select>
-        {context.kind === 'all' && (
-          <label className="skill-target-field" htmlFor="skill-discovery-target">
-            <span>发现目标</span>
-            <select
-              id="skill-discovery-target"
-              aria-label="选择 Skill 发现目标"
-              value={targetValue(allDiscoveryTarget)}
-              onChange={(event) => setAllDiscoveryTarget(targetFromValue(event.target.value))}
-            >
-              <option value="">选择全局或项目配置</option>
-              <option value="global">全局配置</option>
-              {projects.map((project) => (
-                <option key={project.projectId} value={`project:${project.projectId}`}>
-                  {targetLabel({ scope: 'project', projectId: project.projectId }, projects)}
-                </option>
-              ))}
-            </select>
-          </label>
-        )}
         <div className="skill-toolbar-actions">
           <button
             type="button"
@@ -601,6 +633,7 @@ export function SkillsDiscoveryPage({ context, projects }: SkillsDiscoveryPagePr
 
       {context.kind === 'all' && discoveryTarget === null ? (
         <div className="skill-empty" role="status">
+          <Crosshair size={30} aria-hidden="true" />
           <h3>先选择发现目标</h3>
           <p>请选择全局配置或一个项目配置后，再查看相对该目标的安装状态。</p>
         </div>
@@ -666,14 +699,15 @@ export function SkillsDiscoveryPage({ context, projects }: SkillsDiscoveryPagePr
         <SkillInstallDialog
           skill={skills.find((skill) => skill.key === installDialogKey) ?? null}
           targetText={discoveryTarget ? targetLabel(discoveryTarget, projects) : null}
-          initialApp={initialApp}
+          targets={installTargetsReady ? placementTargets : []}
+          initialLocation={installLocationValid ? initialLocation : null}
           pending={installMutation.isPending}
           errorMessage={errorMessage}
-          onInitialAppChange={setInitialApp}
+          onInitialLocationChange={setInitialLocation}
           onConfirm={() => void handleConfirmInstall()}
           onClose={() => {
             setInstallDialogKey(null);
-            setInitialApp(null);
+            setInitialLocation(null);
             clearFeedback();
           }}
         />
@@ -702,7 +736,8 @@ export function SkillsDiscoveryPage({ context, projects }: SkillsDiscoveryPagePr
       >
         {uninstallTarget !== null && (
           <p className="skill-dialog-copy">
-            确定要卸载 {uninstallTarget.name} 吗？该 Skill 将从该配置目标的所有 Agent 移除。
+            确定要卸载 {uninstallTarget.name}{' '}
+            吗？这会删除受管主资产及其受管投放；未接管条目不在清理范围内。
           </p>
         )}
       </FocusedDialog>

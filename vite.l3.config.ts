@@ -37,6 +37,7 @@ export default defineConfig({
     rollupOptions: {
       input: {
         main: resolve(here, 'index.html'),
+        app: resolve(here, 'tests/l3/app.html'),
         smoke: resolve(here, 'tests/l3/smoke.html'),
       },
     },

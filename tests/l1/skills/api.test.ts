@@ -56,7 +56,7 @@ describe('skills API wrappers', () => {
     expect(result).toBe(expected);
   });
 
-  it('installSkill forwards skill, complete target and initialApp', async () => {
+  it('installSkill forwards skill, complete target and initialLocation', async () => {
     const target: ScopeTarget = { scope: 'project', projectId: 'project-alpha' };
     const skill: DiscoverableSkill = {
       key: 'a/b:foo',
@@ -80,20 +80,27 @@ describe('skills API wrappers', () => {
     expect(mockInvoke).toHaveBeenCalledWith('install_skill', {
       skill,
       target,
-      initialApp: 'codex',
+      initialLocation: 'codex',
     });
   });
 
-  it('existing Skill mutations forward the row ownership target', async () => {
+  it('投放查询和 mutation 转发完整 ownership、位置与 revision', async () => {
     const target: ScopeTarget = { scope: 'project', projectId: 'project-alpha' };
     mockInvoke.mockResolvedValue(undefined);
     const api = await loadSkillsApi();
-    await api.toggleSkillApp('id-1', target, 'gemini-cli', true);
-    expect(mockInvoke).toHaveBeenCalledWith('toggle_skill_app', {
+    await api.getSkillPlacementTargets(target);
+    expect(mockInvoke).toHaveBeenCalledWith('get_skill_placement_targets', { target });
+    const context: ConfigContext = { kind: 'project', projectId: 'project-alpha' };
+    await api.getSkillPlacements(context);
+    expect(mockInvoke).toHaveBeenCalledWith('get_skill_placements', { context });
+
+    await api.setSkillPlacement('id-1', target, 'gemini-cli', true, 'rev-1');
+    expect(mockInvoke).toHaveBeenCalledWith('set_skill_placement', {
       id: 'id-1',
       target,
-      app: 'gemini-cli',
-      enabled: true,
+      location: 'gemini-cli',
+      placed: true,
+      expectedRevision: 'rev-1',
     });
 
     await api.updateSkill('id-1', target);
@@ -101,6 +108,29 @@ describe('skills API wrappers', () => {
 
     await api.uninstallSkill('id-1', target);
     expect(mockInvoke).toHaveBeenCalledWith('uninstall_skill', { id: 'id-1', target });
+  });
+
+  it('导入先预览并用相同 revision 提交', async () => {
+    const target: ScopeTarget = { scope: 'global' };
+    const selections = [
+      {
+        directory: 'local-skill',
+        sourcePath: '/tmp/local-skill',
+        locations: ['shared' as const],
+      },
+    ];
+    const api = await loadSkillsApi();
+    mockInvoke.mockResolvedValueOnce({ revision: 'rev-2', items: [] });
+    await api.previewSkillImport(selections, target);
+    expect(mockInvoke).toHaveBeenCalledWith('preview_skill_import', { selections, target });
+
+    mockInvoke.mockResolvedValueOnce([]);
+    await api.importSkillsFromApps(selections, target, 'rev-2');
+    expect(mockInvoke).toHaveBeenCalledWith('import_skills_from_apps', {
+      selections,
+      target,
+      expectedRevision: 'rev-2',
+    });
   });
 
   it('addSkillRepo forwards repo payload', async () => {

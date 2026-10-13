@@ -24,21 +24,13 @@ describe('长期指令 API wrappers', () => {
     }
   });
 
-  it('按配置上下文读取固定的两类文档', async () => {
+  it('按配置上下文读取固定的AGENTS.md 文档', async () => {
     const context: ConfigContext = { kind: 'project', projectId: 'project-alpha' };
     const expected = [
       {
-        kind: 'claude',
-        fileName: 'CLAUDE.md',
-        appliesTo: ['claude-code'],
-        target: { scope: 'project', projectId: 'project-alpha' },
-        content: '',
-        exists: false,
-      },
-      {
         kind: 'agents',
         fileName: 'AGENTS.md',
-        appliesTo: ['codex', 'opencode'],
+        paths: ['/isolated/AGENTS.md'],
         target: { scope: 'project', projectId: 'project-alpha' },
         content: '# Shared',
         exists: true,

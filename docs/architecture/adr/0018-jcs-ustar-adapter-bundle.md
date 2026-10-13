@@ -1,5 +1,7 @@
 # ADR-0018：适配器包采用 JCS manifest、确定性无压缩 USTAR 与 detached signature
 
+> 现行适用性（2026-09-27）：**已退出当前范围**。动态 Adapter bundle 已随 ADR-0020 退出；本文签名和归档格式没有当前产物。 以下保留历史决策理由；现状见[架构说明](../README.md)，其他决策见[索引](README.md)。
+
 > 状态：Accepted
 >
 > 决策日期：2026-07-27

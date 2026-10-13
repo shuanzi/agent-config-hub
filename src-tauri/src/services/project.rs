@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::database::{Database, ProjectRemoval};
 use crate::error::{format_structured_error, AppError};
-use crate::services::skill::{skill_state_read_guard, SkillService};
+use crate::services::skill::{skill_state_read_guard, skill_state_write_guard, SkillService};
 use crate::services::subagent::{subagent_state_read_guard, SubagentService};
 
 /// 项目 registry 对前端的最小镜像。`project_id` 是唯一身份。
@@ -126,6 +126,7 @@ impl ProjectService {
         project_id: &str,
         root_path: impl AsRef<Path>,
     ) -> Result<ProjectSummary, AppError> {
+        let _skill_state_guard = skill_state_write_guard();
         let _subagent_state_guard = subagent_state_read_guard();
         let project = db
             .get_project(project_id)?
@@ -148,6 +149,16 @@ impl ProjectService {
                     Some("chooseAnotherDirectory"),
                 ));
             }
+        }
+
+        if root_path != project.root_path
+            && crate::services::skill_placement::has_project_placements(db, project_id)?
+        {
+            return Err(project_error(
+                "PROJECT_HAS_SKILL_PLACEMENTS",
+                &[("projectId", project_id)],
+                Some("withdrawSkillPlacements"),
+            ));
         }
 
         if !db.update_project_root(project_id, &root_path)? {
@@ -390,6 +401,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial]
     fn relink_keeps_identity_and_project_owned_rows() {
         let temp = tempfile::tempdir().unwrap();
         let old_root = temp.path().join("old-root");

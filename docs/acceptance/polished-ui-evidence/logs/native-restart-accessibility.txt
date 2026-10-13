@@ -1,0 +1,95 @@
+Window: "Agent Config Manager · 隔离验收", App: Agent Config Manager UI Acceptance.
+0 standard window Agent Config Manager · 隔离验收, Secondary Actions: Raise
+	1 scroll area
+		2 HTML content Description: Agent Config Manager, URL: tauri://localhost
+			3 container
+				4 heading Agent Config Manager, Value: 1
+					5 text Agent Config Manager
+				6 text Skills
+			7 container 资产类型
+				8 container 资产类型导航
+					9 button Skills
+					10 button 长期指令
+					11 button Subagents
+				12 button 设置
+			13 container 配置上下文
+				14 text 配置上下文
+				15 button 添加项目
+				16 container 配置上下文
+					17 button 全部
+					18 button 全局配置
+					19 text 项目配置
+					20 button Help: <repo>/.artifacts/acceptance/home/projects/visual-alpha, visual-alpha <repo>/.artifacts/acceptance/home/projects/visual-alpha
+					21 button 重新关联 visual-alpha（<repo>/.artifacts/acceptance/home/projects/visual-alpha）
+					22 button 移除 visual-alpha（<repo>/.artifacts/acceptance/home/projects/visual-alpha）
+			23 container 已安装 Skills
+				24 tab group (selectable) Skills 视图
+					25 tab (selected) 已安装
+					26 tab (selectable) 发现
+				27 container 已安装
+					28 container 已安装 Skills
+						29 heading 已安装, Value: 2
+							30 text 已安装
+						31 text 1 个受管 Skill · 1 处目录投放
+						32 search text field (settable) 搜索名称、描述或来源
+							33 text 搜索名称、描述或来源
+						34 button (disabled) 检查更新
+						35 button 重新读取投放状态
+						36 button 发现技能
+						37 container
+							38 text 操作目标
+							39 pop up button (collapsed) 选择 Skill 操作目标, Value: 选择操作目标, Secondary Actions: Expand
+						40 button (disabled) 导入已有
+						41 button (disabled) 从备份恢复
+						42 button (disabled) 从 ZIP 安装
+						43 text 请先选择操作目标，检查更新、导入已有、备份恢复或 ZIP 安装才会启用。
+						44 text 图标控制目录投放；完整路径与异常处理见详情。关闭一个位置不保证 Agent 停止加载。
+						45 container 已安装 Skill 列表
+							46 container 全局配置 · 1 个 Skill
+								47 table 全局配置 Skill 列表
+									48 text 全局配置 Skill 列表
+									49 row (selectable) Skill
+来源
+目标
+投放位置
+操作
+									50 row (selectable)
+										51 cell (selectable) 全局配置 · 1 个 Skill, Columns: 0-4, Value: 3
+全局配置 · 1 个 Skill
+									52 row (selectable)
+										53 cell (selectable) acceptance-skill，全局配置，查看详情
+										54 cell (selectable) 本地来源
+本地主副本
+										55 cell (selectable) 全局配置
+全局适用
+										56 cell (selectable) acceptance-skill 投放位置
+投放位置：acceptance-skill，Claude Code，<repo>/.artifacts/acceptance/home/.claude/skills，投放
+投放位置：acceptance-skill，Codex，<repo>/.artifacts/acceptance/home/.codex/skills，撤回投放
+投放位置：acceptance-skill，Gemini CLI，<repo>/.artifacts/acceptance/home/.gemini/skills，投放
+投放位置：acceptance-skill，OpenCode，<repo>/.artifacts/acceptance/home/.config/opencode/skills，投放
+投放位置：acceptance-skill，共享目录，<repo>/.artifacts/acceptance/home/.agents/skills，投放, Value: Claude Code <repo>/.artifacts/acceptance/home/.claude/skills 未投放 · 投放
+Codex <repo>/.artifacts/acceptance/home/.codex/skills 已投放 · 撤回投放
+Gemini CLI <repo>/.artifacts/acceptance/home/.gemini/skills 未投放 · 投放
+OpenCode <repo>/.artifacts/acceptance/home/.config/opencode/skills 未投放 · 投放
+共享目录 <repo>/.artifacts/acceptance/home/.agents/skills 未投放 · 投放
+											57 toggle button Value: off, 投放位置：acceptance-skill，Claude Code，<repo>/.artifacts/acceptance/home/.claude/skills，投放
+											58 toggle button Value: on, 投放位置：acceptance-skill，Codex，<repo>/.artifacts/acceptance/home/.codex/skills，撤回投放
+											59 toggle button Value: off, 投放位置：acceptance-skill，Gemini CLI，<repo>/.artifacts/acceptance/home/.gemini/skills，投放
+											60 toggle button Value: off, 投放位置：acceptance-skill，OpenCode，<repo>/.artifacts/acceptance/home/.config/opencode/skills，投放
+											61 toggle button Value: off, 投放位置：acceptance-skill，共享目录，<repo>/.artifacts/acceptance/home/.agents/skills，投放
+										62 cell (selectable) acceptance-skill 操作
+详情 acceptance-skill，全局配置
+更多操作 acceptance-skill，全局配置
+	63 close button
+	64 full screen button Help: this button also has an action to zoom the window, Secondary Actions: zoom the window
+	65 minimize button
+	66 text Agent Config Manager · 隔离验收
+67 menu bar
+	68 Agent Config Manager UI Acceptance
+	69 File
+	70 Edit
+	71 View
+	72 Window
+	73 Help
+
+The focused UI element is 2 HTML content Description: Agent Config Manager, URL: tauri://localhost

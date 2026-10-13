@@ -35,21 +35,13 @@ describe('长期指令 query invalidation', () => {
     vi.restoreAllMocks();
   });
 
-  it('按完整配置上下文缓存两类文档，而不是按 Agent 缓存预设', async () => {
+  it('按完整配置上下文缓存AGENTS.md 文档，而不是按 Agent 缓存预设', async () => {
     const context: ConfigContext = { kind: 'global' };
     const documents = [
       {
-        kind: 'claude',
-        fileName: 'CLAUDE.md',
-        appliesTo: ['claude-code'],
-        target: { scope: 'global' },
-        content: '',
-        exists: false,
-      },
-      {
         kind: 'agents',
         fileName: 'AGENTS.md',
-        appliesTo: ['codex', 'opencode'],
+        paths: ['/isolated/AGENTS.md'],
         target: { scope: 'global' },
         content: '',
         exists: false,

@@ -11,6 +11,11 @@ export type AgentType = 'claude-code' | 'codex' | 'gemini-cli' | 'opencode';
 
 export const AGENT_TYPES: AgentType[] = ['claude-code', 'codex', 'gemini-cli', 'opencode'];
 
+/** Skill 的目录投放位置；shared 不是 Agent，也不能用于其他资产类型。 */
+export type SkillLocation = AgentType | 'shared';
+
+export const SKILL_LOCATIONS: SkillLocation[] = [...AGENT_TYPES, 'shared'];
+
 export interface AppSettings {
   syncMethod: SyncMethod;
   storageLocation: StorageLocation;
@@ -103,8 +108,50 @@ export interface UnmanagedSkill {
   directory: string;
   name: string;
   description?: string;
-  foundIn: string[];
+  foundIn: SkillLocation[];
   path: string;
+}
+
+export type SkillPlacementState = 'placed' | 'absent' | 'unmanaged' | 'conflict';
+
+/** 一个物理目录目标；aliases 表示解析到该目录的其他投放位置。 */
+export interface SkillPlacementTarget {
+  location: SkillLocation;
+  aliases: SkillLocation[];
+  path: string;
+  physicalPath: string;
+}
+
+/** 受管 Skill 在一个物理目录目标中的当前状态。 */
+export interface SkillPlacement extends SkillPlacementTarget {
+  state: SkillPlacementState;
+  reason?: string;
+  withdrawable: boolean;
+  sourceIsTarget: boolean;
+  revision: string;
+}
+
+export interface SkillPlacementAsset {
+  id: string;
+  target: ScopeTarget;
+  placements: SkillPlacement[];
+}
+
+export interface SkillImportAction {
+  path: string;
+  action: string;
+}
+
+export interface SkillImportPreviewItem {
+  directory: string;
+  sourcePath: string;
+  storagePath: string;
+  actions: SkillImportAction[];
+}
+
+export interface SkillImportPreview {
+  revision: string;
+  items: SkillImportPreviewItem[];
 }
 
 /** mirrors src-tauri/src/services/skill.rs:SkillUninstallResult */
@@ -145,22 +192,20 @@ export interface SkillBackupEntry {
 /** mirrors src-tauri/src/services/skill.rs:ImportSkillSelection */
 export interface ImportSkillSelection {
   directory: string;
-  apps: SkillApps;
-  sourcePath?: string;
+  sourcePath: string;
+  locations: SkillLocation[];
 }
 
 // ========== Long-term instruction DTOs ==========
 
-/** 长期指令仅支持两个固定文档产物；Gemini CLI 不在此能力范围内。 */
-export type InstructionDocumentKind = 'claude' | 'agents';
-
-export type InstructionAgent = 'claude-code' | 'codex' | 'opencode';
+/** 每个配置范围只管理一个逻辑文档 AGENTS.md。 */
+export type InstructionDocumentKind = 'agents';
 
 /** mirrors src-tauri/src/services/instruction.rs:InstructionDocument */
 export interface InstructionDocument {
   kind: InstructionDocumentKind;
-  fileName: 'CLAUDE.md' | 'AGENTS.md';
-  appliesTo: InstructionAgent[];
+  fileName: 'AGENTS.md';
+  paths: string[];
   target: ScopeTarget;
   content: string;
   exists: boolean;
