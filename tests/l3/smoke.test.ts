@@ -12,6 +12,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { codexSkillEnabled } from './codex-skills-probe';
 
 interface ProjectSummaryWire {
   projectId: string;
@@ -192,7 +193,10 @@ interface ProjectRegistrySequenceWire {
       console.log('UI checkpoint: import dialog opened');
       await dialog.$('input[aria-label^="选择 ui-acceptance"]').click();
       await dialog.$('input[aria-label*="Codex"]').click();
+      await dialog.$(".//button[contains(normalize-space(),'预览接管')]").waitForEnabled();
       await dialog.$(".//button[contains(normalize-space(),'预览接管')]").click();
+      await dialog.$(".//button[normalize-space()='确认接管']").waitForDisplayed();
+      await dialog.$(".//button[normalize-space()='确认接管']").waitForEnabled();
       const projected = join(home, '.codex/skills/ui-acceptance/SKILL.md');
       const externallyChanged = `${original}\nExternal preview change\n`;
       writeFileSync(source, externallyChanged);
@@ -202,12 +206,23 @@ interface ProjectRegistrySequenceWire {
       expect(readFileSync(source, 'utf8')).toBe(externallyChanged);
       expect(existsSync(projected)).toBe(false);
       writeFileSync(source, original);
-      await dialog.$(".//button[normalize-space()='返回修改']").click();
+      const backToSelection = dialog.$(".//button[normalize-space()='返回修改']");
+      if (await backToSelection.isExisting()) await backToSelection.click();
+      const sourceChoice = dialog.$('input[aria-label^="选择 ui-acceptance"]');
+      await sourceChoice.waitForDisplayed();
+      if (!(await sourceChoice.isSelected())) await sourceChoice.click();
+      const codexChoice = dialog.$('input[aria-label*="Codex"]');
+      await codexChoice.waitForEnabled();
+      if (!(await codexChoice.isSelected())) await codexChoice.click();
+      await dialog.$(".//button[contains(normalize-space(),'预览接管')]").waitForEnabled();
       await dialog.$(".//button[contains(normalize-space(),'预览接管')]").click();
+      await dialog.$(".//button[normalize-space()='确认接管']").waitForDisplayed();
+      await dialog.$(".//button[normalize-space()='确认接管']").waitForEnabled();
       await dialog.$(".//button[normalize-space()='确认接管']").click();
       await dialog.waitForDisplayed({ reverse: true });
       console.log('UI checkpoint: import committed');
       // IDs belong to the backend; locate by directory/name rather than inventing its wire ID.
+      await $("//button[normalize-space()='目录与维护']").click();
       const placement = $('[aria-label^="投放位置：ui-acceptance，Codex"]');
       await placement.waitForDisplayed();
       expect(await placement.getAttribute('aria-pressed')).toBe('true');
@@ -229,13 +244,216 @@ interface ProjectRegistrySequenceWire {
       expect(readFileSync(projected, 'utf8')).toContain('External change');
       expect(readFileSync(source, 'utf8')).toBe(original);
       await browser.refresh();
+      await $("//button[normalize-space()='目录与维护']").click();
       await $('[aria-label^="投放位置：ui-acceptance，Codex"]').waitForDisplayed();
       expect(
         await $('[aria-label^="投放位置：ui-acceptance，Codex"]').getAttribute('aria-disabled'),
       ).toBe('true');
     });
 
+    it('persists a matrix project exclusion without changing the global file or the other project', async () => {
+      const home = process.env.ACM_HOME!;
+      const skillDir = join(home, '.claude/skills/matrix-acceptance');
+      mkdirSync(skillDir, { recursive: true });
+      const content =
+        '---\nname: matrix-acceptance\ndescription: Matrix IPC acceptance\n---\n# matrix\n';
+      writeFileSync(join(skillDir, 'SKILL.md'), content);
+      const roots = ['matrix-project-one', 'matrix-project-two'].map((name) => join(home, name));
+      roots.forEach((root) => mkdirSync(root, { recursive: true }));
+      await browser.url('tauri://localhost/tests/l3/app.html');
+      await $('.app-title').waitForDisplayed();
+      const setup = await browser.tauri.execute(
+        async ({ core }, sourcePath: string, roots: string[]) => {
+          const target = { scope: 'global' };
+          const selections = [
+            { directory: 'matrix-acceptance', sourcePath, locations: ['claude-code', 'codex'] },
+          ];
+          const preview = (await core.invoke('preview_skill_import', { target, selections })) as {
+            revision: string;
+          };
+          const installed = (await core.invoke('import_skills_from_apps', {
+            target,
+            selections,
+            expectedRevision: preview.revision,
+          })) as { id: string }[];
+          const projects = [] as { projectId: string }[];
+          for (const rootPath of roots)
+            projects.push(
+              (await core.invoke('add_project', {
+                rootPath,
+                displayName: rootPath.split('/').at(-1),
+              })) as { projectId: string },
+            );
+          return { id: installed[0].id, projects };
+        },
+        skillDir,
+        roots,
+      );
+      await browser.refresh();
+      await $("//nav[@aria-label='配置上下文']//button[contains(.,'matrix-project-one')]").click();
+      const checkbox = $('[aria-label="matrix-acceptance，matrix-project-one，Claude Code"]');
+      await checkbox.waitForDisplayed();
+      expect(await checkbox.isSelected()).toBe(true);
+      await checkbox.click();
+      expect(existsSync(join(roots[0], '.claude/settings.local.json'))).toBe(false);
+      await $("//button[normalize-space()='预览变更']").click();
+      await $("//button[normalize-space()='应用可执行项（1）']").click();
+      await browser.waitUntil(async () => !(await $('[role="dialog"]').isExisting()));
+      const local = JSON.parse(readFileSync(join(roots[0], '.claude/settings.local.json'), 'utf8'));
+      expect(local.skillOverrides['matrix-acceptance']).toBe('off');
+      expect(readFileSync(join(skillDir, 'SKILL.md'), 'utf8')).toBe(content);
+      expect(existsSync(join(roots[1], '.claude/settings.local.json'))).toBe(false);
+      const states = await browser.tauri.execute(
+        async ({ core }, projectIds: string[], id: string) => {
+          const rows = [] as import('../../src/types').SkillMatrixRow[][];
+          for (const projectId of projectIds)
+            rows.push(
+              (await core.invoke('get_skill_matrix', {
+                context: { kind: 'project', projectId },
+              })) as import('../../src/types').SkillMatrixRow[],
+            );
+          return rows.map(
+            (row) =>
+              row
+                .find((entry) => entry.skill.id === id)
+                ?.cells.find((entry) => entry.agent === 'claude-code')?.checked,
+          );
+        },
+        setup.projects.map((project) => project.projectId),
+        setup.id,
+      );
+      expect(states).toEqual([false, true]);
+      const override = await browser.tauri.execute(
+        async ({ core }, ids: string[], id: string) => {
+          type Target = import('../../src/types').ScopeTarget;
+          async function set(target: Target, enabled: boolean) {
+            const context =
+              target.scope === 'global'
+                ? { kind: 'global' }
+                : { kind: 'project', projectId: target.projectId };
+            const rows = (await core.invoke('get_skill_matrix', {
+              context,
+            })) as import('../../src/types').SkillMatrixRow[];
+            const row = rows.find((entry) => entry.skill.id === id)!;
+            const cell = row.cells.find((entry) => entry.agent === 'claude-code')!;
+            const results = (await core.invoke('apply_skill_assignments', {
+              requests: [
+                {
+                  id,
+                  sourceTarget: row.skill.target,
+                  target,
+                  agent: 'claude-code',
+                  enabled,
+                  expectedRevision: cell.revision,
+                },
+              ],
+            })) as import('../../src/types').SkillAssignmentResult[];
+            if (!results[0].applied) throw new Error(results[0].error);
+          }
+          const global: Target = { scope: 'global' };
+          const one: Target = { scope: 'project', projectId: ids[0] };
+          await set(global, false);
+          await set(one, true);
+          const result = [] as boolean[];
+          for (const target of [global, one, { scope: 'project', projectId: ids[1] } as Target]) {
+            const context =
+              target.scope === 'global'
+                ? { kind: 'global' }
+                : { kind: 'project', projectId: target.projectId };
+            const rows = (await core.invoke('get_skill_matrix', {
+              context,
+            })) as import('../../src/types').SkillMatrixRow[];
+            result.push(
+              rows
+                .find((row) => row.skill.id === id)!
+                .cells.find((cell) => cell.agent === 'claude-code')!.checked,
+            );
+          }
+          await set(global, true);
+          await set(one, false);
+          return result;
+        },
+        setup.projects.map((project) => project.projectId),
+        setup.id,
+      );
+      expect(override).toEqual([false, true, false]);
+      expect(readFileSync(join(skillDir, 'SKILL.md'), 'utf8')).toBe(content);
+      const codexPath = join(home, '.codex/skills/matrix-acceptance/SKILL.md');
+      const codexBefore = readFileSync(codexPath, 'utf8');
+      async function setProjectAgents(enabled: boolean) {
+        return browser.tauri.execute(
+          async ({ core }, projectId: string, id: string, enabled: boolean) => {
+            const rows = (await core.invoke('get_skill_matrix', {
+              context: { kind: 'project', projectId },
+            })) as import('../../src/types').SkillMatrixRow[];
+            const row = rows.find((row) => row.skill.id === id)!;
+            const requests = ['codex', 'opencode'].map((agent) => ({
+              id,
+              sourceTarget: row.skill.target,
+              target: { scope: 'project', projectId },
+              agent,
+              enabled,
+              expectedRevision: row.cells.find((cell) => cell.agent === agent)!.revision,
+            }));
+            const results = (await core.invoke('apply_skill_assignments', {
+              requests,
+            })) as import('../../src/types').SkillAssignmentResult[];
+            if (results.some((item) => !item.applied)) throw new Error(JSON.stringify(results));
+            return results;
+          },
+          setup.projects[0].projectId,
+          setup.id,
+          enabled,
+        );
+      }
+      const launchPlan = async (projectId: string) =>
+        browser.tauri.execute(
+          async ({ core }, projectId: string) =>
+            (await core.invoke('get_codex_project_launch', {
+              projectId,
+            })) as import('../../src/types').CodexProjectLaunchPlan,
+          projectId,
+        );
+      await setProjectAgents(false);
+      expect(
+        JSON.parse(readFileSync(join(roots[0], '.codex/acm-skills.json'), 'utf8')).excludedSkillIds,
+      ).toEqual([setup.id]);
+      expect(
+        JSON.parse(readFileSync(join(roots[0], 'opencode.json'), 'utf8')).permission.skill[
+          'matrix-acceptance'
+        ],
+      ).toBe('deny');
+      expect(existsSync(join(roots[1], '.codex/acm-skills.json'))).toBe(false);
+      expect(existsSync(join(roots[1], 'opencode.json'))).toBe(false);
+      expect(readFileSync(codexPath, 'utf8')).toBe(codexBefore);
+      const excluded = await launchPlan(setup.projects[0].projectId);
+      expect(await codexSkillEnabled(excluded, 'matrix-acceptance')).toBe(false);
+      expect(
+        await codexSkillEnabled(await launchPlan(setup.projects[1].projectId), 'matrix-acceptance'),
+      ).toBe(true);
+      await setProjectAgents(true);
+      expect(
+        await codexSkillEnabled(await launchPlan(setup.projects[0].projectId), 'matrix-acceptance'),
+      ).toBe(true);
+      const stale = await browser.tauri.execute(
+        async ({ core }, projectId: string, expectedRevision: string) => {
+          try {
+            await core.invoke('launch_codex_project', { projectId, expectedRevision });
+            return false;
+          } catch {
+            return true;
+          }
+        },
+        setup.projects[0].projectId,
+        excluded.revision,
+      );
+      expect(stale).toBe(true);
+      await setProjectAgents(false);
+      expect(readFileSync(join(skillDir, 'SKILL.md'), 'utf8')).toBe(content);
+    });
+
     it('saves AGENTS.md and native definitions with disk readback after reload', async () => {
+      await $("//nav[@aria-label='配置上下文']//button[normalize-space()='全局配置']").click();
       const home = process.env.ACM_HOME!;
       const claude = join(home, '.claude/CLAUDE.md');
       const untouched = readFileSync(claude);
@@ -315,8 +533,44 @@ interface ProjectRegistrySequenceWire {
 );
 
 (process.env.ACM_L3_READBACK === '1' ? describe : describe.skip)('第二次进程启动持久化回读', () => {
+  it('reads the matrix native exclusion from the new process', async () => {
+    await browser.url('tauri://localhost/tests/l3/app.html');
+    await $('.app-title').waitForDisplayed();
+    const states = await browser.tauri.execute(async ({ core }) => {
+      const projects = (await core.invoke('list_projects')) as {
+        projectId: string;
+        displayName: string;
+      }[];
+      const result = [] as boolean[][];
+      for (const name of ['matrix-project-one', 'matrix-project-two']) {
+        const project = projects.find((entry) => entry.displayName === name);
+        if (!project) throw new Error('Missing persisted matrix project');
+        const rows = (await core.invoke('get_skill_matrix', {
+          context: { kind: 'project', projectId: project.projectId },
+        })) as import('../../src/types').SkillMatrixRow[];
+        const cell = rows
+          .find((row) => row.skill.name === 'matrix-acceptance')
+          ?.cells.find((cell) => cell.agent === 'claude-code');
+        if (!cell) throw new Error('Missing persisted matrix cell');
+        const row = rows.find((row) => row.skill.name === 'matrix-acceptance')!;
+        result.push(
+          ['claude-code', 'codex', 'opencode'].map(
+            (agent) => row.cells.find((cell) => cell.agent === agent)!.checked,
+          ),
+        );
+      }
+      return result;
+    });
+    expect(states).toEqual([
+      [false, false, false],
+      [true, true, true],
+    ]);
+  });
+
   it('重新启动后保留 Skills 冲突状态、AGENTS.md、原生源码和同步设置', async () => {
     await browser.url('tauri://localhost/tests/l3/app.html');
+    await $('.app-title').waitForDisplayed();
+    await $("//button[normalize-space()='目录与维护']").click();
     const placement = $('[aria-label^="投放位置：ui-acceptance，Codex"]');
     await placement.waitForDisplayed();
     expect(await placement.getAttribute('aria-disabled')).toBe('true');

@@ -940,7 +940,7 @@ impl SkillService {
         Ok(installed_skill)
     }
 
-    fn persist_and_sync_new_skill_for_target(
+    pub(crate) fn persist_and_sync_new_skill_for_target(
         db: &Arc<Database>,
         _target: &ScopeTarget,
         skill: &InstalledSkill,

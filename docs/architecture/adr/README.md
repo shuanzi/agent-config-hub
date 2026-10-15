@@ -25,5 +25,7 @@ ADR 记录为何作出决定，不是自动证明实现完成。以下按 2026-0
 | [0019 · MVP 仅支持 macOS 15+ Apple Silicon，并维护单一 arm64 发布轨](0019-macos-15-arm64-only.md) | 部分有效 | macOS 15+ arm64 支持基线仍适用；DMG、签名更新产物和发布验证尚未建立。 |
 | [0020 · 架构 pivot —— 采用 cc-switch 式直接命令 + SQLite SSOT/投影 资产管理架构](0020-ccswitch-architecture-pivot.md) | 部分有效 | 直接命令、按资产服务及 React Query 仍适用；指令预设和统一 Subagent 投影已被单一 AGENTS.md 与 ADR-0021 原生模型替代。 |
 | [0021 · Subagent 按 Agent 原生格式管理](0021-native-subagent-management.md) | 有效 | 单 Agent 原生定义、显式接管、摘要保护、备份与原生启停仍适用。 |
+| [0022 · Skills 目标 × Agent 使用矩阵](0022-skill-scope-matrix.md) | 有效 | 在目标绑定资产上增加矩阵、批量分配及已核对的原生项目排除；范围和证据见现行产品说明。 |
+| [0023 · 项目 Skill 排除与 Codex 启动](0023-project-skill-exclusion-launch.md) | 有效 | OpenCode 有序原生权限；Codex 使用明确的项目 CLI 启动入口，扩展 ADR-0022 的接入范围。 |
 
 后续重要决定新增 ADR，注明替代对象与范围，不追改历史理由。已退出范围的方案没有自动实施授权，未实施的发布设计不能当作当前能力。

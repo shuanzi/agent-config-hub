@@ -1,6 +1,6 @@
 # 前端说明
 
-本文定义当前 UI 的数据与交互约定，产品行为见[产品说明](../product/README.md)，视觉基准见 [polished 清单](../design/agent-config-manager-ui/polished/README.md)。不复制历史 Demo 的候选功能。
+本文定义当前 UI 的数据与交互约定，产品行为见[产品说明](../product/README.md)，视觉基准见[设计入口](../design/README.md)，使用矩阵与目录维护分别遵循其已批准表面。不复制历史 Demo 的候选功能。
 
 ## 导航与目标
 
@@ -24,6 +24,8 @@ React Query hooks 位于 [src/hooks](../../src/hooks)，命令薄封装位于 [s
 
 | 场景 | 当前请求与结果 |
 | --- | --- |
+| Skills 矩阵 | `get_skill_matrix({context})` 返回 `skill` 来源目标、`target` 分配目标和四个带 revision／限制原因的配置单元；没有上一上下文的 placeholder 数据 |
+| 批量分配 | `preview_skill_assignments({requests})` 与 `apply_skill_assignments({requests})`；每项显式带 `sourceTarget`、`target`、`agent`、`enabled`、`expectedRevision`；应用返回逐项结果，失败不会被计入成功 |
 | Skill 安装 | `install_skill({skill, target, initialLocation})`；`initialLocation` 为 Agent 目录或全局 `shared`；位置查询就绪且选中位置属于当前目标后才允许提交，不能使用前一目标的占位数据 |
 | ZIP 安装 | `install_skills_from_zip({filePath, initialLocation, target})`；系统单 ZIP picker 取消时不提交；切换目标清空初始位置，位置加载完成并验证属于当前目标后才可提交 |
 | 投放与撤回 | `set_skill_placement({id, target, location, placed, expectedRevision})`，revision 来自当前目录状态 |
@@ -39,7 +41,7 @@ React Query hooks 位于 [src/hooks](../../src/hooks)，命令薄封装位于 [s
 
 ## 主表面与草稿
 
-Skills 使用五列：名称、来源、目标、投放位置、操作。桌面记录高 64px，32px 图标横排；完整路径、别名及原因通过可聚焦提示与详情读取。未接管进入预览流程，冲突或受保护位置禁用并展示原因，详情不得截掉目录清单。
+Skills 默认使用四个 Agent 勾选列的使用矩阵，搜索与筛选后可按全部结果多选、跨项目批量分配，并在预览后提交。草稿以来源目标、Skill ID、分配目标和 Agent 标识，切换项目不会改写旧草稿的目标。「目录与维护」继续使用五列：名称、来源、目标、投放位置、操作。桌面记录高 64px，32px 图标横排；完整路径、别名及原因通过可聚焦提示与详情读取。未接管进入预览流程，冲突或受保护位置禁用并展示原因，详情不得截掉目录清单。
 
 长期指令和 Subagents 在宽屏工作区内采用 master-detail。指令直接编辑当前目标 AGENTS.md；原生定义在接管后编辑源码，保存结果来自真实命令。前端不提供通用跨资产事务、自动格式转换或旧 Demo 的全局 dirty-guard 保证；具体草稿行为按对应面板和测试维护。
 
@@ -58,3 +60,11 @@ Skills 使用五列：名称、来源、目标、投放位置、操作。桌面�
 [浏览器验收](../acceptance/polished-ui.md#浏览器验收) 复用正式 App、模拟命令和文件选择取消流程，刷新重置样例。[真实桌面验收](../acceptance/polished-ui.md#隔离桌面验收) 覆盖真实文件及重启读回。旧 `prototype=full-ui` 只保留为历史测试对象。
 
 L1 覆盖参数、缓存、目标隔离与草稿；L2 覆盖正式 App 的导航、弹窗、尺寸、错误重试与交互；L3 覆盖真实 IPC 及磁盘读回。现有测试入口见[开发指南](../development.md#测试与证据)。
+
+## Codex 项目启动与项目排除
+
+矩阵单元增加 `activationMode: native | projectLauncher` 和非阻断 `notice`；`reason` 继续表示不可操作原因。Codex 项目单元可勾选，列标题和单元标明通过项目启动入口生效；提示按钮可由键盘打开说明。OpenCode 的角色覆盖等限制保留只读复选框及可聚焦原因入口。
+
+`get_codex_project_launch({projectId})` 返回完整项目路径、Codex 配置目录、CLI 路径、参数、排除项、revision，以及缺失 CLI 等原因。`launch_codex_project({projectId, expectedRevision})` 复验后返回 `handedOff`。两命令在正式与隔离 harness 中均注册。启动对话框只用已保存规则；本项目任意 Agent 草稿阻止启动，其他项目草稿不阻止。重新读取清除旧计划，失败保留错误和重读入口，终端交接完成后显示状态并恢复按钮焦点。
+
+项目排除仍使用既有预览／应用命令，成功项清除草稿、失败项保留。不存在隐式应用、自动启动或刷新后草稿持久化；Codex 普通 CLI、桌面、IDE 与已运行会话的状态不由此入口推断。

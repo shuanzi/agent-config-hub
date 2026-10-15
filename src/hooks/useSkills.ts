@@ -241,3 +241,19 @@ export function useDeleteSkillBackup() {
 }
 
 export type { SkillRepo };
+
+export function useSkillMatrix(context: ConfigContext, enabled = true) {
+  return useQuery({
+    queryKey: ['skills', 'matrix', context],
+    enabled,
+    queryFn: () => skillsApi.getSkillMatrix(context),
+    staleTime: 30 * 1000,
+  });
+}
+export function useApplySkillAssignments() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: skillsApi.applySkillAssignments,
+    onSettled: () => invalidateSkillQueries(queryClient),
+  });
+}

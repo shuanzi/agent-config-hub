@@ -1,0 +1,203 @@
+.skill-matrix {
+  min-width: 0;
+}
+.matrix-filters {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin: 16px 0;
+}
+.matrix-filters label {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  font-size: 13px;
+}
+.matrix-filters select {
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--wb-panel);
+  color: inherit;
+}
+.matrix-scroll {
+  max-width: 100%;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.matrix-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  table-layout: fixed;
+  min-width: 620px;
+}
+.matrix-table th,
+.matrix-table td {
+  padding: 13px 10px;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+.matrix-table th:first-child {
+  width: 42px;
+}
+.matrix-table th:nth-child(2) {
+  width: 28%;
+}
+.matrix-table thead th {
+  font-weight: 500;
+  color: var(--wb-muted);
+  white-space: nowrap;
+}
+.matrix-table thead img {
+  vertical-align: middle;
+}
+.matrix-table input[type='checkbox'] {
+  width: 17px;
+  height: 17px;
+  accent-color: #d97343;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+.matrix-table input:disabled {
+  cursor: default;
+}
+.matrix-group th {
+  background: var(--wb-panel-muted);
+  font-weight: 500;
+}
+.matrix-name {
+  display: block;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--wb-ink);
+  font-size: 14px;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+.matrix-table small {
+  display: block;
+  color: var(--wb-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  line-height: 1.8;
+}
+.matrix-cell {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+.matrix-cell label {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.matrix-cell label span {
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--wb-muted);
+}
+.matrix-draft {
+  background: #fff4e7;
+}
+.matrix-reason {
+  display: flex;
+  padding: 5px;
+  border: 0;
+  background: none;
+  color: #946f40;
+  cursor: pointer;
+}
+.matrix-draft-bar {
+  position: sticky;
+  bottom: 0;
+  margin-top: 16px;
+  padding: 13px 16px;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+  background: var(--wb-panel);
+  border: 1px solid #e7b67e;
+  border-radius: 9px;
+}
+.matrix-draft-bar span {
+  flex: 1;
+  font-size: 13px;
+}
+.matrix-choice {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  padding: 9px 0;
+  overflow-wrap: anywhere;
+}
+.skill-view-options {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+.skill-view-options button[aria-pressed='true'] {
+  background: #fff0e0;
+  color: #98522d;
+  border-color: #efc397;
+}
+@media (max-width: 600px) {
+  .matrix-filters {
+    gap: 8px;
+  }
+  .matrix-table {
+    min-width: 680px;
+  }
+  .matrix-cell label {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .matrix-filters select {
+    max-width: 125px;
+  }
+  .matrix-reason {
+    min-width: 32px;
+    min-height: 40px;
+  }
+}
+
+.matrix-table.is-single-agent {
+  min-width: 0;
+}
+.matrix-table.is-single-agent th:nth-child(2) {
+  width: 55%;
+}
+.matrix-name {
+  overflow-wrap: anywhere;
+}
+@media (max-width: 600px) {
+  .matrix-cell label {
+    min-height: 44px;
+    min-width: 44px;
+    justify-content: center;
+  }
+}
+
+.matrix-table th small,
+.matrix-cell label small {
+  display: block;
+  font-size: 10px;
+  font-weight: 400;
+  color: var(--wb-muted);
+}
+.matrix-launch-list {
+  max-height: 240px;
+  overflow: auto;
+}
+
+.matrix-launch-path {
+  overflow-wrap: anywhere;
+}

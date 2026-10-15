@@ -170,6 +170,47 @@ export function verifyDocs(root) {
   } catch (error) {
     errors.push(`设计／截图清单：${error.message}`);
   }
+  const matrixRoot = 'docs/design/skill-matrix';
+  if (fs.existsSync(path.join(root, matrixRoot))) {
+    try {
+      const records = fs.readFileSync(path.join(root,matrixRoot,'preview-manifest.tsv'),'utf8').trim().split(/\r?\n/);
+      if (records.shift() !== 'file\twidth\theight\tevidence') throw new Error('矩阵清单表头无效');
+      const seen = new Set();
+      for (const row of records) {
+        const [file,width,height,evidence] = row.split('\t');
+        if (!/^previews\/[^/]+\.(png|jpe?g)$/.test(file) || seen.has(file) || !evidence) throw new Error(`矩阵清单条目无效：${file}`);
+        seen.add(file);
+        const relative = `${matrixRoot}/${file}`;
+        const data = fs.readFileSync(path.join(root,relative));
+        let actual;
+        if (data.subarray(0,8).toString('hex') === '89504e470d0a1a0a') {
+          if (!file.endsWith('.png')) throw new Error(`矩阵图片编码与扩展名不一致：${file}`);
+          actual = pngSize(relative);
+        } else if (data[0] === 0xff && data[1] === 0xd8) {
+          if (!/\.jpe?g$/.test(file)) throw new Error(`矩阵图片编码与扩展名不一致：${file}`);
+          let offset=2;
+          while (offset+4 < data.length) {
+            if (data[offset++] !== 0xff) throw new Error(`无效 JPEG：${file}`);
+            while (data[offset] === 0xff) offset++;
+            const marker=data[offset++];
+            if (marker===0xda || marker===0xd9) break;
+            const length=data.readUInt16BE(offset);
+            if (length < 2 || offset+length > data.length) throw new Error(`无效 JPEG：${file}`);
+            if ([0xc0,0xc1,0xc2,0xc3,0xc5,0xc6,0xc7,0xc9,0xca,0xcb,0xcd,0xce,0xcf].includes(marker)) {
+              if (length < 8) throw new Error(`无效 JPEG：${file}`);
+              actual=[data.readUInt16BE(offset+5),data.readUInt16BE(offset+3)]; break;
+            }
+            offset+=length;
+          }
+          if (!actual) throw new Error(`JPEG 缺少尺寸：${file}`);
+        } else throw new Error(`矩阵图片编码无法识别：${file}`);
+        if (actual[0]!==Number(width) || actual[1]!==Number(height) || !Number(width) || !Number(height)) throw new Error(`矩阵实际尺寸不匹配：${file}`);
+      }
+      const images=fs.readdirSync(path.join(root,matrixRoot,'previews')).filter((name)=>/\.(png|jpe?g)$/.test(name));
+      if (!seen.size || images.length!==seen.size || images.some((name)=>!seen.has(`previews/${name}`))) throw new Error('矩阵预览与清单不完整对应');
+      if (!fs.existsSync(path.join(root,matrixRoot,'approved-prototype.zip'))) throw new Error('矩阵可编辑原型包缺失');
+    } catch (error) { errors.push(`矩阵设计清单：${error.message}`); }
+  }
   return { errors, documentCount: files.length };
 }
 

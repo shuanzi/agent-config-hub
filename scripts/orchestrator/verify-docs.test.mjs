@@ -129,3 +129,34 @@ test('实际截图清单不能只保留部分页面', (t) => {
   );
   assert.ok(verifyDocs(root).errors.some((error) => error.includes('实际截图清单遗漏')));
 });
+
+function matrixFixture(t) {
+  const context=fixture(t);
+  const matrix='docs/design/skill-matrix';
+  context.write(`${matrix}/previews/state.png`,fs.readFileSync(path.join(context.root,design,'polished/previews/desktop-test.png')));
+  context.write(`${matrix}/approved-prototype.zip`,'fixture');
+  context.write(`${matrix}/preview-manifest.tsv`,'file\twidth\theight\tevidence\npreviews/state.png\t1\t1\t模拟界面\n');
+  return {...context,matrix};
+}
+test('矩阵预览按实际编码与像素尺寸通过', (t) => {
+  const {root}=matrixFixture(t);assert.deepEqual(verifyDocs(root).errors,[]);
+});
+for (const [name,file,width,extra,expected] of [
+  ['扩展名错配','state.jpg',1,false,'编码与扩展名不一致'],
+  ['尺寸错配','state.png',2,false,'实际尺寸不匹配'],
+  ['缺失记录','state.png',1,true,'不完整对应'],
+]) test(`矩阵${name}不能通过`, (t) => {
+  const {root,write,matrix}=matrixFixture(t);
+  if (file.endsWith('.jpg')) fs.renameSync(path.join(root,matrix,'previews/state.png'),path.join(root,matrix,`previews/${file}`));
+  write(`${matrix}/preview-manifest.tsv`,`file\twidth\theight\tevidence\npreviews/${file}\t${width}\t1\t模拟界面\n`);
+  if (extra) write(`${matrix}/previews/extra.png`,fs.readFileSync(path.join(root,matrix,'previews/state.png')));
+  assert.ok(verifyDocs(root).errors.some((error)=>error.includes(expected)));
+});
+test('矩阵 JPEG 尺寸读取保持宽高顺序', (t) => {
+  const {root,write,matrix}=matrixFixture(t);
+  fs.rmSync(path.join(root,matrix,'previews/state.png'));
+  // SOF metadata fixture, 3×2, sufficient for the header checker.
+  write(`${matrix}/previews/state.jpg`,Buffer.from([0xff,0xd8,0xff,0xc0,0,8,8,0,2,0,3,1,0xff,0xd9]));
+  write(`${matrix}/preview-manifest.tsv`,'file\twidth\theight\tevidence\npreviews/state.jpg\t3\t2\t模拟界面\n');
+  assert.deepEqual(verifyDocs(root).errors,[]);
+});
