@@ -6,7 +6,7 @@
 
 默认进入使用矩阵；已安装来源与项目归属、Agent 勾选、筛选、多选、跨项目批量分配、预览和限制原因已接入正式 App。目录维护保留接管、更新、卸载、备份和完整路径操作。项目草稿保存在 App 层，窄屏返回配置上下文后不会丢失；切换 Agent／搜索清空行选择，保留草稿。
 
-[桌面矩阵](../design/skill-matrix/previews/initial-desktop-matrix.jpg)、[变更预览](../design/skill-matrix/previews/initial-desktop-preview.jpg)、[390px 单 Agent 矩阵](../design/skill-matrix/previews/initial-mobile-matrix.jpg)、[限制说明](../design/skill-matrix/previews/initial-mobile-limitation.jpg)来自正式组件与模拟命令，仅证明界面。390px 下实测文档宽 390px、单 Agent 表格宽 356px；四 Agent 可在表格内部滚动。完整路径和触发项返回焦点继续由目录维护和详情承担。
+[桌面矩阵](evidence/2026-10-14-skill-matrix/initial-desktop-matrix.jpg)、[变更预览](evidence/2026-10-14-skill-matrix/initial-desktop-preview.jpg)、[390px 单 Agent 矩阵](evidence/2026-10-14-skill-matrix/initial-mobile-matrix.jpg)、[限制说明](evidence/2026-10-14-skill-matrix/initial-mobile-limitation.jpg)来自正式组件与模拟命令，仅证明界面。390px 下实测文档宽 390px、单 Agent 表格宽 356px；四 Agent 可在表格内部滚动。完整路径和触发项返回焦点继续由目录维护和详情承担。
 
 真实 Tauri test-harness 在隔离 `ACM_HOME` 下导入 `matrix-acceptance`，登记两个项目；项目一直接取消 Claude Code 勾选、预览后应用。磁盘读回确认：项目一 `.claude/settings.local.json` 写入 `skillOverrides["matrix-acceptance"] = "off"`；全局 `SKILL.md` 字节不变；项目二没有新增停用文件。真实命令返回两个项目的配置状态 `[false, true]`。额外通过真实命令验证全局停用、项目一启用时三个配置状态为 `[false, true, false]`，随后恢复最初的两个项目状态。关闭后以同一隔离目录启动新进程，重新读取项目 registry 和矩阵仍得到 `[false, true]`。验收框架核对八个真实用户配置文件的前后摘要，没有检测到变更。
 

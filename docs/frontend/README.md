@@ -57,7 +57,7 @@ Skills 默认使用四个 Agent 勾选列的使用矩阵，搜索与筛选后可
 
 ## 验证入口
 
-[浏览器验收](../acceptance/polished-ui.md#浏览器验收) 复用正式 App、模拟命令和文件选择取消流程，刷新重置样例。[真实桌面验收](../acceptance/polished-ui.md#隔离桌面验收) 覆盖真实文件及重启读回。旧 `prototype=full-ui` 只保留为历史测试对象。
+[浏览器验收](../acceptance/polished-ui.md#浏览器验收) 复用正式 App、模拟命令和文件选择取消流程，刷新重置样例。[真实桌面验收](../acceptance/polished-ui.md#隔离桌面验收) 覆盖真实文件及重启读回。旧 `prototype=full-ui` 入口与专用测试已退役，通过 Git 历史追溯。
 
 L1 覆盖参数、缓存、目标隔离与草稿；L2 覆盖正式 App 的导航、弹窗、尺寸、错误重试与交互；L3 覆盖真实 IPC 及磁盘读回。现有测试入口见[开发指南](../development.md#测试与证据)。
 

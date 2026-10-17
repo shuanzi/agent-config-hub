@@ -1,20 +1,23 @@
 import { describe, it } from 'mocha';
 import { $, browser, expect } from '@wdio/globals';
-import { mkdir } from 'node:fs/promises';
+import { saveEvidence } from './evidence';
 
-const evidence = '/tmp/acm-polished-evidence';
 const entry = '/tests/l2/workbench.html?fixture=polished';
 const button = (label: string) => $(`//button[normalize-space()='${label}']`);
 async function open(query = '') {
   await browser.url(entry + query);
   await $('.app-header').waitForDisplayed();
+  const params = new URLSearchParams(query);
+  if (!params.has('page') && !params.has('step') && params.get('tab') !== 'discovery') {
+    await button('目录与维护').waitForDisplayed();
+    await button('目录与维护').click();
+  }
 }
 async function capture(name: string) {
-  await mkdir(evidence, { recursive: true });
   expect(await browser.execute(() => document.documentElement.scrollWidth > innerWidth)).toBe(
     false,
   );
-  await browser.saveScreenshot(`${evidence}/${name}.png`);
+  await saveEvidence(name);
 }
 async function nativeDetail() {
   await $('[data-native-identity="codex:repo-reviewer"]').click();
@@ -94,6 +97,7 @@ describe('Polished 实际 App 页面与交互验收', () => {
         await button('Skills').click();
         await capture(`${prefix}-contexts`);
         await button('全部').click();
+        await button('目录与维护').click();
         await button('更多操作').click();
         await capture(`${prefix}-skills-actions`);
         await browser.keys('Escape');

@@ -30,7 +30,7 @@ npm run accept:app
 | [前端说明](docs/frontend/README.md)                           | 数据契约、操作目标、导航和可访问性                   |
 | [开发指南](docs/development.md)                               | 环境、命令、测试分层和文档更新规则                   |
 | [设计入口](docs/design/README.md)                             | polished Pen、已批准矩阵原型与静态预览               |
-| [验收指南](docs/acceptance/polished-ui.md)                    | 浏览器及隔离桌面的可操作流程                         |
+| [验收入口](docs/acceptance/README.md)                         | 操作指南、有日期的报告及证据目录                     |
 | [2026-09-27 验收结果](docs/acceptance/polished-ui-results.md) | 有日期的运行证据及其边界，不代表每个后续提交均已复测 |
 | [架构决策索引](docs/architecture/adr/README.md)               | 决策理由、适用状态与替代关系                         |
 

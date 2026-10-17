@@ -16,7 +16,7 @@ ADR 记录为何作出决定，不是自动证明实现完成。以下按 2026-0
 | [0010 · 采用 CodeMirror 6 与契约驱动的工作台控件](0010-codemirror-contract-driven-workbench.md) | 已替代 | 现行面板使用原生文本编辑控件与直接命令；不要求实现旧 CodeMirror 或事务工作台。 |
 | [0011 · 以 Rust wire DTO 作为 IPC schema 事实源](0011-rust-first-wire-schema.md) | 已替代 | ADR-0020 移除 wire 生成协议，改为手工镜像 serde DTO。 |
 | [0012 · 采用分层证据与少量真实 Tauri 主路径](0012-layered-test-evidence.md) | 部分有效 | 分层证据原则仍适用；旧 Gateway/event tracer 不再运行，当前测试入口见开发指南。 |
-| [0013 · 通过真实 tracer 校准并冻结性能预算](0013-evidence-calibrated-performance-budgets.md) | 待重新校准 | 旧采样绑定已删除的实现，npm run perf 显式未建立；不证明现行性能预算通过。 |
+| [0013 · 通过真实 tracer 校准并冻结性能预算](0013-evidence-calibrated-performance-budgets.md) | 待重新校准 | 旧采样实现已退役，npm run perf 继续显式未建立；不证明现行性能预算通过。 |
 | [0014 · 采用 npm + Vite 根级验证命令面](0014-npm-vite-command-surface.md) | 部分有效 | npm + Vite 和薄编排仍适用；命令可用状态以开发指南为准，不能由命令名推断已实现。 |
 | [0015 · 采用 rusqlite 与内嵌 forward-only migration](0015-rusqlite-state-store.md) | 部分有效 | rusqlite 与前向迁移仍适用；表结构以当前 schema 为准，旧 StateStore/Gateway 语义已替代。 |
 | [0016 · 采用 XChaCha20-Poly1305 与单一 Keychain 密钥](0016-xchacha-keychain-snapshot-vault.md) | 未实施／旧模型 | 当前备份未实现本文的 XChaCha20/Keychain 容器；旧事务快照模型已退出当前范围。 |
