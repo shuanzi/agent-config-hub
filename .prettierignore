@@ -5,6 +5,7 @@ src-tauri
 target
 docs
 .scratch
+.impeccable/hook.cache.json
 scripts
 fixtures
 package-lock.json

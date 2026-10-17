@@ -31,6 +31,63 @@ fn map_err(err: AppError) -> String {
 }
 
 #[tauri::command]
+pub fn get_skill_matrix(
+    context: ConfigContext,
+    app_state: tauri::State<'_, AppState>,
+) -> Result<Vec<crate::services::skill_matrix::MatrixRow>, String> {
+    let _guard = skill_state_read_guard();
+    crate::services::skill_matrix::rows(&app_state.db, &context).map_err(map_err)
+}
+
+#[tauri::command]
+pub fn apply_skill_assignments(
+    requests: Vec<crate::services::skill_matrix::Assignment>,
+    app_state: tauri::State<'_, AppState>,
+) -> Vec<crate::services::skill_matrix::AssignmentResult> {
+    let _guard = skill_state_write_guard();
+    crate::services::skill_matrix::apply(&app_state.db, requests)
+}
+
+#[tauri::command]
+pub fn preview_skill_assignments(
+    requests: Vec<crate::services::skill_matrix::Assignment>,
+    app_state: tauri::State<'_, AppState>,
+) -> Vec<crate::services::skill_matrix::AssignmentPreview> {
+    let _guard = skill_state_read_guard();
+    crate::services::skill_matrix::preview(&app_state.db, requests)
+}
+
+#[tauri::command]
+pub async fn get_codex_project_launch(
+    project_id: String,
+    app_state: tauri::State<'_, AppState>,
+) -> Result<crate::services::codex_launch::CodexProjectLaunch, String> {
+    let db = app_state.db.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let _guard = skill_state_read_guard();
+        crate::services::codex_launch::get(&db, &project_id)
+    })
+    .await
+    .map_err(|_| format_skill_error("SKILL_INTERNAL", &[], None))?
+    .map_err(map_err)
+}
+#[tauri::command]
+pub async fn launch_codex_project(
+    project_id: String,
+    expected_revision: String,
+    app_state: tauri::State<'_, AppState>,
+) -> Result<crate::services::codex_launch::LaunchResult, String> {
+    let db = app_state.db.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let _guard = skill_state_read_guard();
+        crate::services::codex_launch::launch(&db, &project_id, &expected_revision)
+    })
+    .await
+    .map_err(|_| format_skill_error("SKILL_INTERNAL", &[], None))?
+    .map_err(map_err)
+}
+
+#[tauri::command]
 pub fn get_installed_skills(
     context: ConfigContext,
     app_state: tauri::State<'_, AppState>,

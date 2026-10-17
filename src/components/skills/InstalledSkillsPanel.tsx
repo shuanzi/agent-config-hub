@@ -35,6 +35,7 @@ import {
   useSetSkillPlacement,
   useSkillBackups,
   useSkillPlacements,
+  useSkillMatrix,
   useSkillPlacementTargets,
   useUninstallSkill,
   useUpdateSkill,
@@ -48,11 +49,13 @@ import {
   skillLocationLabels,
 } from './SkillPlacementControls';
 import './skills.css';
+import { SkillMatrixPanel, type SkillMatrixDraftState } from './SkillMatrixPanel';
 
 interface InstalledSkillsPanelProps {
   context: ConfigContext;
   projects: readonly ProjectSummary[];
   onOpenDiscovery: () => void;
+  matrixDraftState?: SkillMatrixDraftState;
 }
 
 function targetForContext(context: ConfigContext): ScopeTarget | null {
@@ -469,8 +472,11 @@ export function InstalledSkillsPanel({
   context,
   projects,
   onOpenDiscovery,
+  matrixDraftState,
 }: InstalledSkillsPanelProps) {
   const [searchQuery, setSearchQuery] = useState('');
+  const [matrixView, setMatrixView] = useState(true);
+  const [matrixDetail, setMatrixDetail] = useState<InstalledSkill | null>(null);
   const [zipPath, setZipPath] = useState('');
   const [zipDialogOpen, setZipDialogOpen] = useState(false);
   const [actionsOpen, setActionsOpen] = useState(false);
@@ -520,6 +526,7 @@ export function InstalledSkillsPanel({
       (target) =>
         target.location === zipInitialLocation || target.aliases.includes(zipInitialLocation),
     );
+  const matrixQuery = useSkillMatrix(context, matrixView);
   const setPlacementMutation = useSetSkillPlacement();
   const uninstallMutation = useUninstallSkill();
   const {
@@ -588,9 +595,13 @@ export function InstalledSkillsPanel({
   );
 
   const selectedSkill =
-    selectedSkillId === null
+    matrixDetail ??
+    (selectedSkillId === null
       ? null
-      : (filteredSkills.find((skill) => skillSelectionId(skill) === selectedSkillId) ?? null);
+      : (filteredSkills.find((skill) => skillSelectionId(skill) === selectedSkillId) ?? null));
+  useEffect(() => {
+    setMatrixDetail(null);
+  }, [context.kind, context.kind === 'project' ? context.projectId : '']);
   useEffect(() => {
     if (selectedSkillId !== null && selectedSkill === null) setSelectedSkillId(null);
   }, [selectedSkill, selectedSkillId]);
@@ -738,7 +749,10 @@ export function InstalledSkillsPanel({
     clearFeedback();
     try {
       await uninstallMutation.mutateAsync({ id, target });
-      if (selectedSkillId === skillSelectionId(uninstallTarget)) setSelectedSkillId(null);
+      if (selectedSkillId === skillSelectionId(uninstallTarget)) {
+        setSelectedSkillId(null);
+        setMatrixDetail(null);
+      }
       setStatusMessage(`已卸载 ${name}（${targetLabel(target, projects)}）。`);
     } catch (error) {
       const userError = toUserError(error);
@@ -778,7 +792,10 @@ export function InstalledSkillsPanel({
   const handleUpdateSkill = async (skill: InstalledSkill) => {
     clearFeedback();
     try {
-      await updateSkillMutation.mutateAsync({ id: skill.id, target: skill.target });
+      const updated = await updateSkillMutation.mutateAsync({ id: skill.id, target: skill.target });
+      setMatrixDetail((current) =>
+        current && skillSelectionId(current) === skillSelectionId(skill) ? updated : current,
+      );
       setStatusMessage(`已更新 ${skill.name}（${targetLabel(skill.target, projects)}）。`);
     } catch (error) {
       const userError = toUserError(error);
@@ -1021,7 +1038,8 @@ export function InstalledSkillsPanel({
             已安装
           </h2>
           <p>
-            {skills?.length ?? 0} 个受管 Skill · {placedCount} 处目录投放
+            {matrixView ? (matrixQuery.data?.length ?? 0) : (skills?.length ?? 0)} 个
+            {matrixView ? 'Skill 来源' : '受管 Skill'} · {placedCount} 处目录投放
           </p>
         </div>
       </div>
@@ -1219,9 +1237,48 @@ export function InstalledSkillsPanel({
         }
         statusMessage={statusMessage}
       />
-      <p className="skill-placement-note">
-        图标控制目录投放；完整路径与异常处理见详情。关闭一个位置不保证 Agent 停止加载。
-      </p>
+      <div className="skill-view-options" aria-label="Skills 管理视图">
+        <button
+          className="skill-button"
+          aria-pressed={matrixView}
+          onClick={() => {
+            setMatrixView(true);
+            setMatrixDetail(null);
+            closeDetail();
+          }}
+        >
+          使用矩阵
+        </button>
+        <button
+          className="skill-button"
+          aria-pressed={!matrixView}
+          onClick={() => {
+            setMatrixView(false);
+            setMatrixDetail(null);
+            closeDetail();
+          }}
+        >
+          目录与维护
+        </button>
+      </div>
+      <div hidden={!matrixView || selectedSkill !== null}>
+        <SkillMatrixPanel
+          draftState={matrixDraftState}
+          active={matrixView && selectedSkill === null}
+          context={context}
+          projects={projects}
+          searchQuery={searchQuery}
+          onDetail={(skill) => {
+            setMatrixDetail(skill);
+            selectSkill(skill);
+          }}
+        />
+      </div>
+      {!matrixView && (
+        <p className="skill-placement-note">
+          图标控制目录投放；完整路径与异常处理见详情。关闭一个位置不保证 Agent 停止加载。
+        </p>
+      )}
 
       {selectedSkill !== null ? (
         <InstalledSkillDetail
@@ -1230,7 +1287,10 @@ export function InstalledSkillsPanel({
           targetText={targetLabel(selectedSkill.target, projects)}
           updateAvailable={hasUpdate(selectedSkill)}
           pending={pending}
-          onBack={closeDetail}
+          onBack={() => {
+            setMatrixDetail(null);
+            closeDetail();
+          }}
           backButtonRef={detailBackButtonRef}
           onUpdate={() => void handleUpdateSkill(selectedSkill)}
           onUninstall={() => requestUninstall(selectedSkill)}
@@ -1239,7 +1299,7 @@ export function InstalledSkillsPanel({
           }
           onTakeover={(placement) => setTakeoverTarget({ skill: selectedSkill, placement })}
         />
-      ) : isLoading ? (
+      ) : matrixView ? null : isLoading ? (
         <div className="skill-empty" role="status">
           <Loader2 size={24} className="spin" />
           <p>正在加载…</p>

@@ -2,7 +2,7 @@
 
 本地单用户的 Agent 配置管理工作台，管理 Skills、AGENTS.md 和原生 Subagents。支持全局与已登记项目，提供目录投放、接管、编辑、备份及冲突保护。界面显示文件配置状态，不保证运行中的 Agent 已加载配置。
 
-当前实现采用 polished 精细稿与 cc-switch 式 Skills 紧凑列表。支持基线为 macOS 15+、Apple Silicon；正式签名、打包和发布验证尚未建立。
+Skills 默认使用目标 × Agent 矩阵，目录维护及其他页面沿用 polished 精细稿。项目排除支持 Claude Code、Gemini CLI、OpenCode 原生配置，以及 Codex 显式项目 CLI 启动入口。支持基线为 macOS 15+、Apple Silicon；正式签名、打包和发布验证尚未建立。
 
 ## 启动与验收
 
@@ -29,8 +29,8 @@ npm run accept:app
 | [架构说明](docs/architecture/README.md)                       | 模块、存储、路径、写入保护与失败处理                 |
 | [前端说明](docs/frontend/README.md)                           | 数据契约、操作目标、导航和可访问性                   |
 | [开发指南](docs/development.md)                               | 环境、命令、测试分层和文档更新规则                   |
-| [设计入口](docs/design/README.md)                             | 当前可编辑 polished Pen 与静态预览                   |
-| [验收指南](docs/acceptance/polished-ui.md)                    | 浏览器及隔离桌面的可操作流程                         |
+| [设计入口](docs/design/README.md)                             | polished Pen、已批准矩阵原型与静态预览               |
+| [验收入口](docs/acceptance/README.md)                         | 操作指南、有日期的报告及证据目录                     |
 | [2026-09-27 验收结果](docs/acceptance/polished-ui-results.md) | 有日期的运行证据及其边界，不代表每个后续提交均已复测 |
 | [架构决策索引](docs/architecture/adr/README.md)               | 决策理由、适用状态与替代关系                         |
 

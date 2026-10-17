@@ -3,6 +3,7 @@
  * 测试入口页为 tests/l2/workbench.html（scripted mock 注入）。
  */
 import type { Options } from '@wdio/types';
+import { rm } from 'node:fs/promises';
 import { createServer, type ViteDevServer } from 'vite';
 // 拉入 webdriverio 的全局 WebdriverIO namespace 类型（Capabilities 等）
 import type {} from 'webdriverio';
@@ -40,6 +41,10 @@ export const config = {
     timeout: 60000,
   },
   onPrepare: async () => {
+    await rm(new URL('../../.artifacts/ui/latest/', import.meta.url), {
+      recursive: true,
+      force: true,
+    });
     viteServer = await createServer({
       logLevel: 'warn',
       server: { host: '127.0.0.1', port: l2Port, strictPort: true },

@@ -14,6 +14,8 @@ describe('Skill management journey', () => {
   it('lands on installed view, discovers, installs, withdraws one placement and uninstalls', async () => {
     await browser.setWindowSize(1280, 900);
     await browser.url(ENTRY);
+    await $("//button[normalize-space()='目录与维护']").waitForDisplayed();
+    await $("//button[normalize-space()='目录与维护']").click();
 
     // 默认落地 Skills 已安装视图
     await $('.skills-view').waitForDisplayed();
@@ -52,6 +54,7 @@ describe('Skill management journey', () => {
     await installedTab.click();
     await waitForStable();
 
+    await $("//button[normalize-space()='目录与维护']").click();
     const installedCard = await $("[data-skill-id='anthropics/skills:commit-conventions']");
     await installedCard.waitForDisplayed();
     expect(await installedCard.$('.skill-card-title').getText()).toContain('Commit Conventions');
@@ -87,6 +90,8 @@ describe('Skill management journey', () => {
   it('uses the visual fixture for installed detail update, placement and uninstall paths', async () => {
     await browser.setWindowSize(1280, 900);
     await browser.url(`${ENTRY}?fixture=visual`);
+    await $("//button[normalize-space()='目录与维护']").waitForDisplayed();
+    await $("//button[normalize-space()='目录与维护']").click();
     await waitForStable();
 
     // 更新和写操作必须具有明确 target；视觉 fixture 的 Testing Strategy 属于全局目标。
@@ -156,6 +161,7 @@ describe('Skill management journey', () => {
     await $("//nav[@aria-label='配置上下文']//button[normalize-space()='全局配置']").click();
     await waitForStable();
 
+    await $("//button[normalize-space()='目录与维护']").click();
     const row = await $("[data-skill-id='anthropics/skills:testing-strategy']");
     await row.$('.skill-row-select').click();
     const detail = await $("[data-skill-detail='anthropics/skills:testing-strategy']");
