@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { SkillMatrixPanel } from '../../../src/components/skills/SkillMatrixPanel';
 import type { ConfigContext, SkillAssignment, SkillMatrixRow } from '../../../src/types';
@@ -52,6 +52,15 @@ function setup(context: ConfigContext = { kind: 'project', projectId: 'one' }) {
     </QueryClientProvider>
   );
   return { ...render(renderPanel(context)), renderPanel };
+}
+function openBulk(agents = ['Claude Code']) {
+  fireEvent.click(screen.getByRole('checkbox', { name: '选择 code-review，全局' }));
+  fireEvent.click(screen.getByRole('button', { name: '批量分配（1）' }));
+  const dialog = within(screen.getByRole('dialog'));
+  for (const agent of ['Claude Code', 'Codex', 'Gemini CLI', 'OpenCode']) {
+    if (!agents.includes(agent)) fireEvent.click(dialog.getByLabelText(agent));
+  }
+  return dialog;
 }
 beforeEach(() => {
   vi.clearAllMocks();
@@ -249,5 +258,157 @@ describe('Skills 使用矩阵', () => {
     expect((screen.getByRole('button', { name: '暂存使用' }) as HTMLButtonElement).disabled).toBe(
       false,
     );
+  });
+  it.each([true, false])('批量选择磁盘状态 %s 清除先前的反向单项草稿', async (enabled) => {
+    const matrixRow = row();
+    matrixRow.cells[0].checked = enabled;
+    api.getSkillMatrix.mockResolvedValue([matrixRow]);
+    api.previewSkillAssignments.mockImplementation((requests: SkillAssignment[]) =>
+      Promise.resolve(
+        requests.map((request) => ({
+          request: { ...request, expectedRevision: 'revision-claude-code' },
+          checked: enabled,
+        })),
+      ),
+    );
+    setup();
+    const checkbox = (await screen.findByRole('checkbox', {
+      name: 'code-review，项目一，Claude Code',
+    })) as HTMLInputElement;
+    fireEvent.click(checkbox);
+    expect(checkbox.checked).toBe(!enabled);
+    expect(screen.getByText(/1 项待应用/)).toBeTruthy();
+    const dialog = openBulk();
+    fireEvent.click(dialog.getByRole('button', { name: enabled ? '暂存使用' : '暂存停用' }));
+    await screen.findByText('已暂存 0 项，跳过 1 项无需变更。');
+    expect(checkbox.checked).toBe(enabled);
+    expect(screen.queryByText(/项待应用/)).toBeNull();
+    expect(screen.queryByRole('button', { name: '预览变更' })).toBeNull();
+    expect(api.applySkillAssignments).not.toHaveBeenCalled();
+  });
+  it('批量混合无需变更和真实变更时保留其他 Agent 与项目的草稿', async () => {
+    api.previewSkillAssignments.mockImplementation((requests: SkillAssignment[]) =>
+      Promise.resolve(
+        requests.map((request) => ({
+          request: {
+            ...request,
+            expectedRevision: request.expectedRevision || `bulk-${request.agent}`,
+          },
+          checked: request.agent !== 'gemini-cli',
+        })),
+      ),
+    );
+    const view = setup({ kind: 'project', projectId: 'two' });
+    fireEvent.click(
+      await screen.findByRole('checkbox', { name: 'code-review，项目二，Claude Code' }),
+    );
+    view.rerender(view.renderPanel({ kind: 'project', projectId: 'one' }));
+    for (const agent of ['Claude Code', 'Gemini CLI', 'Codex']) {
+      fireEvent.click(
+        await screen.findByRole('checkbox', { name: `code-review，项目一，${agent}` }),
+      );
+    }
+    expect(screen.getByText(/4 项待应用/)).toBeTruthy();
+    const dialog = openBulk(['Claude Code', 'Gemini CLI']);
+    fireEvent.click(dialog.getByRole('button', { name: '暂存使用' }));
+    await screen.findByText('已暂存 1 项，跳过 1 项无需变更。');
+    expect(screen.getByText(/3 项待应用/)).toBeTruthy();
+    expect(
+      (
+        screen.getByRole('checkbox', {
+          name: 'code-review，项目一，Claude Code',
+        }) as HTMLInputElement
+      ).checked,
+    ).toBe(true);
+    fireEvent.click(screen.getByRole('button', { name: '预览变更' }));
+    fireEvent.click(await screen.findByRole('button', { name: '应用可执行项（3）' }));
+    await waitFor(() => expect(api.applySkillAssignments).toHaveBeenCalledTimes(1));
+    expect(api.applySkillAssignments.mock.calls[0][0]).toEqual(
+      expect.arrayContaining([
+        {
+          id: 'review',
+          sourceTarget: { scope: 'global' },
+          target: { scope: 'project', projectId: 'one' },
+          agent: 'gemini-cli',
+          enabled: true,
+          expectedRevision: 'bulk-gemini-cli',
+        },
+        {
+          id: 'review',
+          sourceTarget: { scope: 'global' },
+          target: { scope: 'project', projectId: 'one' },
+          agent: 'codex',
+          enabled: false,
+          expectedRevision: 'revision-codex',
+        },
+        {
+          id: 'review',
+          sourceTarget: { scope: 'global' },
+          target: { scope: 'project', projectId: 'two' },
+          agent: 'claude-code',
+          enabled: false,
+          expectedRevision: 'revision-claude-code',
+        },
+      ]),
+    );
+    expect(api.applySkillAssignments.mock.calls[0][0]).toHaveLength(3);
+  });
+  it('批量预览拒绝时保留旧草稿，仍按原选择与 revision 预览应用', async () => {
+    setup();
+    const checkbox = (await screen.findByRole('checkbox', {
+      name: 'code-review，项目一，Claude Code',
+    })) as HTMLInputElement;
+    fireEvent.click(checkbox);
+    api.previewSkillAssignments.mockRejectedValueOnce(new Error('preview unavailable'));
+    const dialog = openBulk();
+    fireEvent.click(dialog.getByRole('button', { name: '暂存使用' }));
+    await screen.findByText('操作失败，请稍后重试。');
+    expect(checkbox.checked).toBe(false);
+    expect(screen.getByText(/1 项待应用/)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: '关闭对话框' }));
+    fireEvent.click(screen.getByRole('button', { name: '预览变更' }));
+    fireEvent.click(await screen.findByRole('button', { name: '应用可执行项（1）' }));
+    await waitFor(() => expect(api.applySkillAssignments).toHaveBeenCalledTimes(1));
+    expect(api.applySkillAssignments.mock.calls[0][0]).toEqual([
+      {
+        id: 'review',
+        sourceTarget: { scope: 'global' },
+        target: { scope: 'project', projectId: 'one' },
+        agent: 'claude-code',
+        enabled: false,
+        expectedRevision: 'revision-claude-code',
+      },
+    ]);
+  });
+  it('批量暂存保留预览 revision，后续冲突与限制仍阻止应用', async () => {
+    setup();
+    await screen.findByRole('checkbox', { name: '选择 code-review，全局' });
+    api.previewSkillAssignments.mockImplementation((requests: SkillAssignment[]) =>
+      Promise.resolve(
+        requests.map((request) => ({
+          request: { ...request, expectedRevision: 'bulk-revision' },
+          checked: false,
+        })),
+      ),
+    );
+    const dialog = openBulk(['Gemini CLI']);
+    fireEvent.click(dialog.getByRole('button', { name: '暂存使用' }));
+    await screen.findByText('已暂存 1 项，跳过 0 项无需变更。');
+    api.previewSkillAssignments.mockImplementation((requests: SkillAssignment[]) =>
+      Promise.resolve(
+        requests.map((request) => ({
+          request: { ...request, expectedRevision: 'changed-revision' },
+          checked: false,
+        })),
+      ),
+    );
+    fireEvent.click(screen.getByRole('button', { name: '预览变更' }));
+    expect(
+      ((await screen.findByRole('button', { name: '应用可执行项（0）' })) as HTMLButtonElement)
+        .disabled,
+    ).toBe(true);
+    expect(api.previewSkillAssignments.mock.calls[1][0][0].expectedRevision).toBe('bulk-revision');
+    expect(screen.getByText(/目录、版本或策略已变化/)).toBeTruthy();
+    expect(api.applySkillAssignments).not.toHaveBeenCalled();
   });
 });

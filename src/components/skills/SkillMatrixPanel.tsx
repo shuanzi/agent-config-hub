@@ -186,8 +186,10 @@ export function SkillMatrixPanel({
         seen.add(key);
         return true;
       });
+      const requestedKeys = new Set(requests.map(assignmentKey));
       setDrafts((current) => ({
-        ...current,
+        // A successful no-op preview also replaces the previous draft choice.
+        ...Object.fromEntries(Object.entries(current).filter(([key]) => !requestedKeys.has(key))),
         ...Object.fromEntries(changes.map((item) => [assignmentKey(item.request), item.request])),
       }));
       setMessage(

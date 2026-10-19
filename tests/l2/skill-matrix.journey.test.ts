@@ -81,4 +81,46 @@ describe('Skills matrix scope journey', () => {
     }));
     expect(bounds.width).toBeLessThanOrEqual(bounds.viewport);
   });
+  it('replaces opposite single drafts with the latest bulk choice in both directions', async () => {
+    await browser.setViewport({ width: 1586, height: 992 });
+    await browser.url('/tests/l2/workbench.html?fixture=polished');
+    const project = $('[aria-label="配置上下文"] button[title="/workspaces/visual-alpha"]');
+    await project.waitForDisplayed();
+    await project.click();
+    const checkbox = $(
+      '[aria-label="code-review，同名项目（/workspaces/visual-alpha），Claude Code"]',
+    );
+    await checkbox.waitForDisplayed();
+    for (const enabled of [true, false]) {
+      expect(await checkbox.isSelected()).toBe(enabled);
+      await checkbox.click();
+      expect(await $('.matrix-draft-bar').getText()).toContain('1 项待应用');
+      const selection = $('[aria-label="选择 code-review，全局"]');
+      if (!(await selection.isSelected())) await selection.click();
+      await $("//button[normalize-space()='批量分配（1）']").click();
+      const dialog = $('[role="dialog"]');
+      for (const agent of ['Codex', 'Gemini CLI', 'OpenCode']) {
+        await dialog.$(`.//label[normalize-space()='${agent}']/input`).click();
+      }
+      await dialog.$(`.//button[normalize-space()='${enabled ? '暂存使用' : '暂存停用'}']`).click();
+      await browser.waitUntil(async () => !(await dialog.isExisting()));
+      expect(await $('.skill-status').getText()).toBe('已暂存 0 项，跳过 1 项无需变更。');
+      expect(await checkbox.isSelected()).toBe(enabled);
+      expect(await $('.matrix-draft-bar').isExisting()).toBe(false);
+      if (enabled) {
+        // Persist a real disable so the reverse case starts from saved state.
+        await checkbox.click();
+        await $("//button[normalize-space()='预览变更']").click();
+        await $("//button[normalize-space()='应用可执行项（1）']").click();
+        await browser.waitUntil(async () => !(await $('[role="dialog"]').isExisting()));
+        expect(await checkbox.isSelected()).toBe(false);
+      }
+    }
+    await $('[aria-label="配置上下文"] button[title="/workspaces/visual-beta"]').click();
+    expect(
+      await $(
+        '[aria-label="code-review，同名项目（/workspaces/visual-beta），Claude Code"]',
+      ).isSelected(),
+    ).toBe(true);
+  });
 });
