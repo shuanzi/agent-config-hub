@@ -924,8 +924,23 @@ mod tests {
         ScopeTarget,
         ScopeTarget,
     ) {
+        setup_with_database(false)
+    }
+    fn setup_with_database(
+        persistent: bool,
+    ) -> (
+        Home,
+        Arc<Database>,
+        InstalledSkill,
+        ScopeTarget,
+        ScopeTarget,
+    ) {
         let home = Home::new();
-        let db = Arc::new(Database::memory().unwrap());
+        let db = Arc::new(if persistent {
+            Database::init().unwrap()
+        } else {
+            Database::memory().unwrap()
+        });
         let targets = ["one", "two"].map(|name| {
             let path = home.temp.path().join(name);
             fs::create_dir(&path).unwrap();
@@ -1407,6 +1422,473 @@ mod tests {
     }
     #[test]
     #[serial]
+    fn opencode_legacy_ask_survives_disable_and_enable() {
+        let (_home, db, skill, one, _) = setup();
+        placement::sync(&db, &skill, SkillLocation::Shared).unwrap();
+        let root = ProjectService::resolve_scope_target(&db, &one)
+            .unwrap()
+            .project_root
+            .unwrap();
+        let path = root.join("opencode.json");
+        let original = r#"{"permission":{"skill":{"code-review":"ask"}}}"#;
+        fs::write(&path, original).unwrap();
+        for enabled in [false, true] {
+            let result = apply(
+                &db,
+                vec![request(&db, &skill, &one, SkillLocation::OpenCode, enabled)],
+            );
+            assert!(result[0].applied, "{:?}", result[0].error);
+            let value = super::super::jsonc_document::parse(&fs::read_to_string(&path).unwrap())
+                .unwrap()
+                .value;
+            assert_eq!(
+                value["permission"]["skill"][&skill.name],
+                if enabled { "ask" } else { "deny" }
+            );
+        }
+        assert!(cell(&db, &skill, &one, SkillLocation::OpenCode)
+            .unwrap()
+            .notice
+            .is_some());
+    }
+    #[test]
+    #[serial]
+    fn opencode_legacy_roundtrips_keep_native_values_order_and_comments() {
+        let (_home, db, skill, one, _) = setup();
+        placement::sync(&db, &skill, SkillLocation::Shared).unwrap();
+        let root = ProjectService::resolve_scope_target(&db, &one)
+            .unwrap()
+            .project_root
+            .unwrap();
+        let path = root.join("opencode.jsonc");
+        for exact in [r#", "code-review":"ask""#, r#", "code-review":"allow""#, ""] {
+            let original = format!(
+                r#"{{ // header
+                  "permission": {{ "skill": {{ "*":"deny"{exact}, "other":"ask" }} }},
+                  "unknown": "keep", // tail
+                }}"#
+            );
+            // Absence inherits ask, while the exact permissions override deny.
+            let original = if exact.is_empty() {
+                original.replace(r#""*":"deny""#, r#""*":"ask""#)
+            } else {
+                original
+            };
+            fs::write(&path, &original).unwrap();
+            for _ in 0..2 {
+                for enabled in [false, true] {
+                    let result = apply(
+                        &db,
+                        vec![request(&db, &skill, &one, SkillLocation::OpenCode, enabled)],
+                    );
+                    assert!(result[0].applied, "{:?}", result[0].error);
+                    // Exercise the adapter's own idempotence too, bypassing
+                    // the matrix's checked-state no-op.
+                    super::super::skill_policy::apply(
+                        &db,
+                        &skill,
+                        &one,
+                        SkillLocation::OpenCode,
+                        enabled,
+                    )
+                    .unwrap();
+                }
+                let restored = fs::read_to_string(&path).unwrap();
+                assert_eq!(
+                    super::super::jsonc_document::parse(&restored)
+                        .unwrap()
+                        .value,
+                    super::super::jsonc_document::parse(&original)
+                        .unwrap()
+                        .value
+                );
+                if !exact.is_empty() {
+                    assert_eq!(restored, original);
+                }
+                assert!(restored.contains("// header"));
+                assert!(restored.contains("// tail"));
+            }
+        }
+    }
+    #[test]
+    #[serial]
+    fn opencode_legacy_native_deny_without_backup_is_never_removed() {
+        let (_home, db, skill, one, _) = setup();
+        placement::sync(&db, &skill, SkillLocation::Shared).unwrap();
+        let root = ProjectService::resolve_scope_target(&db, &one)
+            .unwrap()
+            .project_root
+            .unwrap();
+        let path = root.join("opencode.json");
+        let original = r#"{"permission":{"skill":{"code-review":"deny"}}}"#;
+        fs::write(&path, original).unwrap();
+        let state = cell(&db, &skill, &one, SkillLocation::OpenCode).unwrap();
+        assert!(!state.checked);
+        assert!(state.reason.unwrap().contains("原权限记录"));
+        let result = apply(
+            &db,
+            vec![request(&db, &skill, &one, SkillLocation::OpenCode, true)],
+        );
+        assert!(!result[0].applied);
+        assert!(super::super::skill_policy::apply(
+            &db,
+            &skill,
+            &one,
+            SkillLocation::OpenCode,
+            true
+        )
+        .is_err());
+        super::super::skill_policy::apply(&db, &skill, &one, SkillLocation::OpenCode, false)
+            .unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), original);
+    }
+    #[test]
+    #[serial]
+    fn opencode_legacy_backup_survives_database_reopen() {
+        let (_home, db, skill, one, _) = setup_with_database(true);
+        placement::sync(&db, &skill, SkillLocation::Shared).unwrap();
+        let root = ProjectService::resolve_scope_target(&db, &one)
+            .unwrap()
+            .project_root
+            .unwrap();
+        let path = root.join("opencode.json");
+        let original = r#"{"permission":{"skill":{"code-review":"ask"}}}"#;
+        fs::write(&path, original).unwrap();
+        assert!(
+            apply(
+                &db,
+                vec![request(&db, &skill, &one, SkillLocation::OpenCode, false)],
+            )[0]
+            .applied
+        );
+        drop(db);
+        let db = Arc::new(Database::init().unwrap());
+        assert!(
+            apply(
+                &db,
+                vec![request(&db, &skill, &one, SkillLocation::OpenCode, true)],
+            )[0]
+            .applied
+        );
+        assert_eq!(fs::read_to_string(path).unwrap(), original);
+    }
+    #[test]
+    #[serial]
+    fn opencode_legacy_restore_preserves_unrelated_edits_and_rejects_relevant_edits() {
+        let (_home, db, skill, one, _) = setup();
+        placement::sync(&db, &skill, SkillLocation::Shared).unwrap();
+        let root = ProjectService::resolve_scope_target(&db, &one)
+            .unwrap()
+            .project_root
+            .unwrap();
+        let path = root.join("opencode.jsonc");
+        fs::write(
+            &path,
+            r#"{"permission":{"skill":{"code-review":"ask"}},"unknown":1}"#,
+        )
+        .unwrap();
+        assert!(
+            apply(
+                &db,
+                vec![request(&db, &skill, &one, SkillLocation::OpenCode, false)],
+            )[0]
+            .applied
+        );
+        let enable = request(&db, &skill, &one, SkillLocation::OpenCode, true);
+        let disabled = fs::read_to_string(&path).unwrap();
+        for changed in [
+            disabled.replace(r#""code-review":"deny""#, r#""code-review":"allow""#),
+            disabled.replace(r#""code-review":"deny""#, r#""code-review":"ask""#),
+            disabled.replace(r#""code-review":"deny""#, ""),
+            disabled.replace(
+                r#""code-review":"deny""#,
+                r#""*":"deny","code-review":"deny""#,
+            ),
+        ] {
+            fs::write(&path, &changed).unwrap();
+            assert!(!apply(&db, vec![enable.clone()])[0].applied);
+            assert!(super::super::skill_policy::apply(
+                &db,
+                &skill,
+                &one,
+                SkillLocation::OpenCode,
+                true
+            )
+            .is_err());
+            assert_eq!(fs::read_to_string(&path).unwrap(), changed);
+        }
+        // Changes to another Skill and unknown fields don't invalidate this
+        // row; restoring it must retain those external edits.
+        let changed = disabled
+            .replace(
+                r#""code-review":"deny""#,
+                r#""code-review":"deny","other":"ask""#,
+            )
+            .replace(r#""unknown":1"#, r#""unknown":2 /* external */"#);
+        fs::write(&path, changed).unwrap();
+        assert!(apply(&db, vec![enable])[0].applied);
+        let restored = fs::read_to_string(&path).unwrap();
+        assert!(restored.contains("/* external */"));
+        let value = super::super::jsonc_document::parse(&restored)
+            .unwrap()
+            .value;
+        assert_eq!(value["permission"]["skill"]["code-review"], "ask");
+        assert_eq!(value["permission"]["skill"]["other"], "ask");
+        assert_eq!(value["unknown"], 2);
+    }
+    #[test]
+    #[serial]
+    fn opencode_legacy_restore_rejects_external_inherited_rule_changes_after_refresh() {
+        let (_home, db, skill, one, _) = setup();
+        placement::sync(&db, &skill, SkillLocation::Shared).unwrap();
+        let root = ProjectService::resolve_scope_target(&db, &one)
+            .unwrap()
+            .project_root
+            .unwrap();
+        let path = root.join("opencode.json");
+        let global = config::get_opencode_config_dir().join("opencode.json");
+        fs::create_dir_all(global.parent().unwrap()).unwrap();
+        let inherited = r#"{"permission":{"skill":{"*":"ask"}},"unknown":1}"#;
+        fs::write(&global, inherited).unwrap();
+        let original = r#"{"permission":{"skill":{"code-review":"allow"}}}"#;
+        fs::write(&path, original).unwrap();
+        assert!(
+            apply(
+                &db,
+                vec![request(&db, &skill, &one, SkillLocation::OpenCode, false)],
+            )[0]
+            .applied
+        );
+        let disabled = fs::read_to_string(&path).unwrap();
+        let unrelated = inherited.replace(r#""unknown":1"#, r#""unknown":2"#);
+        fs::write(&global, &unrelated).unwrap();
+        assert!(cell(&db, &skill, &one, SkillLocation::OpenCode)
+            .unwrap()
+            .reason
+            .is_none());
+        fs::write(&global, unrelated.replace(r#""*":"ask""#, r#""*":"deny""#)).unwrap();
+        // Refreshing the row cannot adopt an ancestor change as consent to
+        // restore the saved allow over the newly added deny.
+        let rows = rows(
+            &db,
+            &ConfigContext::Project {
+                project_id: match &one {
+                    ScopeTarget::Project { project_id } => project_id.clone(),
+                    _ => unreachable!(),
+                },
+            },
+        )
+        .unwrap();
+        let row = rows.iter().find(|row| row.skill.id == skill.id).unwrap();
+        let state = row
+            .cells
+            .iter()
+            .find(|cell| cell.agent == SkillLocation::OpenCode)
+            .unwrap();
+        assert!(state.reason.is_some());
+        assert!(super::super::skill_policy::apply(
+            &db,
+            &skill,
+            &one,
+            SkillLocation::OpenCode,
+            true
+        )
+        .is_err());
+        assert_eq!(fs::read_to_string(&path).unwrap(), disabled);
+        fs::write(&global, &unrelated).unwrap();
+        assert!(
+            apply(
+                &db,
+                vec![request(&db, &skill, &one, SkillLocation::OpenCode, true)],
+            )[0]
+            .applied
+        );
+        assert_eq!(fs::read_to_string(path).unwrap(), original);
+        assert_eq!(fs::read_to_string(global).unwrap(), unrelated);
+    }
+    #[test]
+    #[serial]
+    fn opencode_legacy_incomplete_backup_cannot_be_treated_as_original_absence() {
+        let (_home, db, skill, one, _) = setup();
+        placement::sync(&db, &skill, SkillLocation::Shared).unwrap();
+        let root = ProjectService::resolve_scope_target(&db, &one)
+            .unwrap()
+            .project_root
+            .unwrap();
+        let path = root.join("opencode.json");
+        let original = r#"{"permission":{"skill":{"code-review":"ask"}}}"#;
+        fs::write(&path, original).unwrap();
+        assert!(
+            apply(
+                &db,
+                vec![request(&db, &skill, &one, SkillLocation::OpenCode, false)],
+            )[0]
+            .applied
+        );
+        let enable = request(&db, &skill, &one, SkillLocation::OpenCode, true);
+        let disabled = fs::read_to_string(&path).unwrap();
+        let key: String = db
+            .conn
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT key FROM settings WHERE key LIKE 'opencode_skill_exclusion_v1:%'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let saved = db.get_setting(&key).unwrap().unwrap();
+        let mut incomplete: Value = serde_json::from_str(&saved).unwrap();
+        incomplete.as_object_mut().unwrap().remove("previous");
+        db.set_setting(&key, &incomplete.to_string()).unwrap();
+        assert!(!apply(&db, vec![enable.clone()])[0].applied);
+        assert_eq!(fs::read_to_string(&path).unwrap(), disabled);
+        db.set_setting(&key, &saved).unwrap();
+        assert!(apply(&db, vec![enable])[0].applied);
+        assert_eq!(fs::read_to_string(path).unwrap(), original);
+    }
+    #[test]
+    #[serial]
+    fn opencode_legacy_backup_failure_keeps_native_permission_unchanged() {
+        let (_home, db, skill, one, _) = setup();
+        placement::sync(&db, &skill, SkillLocation::Shared).unwrap();
+        let root = ProjectService::resolve_scope_target(&db, &one)
+            .unwrap()
+            .project_root
+            .unwrap();
+        let path = root.join("opencode.json");
+        let original = r#"{"permission":{"skill":{"code-review":"ask"}}}"#;
+        fs::write(&path, original).unwrap();
+        db.conn
+            .lock()
+            .unwrap()
+            .execute_batch("PRAGMA query_only=ON")
+            .unwrap();
+        let result = apply(
+            &db,
+            vec![request(&db, &skill, &one, SkillLocation::OpenCode, false)],
+        );
+        assert!(!result[0].applied);
+        assert_eq!(fs::read_to_string(&path).unwrap(), original);
+    }
+    #[test]
+    #[serial]
+    fn opencode_legacy_restore_database_failure_can_retry_without_partial_enable() {
+        let (_home, db, skill, one, _) = setup();
+        placement::sync(&db, &skill, SkillLocation::Shared).unwrap();
+        let root = ProjectService::resolve_scope_target(&db, &one)
+            .unwrap()
+            .project_root
+            .unwrap();
+        let path = root.join("opencode.json");
+        let original = r#"{"permission":{"skill":{"code-review":"ask"}}}"#;
+        fs::write(&path, original).unwrap();
+        assert!(
+            apply(
+                &db,
+                vec![request(&db, &skill, &one, SkillLocation::OpenCode, false)],
+            )[0]
+            .applied
+        );
+        let disabled = fs::read_to_string(&path).unwrap();
+        let enable = request(&db, &skill, &one, SkillLocation::OpenCode, true);
+        db.conn
+            .lock()
+            .unwrap()
+            .execute_batch("PRAGMA query_only=ON")
+            .unwrap();
+        let result = apply(&db, vec![enable]);
+        db.conn
+            .lock()
+            .unwrap()
+            .execute_batch("PRAGMA query_only=OFF")
+            .unwrap();
+        assert!(!result[0].applied);
+        assert_eq!(fs::read_to_string(&path).unwrap(), disabled);
+        let state = cell(&db, &skill, &one, SkillLocation::OpenCode).unwrap();
+        assert!(!state.checked);
+        assert!(state.reason.is_none());
+        assert!(
+            apply(
+                &db,
+                vec![request(&db, &skill, &one, SkillLocation::OpenCode, true)],
+            )[0]
+            .applied
+        );
+        assert_eq!(fs::read_to_string(path).unwrap(), original);
+    }
+    #[cfg(unix)]
+    #[test]
+    #[serial]
+    fn opencode_legacy_native_write_failure_rolls_back_backup_and_can_retry() {
+        use std::os::unix::fs::PermissionsExt;
+        let (_home, db, skill, one, _) = setup();
+        placement::sync(&db, &skill, SkillLocation::Shared).unwrap();
+        let root = ProjectService::resolve_scope_target(&db, &one)
+            .unwrap()
+            .project_root
+            .unwrap();
+        let path = root.join("opencode.json");
+        let original = r#"{"permission":{"skill":{"code-review":"ask"}}}"#;
+        fs::write(&path, original).unwrap();
+        let disable = request(&db, &skill, &one, SkillLocation::OpenCode, false);
+        let permissions = fs::metadata(&root).unwrap().permissions();
+        fs::set_permissions(&root, fs::Permissions::from_mode(0o500)).unwrap();
+        let result = apply(&db, vec![disable]);
+        fs::set_permissions(&root, permissions).unwrap();
+        assert!(!result[0].applied);
+        assert_eq!(fs::read_to_string(&path).unwrap(), original);
+        assert!(cell(&db, &skill, &one, SkillLocation::OpenCode)
+            .unwrap()
+            .reason
+            .is_none());
+        for enabled in [false, true] {
+            assert!(
+                apply(
+                    &db,
+                    vec![request(&db, &skill, &one, SkillLocation::OpenCode, enabled)],
+                )[0]
+                .applied
+            );
+        }
+        assert_eq!(fs::read_to_string(path).unwrap(), original);
+    }
+    #[test]
+    #[serial]
+    fn opencode_legacy_later_wildcard_cannot_turn_disable_into_a_noop() {
+        let (_home, db, skill, one, _) = setup();
+        placement::sync(&db, &skill, SkillLocation::Shared).unwrap();
+        let root = ProjectService::resolve_scope_target(&db, &one)
+            .unwrap()
+            .project_root
+            .unwrap();
+        let path = root.join("opencode.json");
+        let original = r#"{"permission":{"skill":{"code-review":"ask","*":"allow"}}}"#;
+        fs::write(&path, original).unwrap();
+        assert!(cell(&db, &skill, &one, SkillLocation::OpenCode)
+            .unwrap()
+            .reason
+            .unwrap()
+            .contains("顺序"));
+        assert!(
+            !apply(
+                &db,
+                vec![request(&db, &skill, &one, SkillLocation::OpenCode, false)],
+            )[0]
+            .applied
+        );
+        assert!(super::super::skill_policy::apply(
+            &db,
+            &skill,
+            &one,
+            SkillLocation::OpenCode,
+            false
+        )
+        .is_err());
+        assert_eq!(fs::read_to_string(path).unwrap(), original);
+    }
+    #[test]
+    #[serial]
     fn opencode_jsonc_priority_order_and_modern_rules_preserve_text() {
         let (_home, db, skill, one, _) = setup();
         placement::sync(&db, &skill, SkillLocation::Shared).unwrap();
@@ -1556,19 +2038,29 @@ mod tests {
         db.save_skill(&other).unwrap();
         placement::register_source(&db, &other).unwrap();
         placement::sync(&db, &other, SkillLocation::Shared).unwrap();
-        let requests = [&skill, &other]
-            .into_iter()
-            .flat_map(|skill| {
-                [SkillLocation::Codex, SkillLocation::OpenCode]
-                    .map(|agent| request(&db, skill, &one, agent, false))
-            })
-            .collect();
-        let results = apply(&db, requests);
-        assert!(
-            results.iter().all(|item| item.applied),
-            "{:?}",
-            results.iter().map(|r| &r.error).collect::<Vec<_>>()
-        );
+        let root = ProjectService::resolve_scope_target(&db, &one)
+            .unwrap()
+            .project_root
+            .unwrap();
+        let policy = root.join("opencode.json");
+        let original = r#"{"permission":{"skill":{"code-review":"ask","other":"allow"}}}"#;
+        fs::write(&policy, original).unwrap();
+        for enabled in [false, true] {
+            let requests = [&skill, &other]
+                .into_iter()
+                .flat_map(|skill| {
+                    [SkillLocation::Codex, SkillLocation::OpenCode]
+                        .map(|agent| request(&db, skill, &one, agent, enabled))
+                })
+                .collect();
+            let results = apply(&db, requests);
+            assert!(
+                results.iter().all(|item| item.applied),
+                "{:?}",
+                results.iter().map(|r| &r.error).collect::<Vec<_>>()
+            );
+        }
+        assert_eq!(fs::read_to_string(policy).unwrap(), original);
     }
 
     #[test]
