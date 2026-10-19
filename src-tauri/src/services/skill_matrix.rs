@@ -894,6 +894,7 @@ mod tests {
     use super::*;
     use crate::{config, services::skill::SkillApps};
     use serial_test::serial;
+    include!("skill_matrix_modern_tests.rs");
     struct Home {
         temp: tempfile::TempDir,
         previous: Option<std::ffi::OsString>,

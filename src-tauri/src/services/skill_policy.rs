@@ -246,10 +246,13 @@ fn effect(value: &Value) -> Result<String, AppError> {
 pub(crate) const OPENCODE_EXCLUSION_PREFIX: &str = "opencode_skill_exclusion_v1:";
 
 #[derive(Serialize, Deserialize)]
-struct LegacyExclusion {
+struct OpenCodeExclusion {
     previous: Value,
     rules: Vec<Value>,
     other_rules: Vec<Value>,
+    // Existing v1 records describe the legacy precise-value replacement.
+    #[serde(default)]
+    modern: bool,
 }
 fn exclusion_key(path: &Path, name: &str) -> String {
     format!(
@@ -281,16 +284,38 @@ fn other_relevant_rules(
     }
     Ok(result)
 }
-fn legacy_exclusion(
+fn modern_rule(name: &str) -> Value {
+    json!({"action":"skill","resource":name,"effect":"deny"})
+}
+fn modern_relevant_rules(node: &Node, name: &str) -> Vec<Value> {
+    node.get("permissions")
+        .into_iter()
+        .flat_map(|array| &array.elements)
+        .filter(|entry| {
+            entry
+                .value
+                .get("action")
+                .and_then(Value::as_str)
+                .is_some_and(|action| wildcard("skill", action))
+                && entry
+                    .value
+                    .get("resource")
+                    .and_then(Value::as_str)
+                    .is_some_and(|resource| wildcard(name, resource))
+        })
+        .map(|entry| entry.value.clone())
+        .collect()
+}
+fn opencode_exclusion(
     db: &Arc<Database>,
     paths: &[PathBuf],
     path: &Path,
     name: &str,
     node: &Node,
-) -> Result<Option<LegacyExclusion>, AppError> {
+) -> Result<Option<OpenCodeExclusion>, AppError> {
     let saved = db
         .get_setting(&exclusion_key(path, name))?
-        .map(|text| serde_json::from_str::<Option<LegacyExclusion>>(&text))
+        .map(|text| serde_json::from_str::<Option<OpenCodeExclusion>>(&text))
         .transpose()
         .map_err(|_| conflict("OpenCode 项目排除的原权限记录无效，请先核对原生配置。"))?
         .flatten();
@@ -298,14 +323,21 @@ fn legacy_exclusion(
         if !saved.previous.is_null() {
             effect(&saved.previous)?;
         }
-        if modern(node)?
-            || saved.rules != relevant_rules(node, path, name)?
+        let local_matches = if saved.modern {
+            saved.previous.is_null()
+                && saved.rules == modern_relevant_rules(node, name)
+                && saved.rules.last() == Some(&modern_rule(name))
+        } else {
+            saved.rules == relevant_rules(node, path, name)?
+                && node
+                    .get("permission")
+                    .and_then(|n| n.get("skill"))
+                    .and_then(|n| n.get(name))
+                    .is_some_and(|n| n.value == "deny")
+        };
+        if saved.modern != modern(node)?
+            || !local_matches
             || saved.other_rules != other_relevant_rules(paths, path, name)?
-            || node
-                .get("permission")
-                .and_then(|n| n.get("skill"))
-                .and_then(|n| n.get(name))
-                .is_none_or(|n| n.value != "deny")
         {
             return Err(conflict(
                 "OpenCode 项目排除的相关权限已被外部修改，请先核对原生配置；本次没有覆盖或恢复旧值。",
@@ -313,6 +345,43 @@ fn legacy_exclusion(
         }
     }
     Ok(saved)
+}
+fn save_exclusion(
+    db: &Arc<Database>,
+    key: &str,
+    saved: &OpenCodeExclusion,
+    path: &Path,
+    original: Option<&str>,
+    text: &str,
+) -> Result<(), AppError> {
+    db.set_setting(key, &serde_json::to_string(saved).unwrap())?;
+    if let Err(error) = write(path, original, text) {
+        if let Err(rollback) = db.set_setting(key, "null") {
+            return Err(conflict(format!(
+                "{error}；原权限记录回滚失败：{rollback}，请核对原生配置。"
+            )));
+        }
+        return Err(error);
+    }
+    Ok(())
+}
+fn restore_exclusion(
+    db: &Arc<Database>,
+    key: &str,
+    path: &Path,
+    original: &str,
+    text: &str,
+) -> Result<(), AppError> {
+    write(path, Some(original), text)?;
+    if let Err(error) = db.set_setting(key, "null") {
+        if let Err(rollback) = write(path, Some(text), original) {
+            return Err(conflict(format!(
+                "{error}；原生权限回滚失败：{rollback}，原权限记录仍保留，请核对原生配置。"
+            )));
+        }
+        return Err(error);
+    }
+    Ok(())
 }
 const LEGACY_KEYS: &[&str] = &[
     "logLevel",
@@ -505,6 +574,8 @@ fn opencode_state(
     let mut observed = vec![];
     let mut saved_exclusion = None;
     let mut native_legacy_deny = false;
+    let mut native_modern_deny = false;
+    let mut selected_modern = false;
     for path in paths.clone() {
         let Some(text) = read(&path)? else {
             continue;
@@ -513,7 +584,18 @@ fn opencode_state(
         let is_modern = modern(&node)?;
         let document_rules = rules(&node, &path)?;
         if path == selected {
-            saved_exclusion = legacy_exclusion(db, &paths, &path, &skill.name, &node)?;
+            selected_modern = is_modern;
+            saved_exclusion = opencode_exclusion(db, &paths, &path, &skill.name, &node)?;
+            native_modern_deny = is_modern
+                && saved_exclusion.is_none()
+                && document_rules
+                    .iter()
+                    .rfind(|rule| matches(rule, &skill.name))
+                    .is_some_and(|rule| {
+                        rule.action == "skill"
+                            && rule.resource == skill.name
+                            && rule.effect == "deny"
+                    });
             let exact = node
                 .get("permission")
                 .and_then(|n| n.get("skill"))
@@ -588,10 +670,25 @@ fn opencode_state(
     }
     let last = all.last();
     let off = last.is_some_and(|rule| rule.effect == "deny");
+    let owned_modern = saved_exclusion
+        .as_ref()
+        .filter(|saved| saved.modern)
+        .and_then(|_| {
+            all.iter().rposition(|rule| {
+                rule.path == selected
+                    && rule.action == "skill"
+                    && rule.resource == skill.name
+                    && rule.effect == "deny"
+            })
+        });
     let restored = all
         .iter()
-        .filter_map(|rule| {
-            if rule.path == selected
+        .enumerate()
+        .filter_map(|(index, rule)| {
+            if Some(index) == owned_modern {
+                None
+            } else if !selected_modern
+                && rule.path == selected
                 && rule.action == "skill"
                 && rule.resource == skill.name
                 && rule.effect == "deny"
@@ -612,6 +709,8 @@ fn opencode_state(
         )
     } else if role {
         Some("OpenCode 角色设置了覆盖此 Skill 的精细权限，请在原生角色配置中管理。".into())
+    } else if native_modern_deny {
+        Some("OpenCode 精确 deny 没有管理器归属记录，请先在原生配置中核对；不会自动移除。".into())
     } else if off
         && (inherited_off
             || last.is_some_and(|rule| {
@@ -633,7 +732,7 @@ fn opencode_state(
         .collect::<Vec<_>>();
     Ok(PolicyState {
         excluded: off,
-        revision: json!({"rules":relevant,"roles":observed,"writePath":selected,"legacyExclusion":saved_exclusion}),
+        revision: json!({"rules":relevant,"roles":observed,"writePath":selected,"exclusion":saved_exclusion}),
         reason,
         notice: last
             .filter(|r| r.effect == "ask")
@@ -650,34 +749,47 @@ fn write_opencode(
     let original = read(&path)?;
     let mut text = original.clone().unwrap_or_else(|| "{}\n".into());
     let node = jsonc::parse(&text)?;
-    let saved = legacy_exclusion(db, &paths, &path, &skill.name, &node)?;
+    let saved = opencode_exclusion(db, &paths, &path, &skill.name, &node)?;
+    let key = exclusion_key(&path, &skill.name);
     if modern(&node)? {
-        let indices = node
-            .get("permissions")
-            .map(|array| {
-                array
-                    .elements
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, entry)| {
-                        entry.value.get("action") == Some(&json!("skill"))
-                            && entry.value.get("resource") == Some(&json!(skill.name))
-                            && entry.value.get("effect") == Some(&json!("deny"))
-                    })
-                    .map(|(i, _)| i)
-                    .collect::<Vec<_>>()
-            })
-            .unwrap_or_default();
-        for index in indices.into_iter().rev() {
+        let current = rules(&node, &path)?;
+        let off = current
+            .iter()
+            .rfind(|rule| matches(rule, &skill.name))
+            .is_some_and(|rule| rule.effect == "deny");
+        if enabled {
+            if saved.is_none() {
+                return if off {
+                    Err(conflict(
+                        "OpenCode 原生 deny 没有管理器归属记录，不会自动移除。",
+                    ))
+                } else {
+                    Ok(())
+                };
+            }
+            // Validation proves the last relevant entry is our appended rule.
+            // Resolve its current index, since other Skills may have shifted it.
+            let index = node
+                .get("permissions")
+                .unwrap()
+                .elements
+                .iter()
+                .rposition(|entry| entry.value == modern_rule(&skill.name))
+                .unwrap();
             text = jsonc::remove_element(&text, &["permissions"], index)?;
+            return restore_exclusion(db, &key, &path, original.as_deref().unwrap(), &text);
         }
-        if !enabled {
-            text = jsonc::append(
-                &text,
-                &["permissions"],
-                json!({"action":"skill","resource":skill.name,"effect":"deny"}),
-            )?;
+        if saved.is_some() || off {
+            return Ok(());
         }
+        text = jsonc::append(&text, &["permissions"], modern_rule(&skill.name))?;
+        let saved = OpenCodeExclusion {
+            previous: Value::Null,
+            rules: modern_relevant_rules(&jsonc::parse(&text)?, &skill.name),
+            other_rules: other_relevant_rules(&paths, &path, &skill.name)?,
+            modern: true,
+        };
+        save_exclusion(db, &key, &saved, &path, original.as_deref(), &text)
     } else {
         if let Some(permission) = node.get("permission").filter(|n| n.value.is_string()) {
             text = jsonc::set(&text, &["permission"], json!({"*":permission.value}))?;
@@ -695,7 +807,6 @@ fn write_opencode(
             .and_then(|n| n.get("skill"))
             .and_then(|n| n.get(&skill.name))
             .map(|n| n.value.clone());
-        let key = exclusion_key(&path, &skill.name);
         if enabled {
             let Some(saved) = saved else {
                 if exact == Some(json!("deny")) {
@@ -710,19 +821,7 @@ fn write_opencode(
             } else {
                 jsonc::remove(&text, &["permission", "skill", &skill.name])?
             };
-            write(&path, original.as_deref(), &text)?;
-            // If clearing the backup fails, restore the managed deny so the
-            // failed operation stays retryable. The CAS also protects any
-            // external edit made after the native restoration.
-            if let Err(error) = db.set_setting(&key, "null") {
-                if let Err(rollback) = write(&path, Some(&text), original.as_deref().unwrap()) {
-                    return Err(conflict(format!(
-                        "{error}；原生权限回滚失败：{rollback}，原权限记录仍保留，请核对原生配置。"
-                    )));
-                }
-                return Err(error);
-            }
-            return Ok(());
+            restore_exclusion(db, &key, &path, original.as_deref().unwrap(), &text)
         } else {
             if saved.is_some() || exact == Some(json!("deny")) {
                 return Ok(());
@@ -738,24 +837,67 @@ fn write_opencode(
                     "OpenCode 规则顺序会使项目排除失效，本次没有写入。",
                 ));
             }
-            let saved = LegacyExclusion {
+            let saved = OpenCodeExclusion {
                 previous: exact.unwrap_or(Value::Null),
                 rules,
                 other_rules: other_relevant_rules(&paths, &path, &skill.name)?,
+                modern: false,
             };
             // Persist before replacing the native value so a restart cannot
             // mistake a managed deny for a native permission to remove.
-            db.set_setting(&key, &serde_json::to_string(&saved).unwrap())?;
-            if let Err(error) = write(&path, original.as_deref(), &text) {
-                if let Err(rollback) = db.set_setting(&key, "null") {
-                    return Err(conflict(format!(
-                        "{error}；原权限记录回滚失败：{rollback}，请核对原生配置。"
-                    )));
-                }
-                return Err(error);
-            }
-            return Ok(());
+            save_exclusion(db, &key, &saved, &path, original.as_deref(), &text)
         }
     }
-    write(&path, original.as_deref(), &text)
+}
+
+#[cfg(test)]
+mod exclusion_write_tests {
+    use super::*;
+
+    #[test]
+    fn opencode_exclusion_failed_native_rollback_keeps_external_edit_and_record() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("opencode.json");
+        let disabled =
+            r#"{"permissions":[{"action":"skill","resource":"review","effect":"deny"}]}"#;
+        let restored = r#"{"permissions":[]}"#;
+        let external = r#"{"permissions":[],"external":true}"#;
+        fs::write(&path, disabled).unwrap();
+        let db = Arc::new(Database::memory().unwrap());
+        let key = exclusion_key(&path, "review");
+        let saved = r#"{"saved":"retain"}"#;
+        db.set_setting(&key, saved).unwrap();
+        // Block cleanup after the native restoration, then emulate an external
+        // writer before the failed cleanup attempts the guarded rollback.
+        let connection = db.conn.lock().unwrap();
+        connection.execute_batch("PRAGMA query_only=ON").unwrap();
+        std::thread::scope(|scope| {
+            let writer = scope.spawn(|| restore_exclusion(&db, &key, &path, disabled, restored));
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+            let mut observed = false;
+            while std::time::Instant::now() < deadline {
+                if fs::read_to_string(&path).is_ok_and(|text| text == restored) {
+                    observed = true;
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+            let changed = if observed {
+                fs::write(&path, external)
+            } else {
+                Ok(())
+            };
+            drop(connection);
+            let result = writer.join().unwrap();
+            assert!(
+                observed,
+                "native restoration was not observed before cleanup"
+            );
+            changed.unwrap();
+            let message = result.unwrap_err().to_string();
+            assert!(message.contains("原生权限回滚失败") && message.contains("外部修改"));
+        });
+        assert_eq!(fs::read_to_string(path).unwrap(), external);
+        assert_eq!(db.get_setting(&key).unwrap().as_deref(), Some(saved));
+    }
 }
