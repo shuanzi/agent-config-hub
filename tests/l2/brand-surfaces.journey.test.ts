@@ -1,6 +1,6 @@
 import { describe, it } from 'mocha';
 import { $, browser, expect } from '@wdio/globals';
-import { mkdir } from 'node:fs/promises';
+import { saveEvidence } from './evidence';
 
 describe('共享品牌入口视觉回归', () => {
   for (const [width, height] of [
@@ -14,6 +14,8 @@ describe('共享品牌入口视觉回归', () => {
       await $('[data-workbench-rail="asset-type"]').waitForDisplayed();
       await $("//*[@data-workbench-rail='asset-type']//button[normalize-space()='Skills']").click();
       await $("//nav[@aria-label='配置上下文']//button[normalize-space()='全局配置']").click();
+      await $("//button[normalize-space()='目录与维护']").waitForDisplayed();
+      await $("//button[normalize-space()='目录与维护']").click();
       await $('.skill-placement-controls.is-inline').waitForDisplayed();
       const marks = await browser.execute(() =>
         [
@@ -31,8 +33,7 @@ describe('共享品牌入口视觉回归', () => {
       );
       expect(marks.length).toBe(4);
       expect(marks.every((mark) => mark.ready && mark.centered)).toBe(true);
-      await mkdir('/tmp/acm-polished-evidence', { recursive: true });
-      await browser.saveScreenshot(`/tmp/acm-polished-evidence/brands-skills-${width}.png`);
+      await saveEvidence(`brands-skills-${width}`);
 
       // Reload to exercise the narrow single-surface navigation from its first step.
       await browser.url('/tests/l2/workbench.html?fixture=visual');
@@ -52,7 +53,7 @@ describe('共享品牌入口视觉回归', () => {
       expect(await $('.instruction-document-paths').getText()).toContain(
         '/isolated/.config/opencode/AGENTS.md',
       );
-      await browser.saveScreenshot(`/tmp/acm-polished-evidence/brands-instructions-${width}.png`);
+      await saveEvidence(`brands-instructions-${width}`);
 
       await browser.url('/tests/l2/workbench.html?fixture=visual');
       await $(
@@ -65,7 +66,7 @@ describe('共享品牌入口视觉回归', () => {
       expect(await browser.execute(() => document.documentElement.scrollWidth > innerWidth)).toBe(
         false,
       );
-      await browser.saveScreenshot(`/tmp/acm-polished-evidence/project-picker-${width}.png`);
+      await saveEvidence(`project-picker-${width}`);
     });
   }
 });

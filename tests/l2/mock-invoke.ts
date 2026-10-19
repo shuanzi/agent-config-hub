@@ -1,6 +1,8 @@
 import { createNativeSubagentFixture } from './native-subagent-fixture';
 import type {
   AgentType,
+  SkillAssignment,
+  SkillMatrixCell,
   ConfigContext,
   DiscoverableSkill,
   DiscoverableSubagent,
@@ -474,6 +476,71 @@ export function setupMockInvoke() {
   };
 
   window.__ACM_MOCK_STATE__ = state;
+  const excludedMatrixCells = new Set<string>();
+  function matrixCell(
+    skill: InstalledSkill,
+    target: ScopeTarget,
+    agent: AgentType,
+  ): SkillMatrixCell {
+    const project = target.scope === 'project';
+    const reads = (location: SkillLocation) =>
+      location === agent ||
+      (agent !== 'claude-code' && location === 'shared') ||
+      (agent === 'opencode' && location === 'claude-code') ||
+      (project && ['gemini-cli', 'opencode'].includes(agent) && location === 'codex');
+    const local = state.skillPlacements.find(
+      (asset) => asset.id === skill.id && sameTarget(asset.target, target),
+    );
+    const inherited =
+      project &&
+      state.installed
+        .filter((asset) => asset.target.scope === 'global' && asset.name === skill.name)
+        .some((asset) =>
+          state.skillPlacements
+            .find((entry) => entry.id === asset.id && entry.target.scope === 'global')
+            ?.placements.some((entry) => reads(entry.location) && entry.state === 'placed'),
+        );
+    const relevant = local?.placements.filter((entry) => reads(entry.location)) ?? [];
+    const present = relevant.some((entry) => entry.state === 'placed') || inherited;
+    const key = JSON.stringify([target, skill.id, agent]);
+    const excluded = excludedMatrixCells.has(key);
+    const limitation =
+      present &&
+      (inherited ||
+        (project &&
+          agent === 'codex' &&
+          relevant.some((entry) => entry.location === 'codex' && entry.state === 'placed')) ||
+        relevant.some((entry) => entry.location !== agent && entry.state === 'placed')) &&
+      ['codex', 'opencode'].includes(agent) &&
+      !project;
+    return {
+      activationMode: agent === 'codex' && project ? 'projectLauncher' : 'native',
+      notice: agent === 'codex' && project ? '仅通过本项目的「启动 Codex」入口生效。' : undefined,
+      agent,
+      checked: present && !excluded,
+      origin: excluded
+        ? 'excluded'
+        : inherited && !relevant.some((entry) => entry.state === 'placed')
+          ? 'inherited'
+          : present
+            ? 'placed'
+            : 'absent',
+      reason:
+        project && agent === 'opencode' && skill.name === 'frontend-design'
+          ? 'OpenCode 角色 plan 设置了此 Skill 的精细权限，请在原生角色配置中管理。'
+          : limitation
+            ? '该 Agent 的原生局部停用能力尚未验证；请在原生 Agent 中管理。'
+            : undefined,
+      revision: JSON.stringify([
+        skill.id,
+        target,
+        agent,
+        present,
+        excluded,
+        relevant.map((entry) => entry.revision),
+      ]),
+    };
+  }
 
   window.__ACM_MOCK_INVOKE__ = (cmd, args) => {
     if (cmd.includes('native_subagent')) return nativeSubagents(cmd, args);
@@ -516,6 +583,101 @@ export function setupMockInvoke() {
 
       case 'get_skill_repos':
         return state.repos;
+
+      case 'get_codex_project_launch': {
+        const project = state.projects.find((entry) => entry.projectId === args?.projectId)!;
+        const target: ScopeTarget = { scope: 'project', projectId: project.projectId };
+        const excludedSkills = state.installed
+          .filter((skill) => excludedMatrixCells.has(JSON.stringify([target, skill.id, 'codex'])))
+          .map((skill) => ({ id: skill.id, name: skill.name }));
+        return {
+          projectId: project.projectId,
+          projectRoot: project.rootPath,
+          codexHome: '/mock/.codex',
+          executablePath: '/mock/bin/codex',
+          args: ['-C', project.rootPath],
+          excludedSkills,
+          revision: JSON.stringify(excludedSkills),
+        };
+      }
+      case 'launch_codex_project':
+        return { handedOff: true };
+      case 'get_skill_matrix': {
+        const context = args?.context as ConfigContext;
+        const assets = state.installed.filter(
+          (asset) =>
+            context.kind === 'all' ||
+            (context.kind === 'global'
+              ? asset.target.scope === 'global'
+              : asset.target.scope === 'global' ||
+                (asset.target.scope === 'project' && asset.target.projectId === context.projectId)),
+        );
+        return assets.map((skill) => {
+          const target: ScopeTarget =
+            context.kind === 'project'
+              ? { scope: 'project', projectId: context.projectId }
+              : skill.target;
+          return {
+            skill,
+            target,
+            cells: (['claude-code', 'codex', 'gemini-cli', 'opencode'] as AgentType[]).map(
+              (agent) => matrixCell(skill, target, agent),
+            ),
+          };
+        });
+      }
+      case 'preview_skill_assignments':
+        return (args?.requests as SkillAssignment[]).map((request) => {
+          const source = state.installed.find(
+            (asset) => asset.id === request.id && sameTarget(asset.target, request.sourceTarget),
+          );
+          if (!source) return { request, checked: false, reason: '来源已不存在' };
+          const cell = matrixCell(source, request.target, request.agent);
+          return {
+            request: { ...request, expectedRevision: cell.revision },
+            checked: cell.checked,
+            reason: cell.reason,
+          };
+        });
+      case 'apply_skill_assignments':
+        return (args?.requests as SkillAssignment[]).map((request) => {
+          const source = state.installed.find(
+            (asset) => asset.id === request.id && sameTarget(asset.target, request.sourceTarget),
+          );
+          if (!source) return { request, applied: false, error: '来源已不存在' };
+          const cell = matrixCell(source, request.target, request.agent);
+          if (cell.reason || cell.revision !== request.expectedRevision)
+            return { request, applied: false, error: cell.reason ?? '目录已变化' };
+          const key = JSON.stringify([request.target, source.id, request.agent]);
+          if (
+            !request.enabled &&
+            (cell.origin === 'inherited' ||
+              (request.target.scope === 'project' && ['codex', 'opencode'].includes(request.agent)))
+          )
+            excludedMatrixCells.add(key);
+          else if (request.enabled && cell.origin === 'excluded') excludedMatrixCells.delete(key);
+          else {
+            let owned = state.installed.find(
+              (asset) => asset.id === source.id && sameTarget(asset.target, request.target),
+            );
+            if (!owned) {
+              owned = { ...source, target: request.target };
+              state.installed.push(owned);
+              state.skillPlacements.push(
+                createSkillPlacementAsset(owned, request.agent, state.projects),
+              );
+            }
+            const entry = state.skillPlacements
+              .find((asset) => asset.id === source.id && sameTarget(asset.target, request.target))
+              ?.placements.find((item) => item.location === request.agent);
+            if (entry) {
+              entry.state = request.enabled ? 'placed' : 'absent';
+              entry.withdrawable = request.enabled;
+              entry.revision += '-changed';
+            }
+          }
+          return { request, applied: true };
+        });
 
       case 'get_installed_skills': {
         const context = args?.context as ConfigContext;

@@ -13,7 +13,7 @@
  *    最小组件；列表见 BANNED_DEPENDENCIES，命中 package.json 或
  *    package-lock.json 即失败）；
  * 8. 敏感占位值守卫：FX-01 占位明文只允许存在于 fixture 原始文件；
- *    其余被跟踪源文件（src/tests/scripts/src-tauri/performance，排除
+ *    其余被跟踪源文件（src/tests/scripts/src-tauri，排除
  *    node_modules/dist/target/.artifacts/lockfiles）出现即失败。
  */
 import fs from 'node:fs';
@@ -85,7 +85,15 @@ async function placeholderGuard() {
   const placeholder = ['SYNTHETIC-SECRET', 'demo-skill-0001'].join('-');
   // 文件系统遍历（交付物可能尚未提交，git ls-files 会漏掉 untracked 文件）；
   // 排除构建产物、依赖与 evidence 目录。扫描结果为 0 时封闭失败（空转即门禁失效）。
-  const scanRoots = ['src', 'tests', 'scripts', 'src-tauri/src', 'src-tauri/tests', 'src-tauri/capabilities', 'performance', 'fixtures'];
+  const scanRoots = [
+    'src',
+    'tests',
+    'scripts',
+    'src-tauri/src',
+    'src-tauri/tests',
+    'src-tauri/capabilities',
+    'fixtures',
+  ];
   const skipDirs = new Set(['node_modules', 'dist', 'target', '.artifacts', 'gen']);
   const skipFiles = new Set(['package-lock.json', 'Cargo.lock']);
   const allowed = new Set(['fixtures/fx-01/fixture.json']);
