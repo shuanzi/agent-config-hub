@@ -14,25 +14,7 @@ const queryClient = new QueryClient({
   },
 });
 
-const query = new URLSearchParams(window.location.search);
-
-async function bootstrap(): Promise<void> {
-  if (import.meta.env.DEV && query.get('prototype') === 'full-ui') {
-    const { FullUiMock } = await import('./prototypes/full-ui-mock/FullUiMock');
-    const container = document.getElementById('root');
-    if (container === null) {
-      throw new Error('缺少 #root 挂载点');
-    }
-    createRoot(container).render(
-      <StrictMode>
-        <QueryClientProvider client={queryClient}>
-          <FullUiMock />
-        </QueryClientProvider>
-      </StrictMode>,
-    );
-    return;
-  }
-
+function bootstrap(): void {
   const container = document.getElementById('root');
   if (container === null) {
     throw new Error('缺少 #root 挂载点');
@@ -46,4 +28,4 @@ async function bootstrap(): Promise<void> {
   );
 }
 
-void bootstrap();
+bootstrap();

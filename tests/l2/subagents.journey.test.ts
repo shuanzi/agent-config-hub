@@ -1,6 +1,6 @@
 import { describe, it } from 'mocha';
 import { $, $$, browser, expect } from '@wdio/globals';
-import { mkdir } from 'node:fs/promises';
+import { saveEvidence } from './evidence';
 
 const ENTRY = '/tests/l2/workbench.html';
 async function openSubagents() {
@@ -96,14 +96,11 @@ describe('原生 Subagent 管理旅程', () => {
       expect(result.overflow).toBe(false);
       expect(result.logos.length).toBe(8);
       expect(result.logos.every((logo) => logo.complete && logo.width > 0)).toBe(true);
-      await mkdir('/tmp/acm-polished-evidence', { recursive: true });
-      await browser.saveScreenshot(`/tmp/acm-polished-evidence/native-subagents-${width}.png`);
+      await saveEvidence(`native-subagents-${width}`);
       await $('[data-native-identity="codex:reviewer"]').click();
       await $("//button[normalize-space()='查看原生源码']").click();
       await $('[aria-label="Subagent 原生源码"]').waitForDisplayed();
-      await browser.saveScreenshot(
-        `/tmp/acm-polished-evidence/native-subagent-detail-${width}.png`,
-      );
+      await saveEvidence(`native-subagent-detail-${width}`);
       if (width === 390) await $("//button[normalize-space()='返回列表']").click();
       await $("//button[contains(@class,'sub-tab')][normalize-space()='发现']").click();
       const target = $('[aria-label="选择 Subagent 发现目标"]');
@@ -124,9 +121,7 @@ describe('原生 Subagent 管理旅程', () => {
       expect(dialogMetrics.targets.length).toBe(4);
       if (width === 390) expect(dialogMetrics.targets.every((height) => height >= 44)).toBe(true);
       if (width === 390) expect(dialogMetrics.closeHeight).toBeGreaterThanOrEqual(44);
-      await browser.saveScreenshot(
-        `/tmp/acm-polished-evidence/native-subagent-install-${width}.png`,
-      );
+      await saveEvidence(`native-subagent-install-${width}`);
     });
   }
 });

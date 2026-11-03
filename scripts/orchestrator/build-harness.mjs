@@ -1,6 +1,6 @@
 /* global console */
 /**
- * L3 harness 构建（由 test-tauri.mjs 使用；旧 perf.mjs 不在有效验证链路中）。
+ * L3 harness 构建（由 test-tauri.mjs 使用）。
  *
  * 顺序（环境与证据边界见 docs/development.md）：
  * 1. `corepack npm exec -- tsc -b`（类型检查）；
@@ -83,6 +83,8 @@ export async function ensureHarnessBuilt() {
     provenance: 'L3 专用隔离测试构建；非生产签名/DMG，不取得 L4 credit',
   };
   writeJson(path.join(ARTIFACTS_ROOT, 'test-harness/identity.json'), identity);
-  console.log(`\nharness 构建完成；artifact identity: ${identity.identifier} (${identity.profile})`);
+  console.log(
+    `\nharness 构建完成；artifact identity: ${identity.identifier} (${identity.profile})`,
+  );
   return true;
 }

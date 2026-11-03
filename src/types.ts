@@ -283,3 +283,49 @@ export interface SubagentBackupEntry {
   createdAt: number;
   subagent: InstalledSubagent;
 }
+
+/** Matrix configuration state; never a claim that an Agent session loaded it. */
+export interface SkillMatrixCell {
+  activationMode: 'native' | 'projectLauncher';
+  notice?: string;
+  agent: AgentType;
+  checked: boolean;
+  origin: 'placed' | 'inherited' | 'excluded' | 'absent' | 'unknown' | 'enabled';
+  reason?: string;
+  revision: string;
+}
+export interface SkillMatrixRow {
+  skill: InstalledSkill;
+  target: ScopeTarget;
+  cells: SkillMatrixCell[];
+}
+export interface SkillAssignment {
+  id: string;
+  sourceTarget: ScopeTarget;
+  target: ScopeTarget;
+  agent: AgentType;
+  enabled: boolean;
+  expectedRevision: string;
+}
+export interface SkillAssignmentResult {
+  request: SkillAssignment;
+  applied: boolean;
+  error?: string;
+}
+export interface SkillAssignmentPreview {
+  request: SkillAssignment;
+  checked: boolean;
+  reason?: string;
+}
+
+export interface CodexProjectLaunchPlan {
+  projectId: string;
+  projectRoot: string;
+  codexHome: string;
+  executablePath?: string;
+  args: string[];
+  excludedSkills: { id: string; name: string }[];
+  revision: string;
+  reason?: string;
+  notice?: string;
+}

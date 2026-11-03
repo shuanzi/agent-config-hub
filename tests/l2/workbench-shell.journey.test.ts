@@ -17,6 +17,12 @@ async function expectNoHorizontalOverflow(): Promise<void> {
   expect(hasOverflow).toBe(false);
 }
 
+async function openMaintenance(): Promise<void> {
+  const maintenance = $("//button[normalize-space()='目录与维护']");
+  await maintenance.waitForDisplayed();
+  await maintenance.click();
+}
+
 describe('Workbench shell and visual fixture', () => {
   it('shows the type rail, configuration-context rail and workspace at the desktop breakpoint', async () => {
     await browser.setWindowSize(1200, 900);
@@ -177,6 +183,7 @@ describe('Workbench shell and visual fixture', () => {
     await allContext.click();
     await $('.app-main-surface').waitForDisplayed();
     expect(await $("[data-workbench-rail='context']").isExisting()).toBe(false);
+    await openMaintenance();
     await $('.skill-table').waitForDisplayed();
     const tableLayout = await browser.execute(() => {
       const table = document.querySelector<HTMLElement>('.skill-table');
@@ -223,6 +230,7 @@ describe('Workbench shell and visual fixture', () => {
     await $('.app-main-surface').waitForDisplayed();
     await expectNoHorizontalOverflow();
 
+    await openMaintenance();
     const compactTableLayout = await browser.execute(() => {
       const table = document.querySelector<HTMLElement>('.skill-table');
       const head = document.querySelector<HTMLElement>('.skill-table thead');
@@ -269,10 +277,12 @@ describe('Workbench shell and visual fixture', () => {
     await browser.setViewport({ width: 1280, height: 900 });
     await browser.url(ENTRY);
     await waitForStable();
+    await openMaintenance();
     expect(await $('.skill-empty h3').getText()).toContain('尚未安装');
 
     await browser.url(`${ENTRY}?fixture=visual`);
     await waitForStable();
+    await openMaintenance();
     expect(await $$('.skill-list [data-skill-id]').length).toBe(3);
 
     const subagents = await $(

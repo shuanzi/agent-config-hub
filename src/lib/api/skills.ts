@@ -126,3 +126,31 @@ export async function restoreSkillBackup(
 export async function deleteSkillBackup(backupId: string, target: ScopeTarget): Promise<void> {
   return invoke('delete_skill_backup', { backupId, target });
 }
+
+export async function getSkillMatrix(
+  context: ConfigContext,
+): Promise<import('../../types').SkillMatrixRow[]> {
+  return invoke('get_skill_matrix', { context });
+}
+export async function applySkillAssignments(
+  requests: import('../../types').SkillAssignment[],
+): Promise<import('../../types').SkillAssignmentResult[]> {
+  return invoke('apply_skill_assignments', { requests });
+}
+export async function previewSkillAssignments(
+  requests: import('../../types').SkillAssignment[],
+): Promise<import('../../types').SkillAssignmentPreview[]> {
+  return invoke('preview_skill_assignments', { requests });
+}
+
+export async function getCodexProjectLaunch(
+  projectId: string,
+): Promise<import('../../types').CodexProjectLaunchPlan> {
+  return invoke('get_codex_project_launch', { projectId });
+}
+export async function launchCodexProject(
+  projectId: string,
+  expectedRevision: string,
+): Promise<{ handedOff: boolean }> {
+  return invoke('launch_codex_project', { projectId, expectedRevision });
+}

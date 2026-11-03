@@ -21,6 +21,9 @@ const { mockOpenFileDialog } = vi.hoisted(() => ({
 
 const mockApi = {
   getInstalledSkills: vi.fn(),
+  getSkillMatrix: vi.fn().mockResolvedValue([]),
+  previewSkillAssignments: vi.fn(),
+  applySkillAssignments: vi.fn(),
   discoverAvailableSkills: vi.fn(),
   getSkillRepos: vi.fn(),
   getSkillBackups: vi.fn(),
@@ -100,6 +103,7 @@ function placementTargets(target: ScopeTarget): SkillPlacementTarget[] {
 }
 
 function setupPlacementMocks() {
+  mockApi.getSkillMatrix.mockResolvedValue([]);
   mockApi.getSkillPlacements.mockResolvedValue([]);
   mockApi.getSkillPlacementTargets.mockImplementation((target: ScopeTarget) =>
     Promise.resolve(placementTargets(target)),
@@ -159,12 +163,14 @@ function renderPanel(
   onOpenDiscovery: () => void = () => undefined,
   projectList: readonly ProjectSummary[] = projects,
 ) {
-  return render(
+  const view = render(
     <Panel context={context} projects={projectList} onOpenDiscovery={onOpenDiscovery} />,
     {
       wrapper: createWrapper(queryClient),
     },
   );
+  fireEvent.click(screen.getByRole('button', { name: '目录与维护' }));
+  return view;
 }
 
 describe('InstalledSkillsPanel 导入同目录不同来源的本地 Skill', () => {

@@ -9,3 +9,4 @@ src-tauri/gen/
 .DS_Store
 # Lockfiles MUST be committed (ARC-06c): do not ignore package-lock.json or Cargo.lock
 .scratch/
+.impeccable/hook.cache.json

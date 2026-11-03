@@ -597,6 +597,9 @@ export interface InitialNavigation {
 }
 
 export function App({ initialNavigation = {} }: { initialNavigation?: InitialNavigation }) {
+  const [matrixDrafts, setMatrixDrafts] = useState<
+    Record<string, import('./types').SkillAssignment>
+  >({});
   const [currentView, setCurrentView] = useState<View>(initialNavigation.view ?? 'skills');
   const [skillsSubView, setSkillsSubView] = useState<SkillsSubView>(
     initialNavigation.subView ?? 'installed',
@@ -795,6 +798,7 @@ export function App({ initialNavigation = {} }: { initialNavigation?: InitialNav
                 >
                   {skillsSubView === 'installed' ? (
                     <InstalledSkillsPanel
+                      matrixDraftState={{ drafts: matrixDrafts, setDrafts: setMatrixDrafts }}
                       context={selectedContext}
                       projects={projects}
                       onOpenDiscovery={() => setSkillsSubView('discovery')}

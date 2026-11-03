@@ -1,6 +1,6 @@
 # Polished UI 操作验收
 
-本次实现以 [polished 清单](../design/agent-config-manager-ui/polished/README.md)及对应可编辑 Pen 为视觉基准。Skills 保留 cc-switch 式五列、64px 紧凑行和横排投放位置；共享目录是目录位置，不是第五种 Agent。浏览器和桌面均使用正式 `App` 与组件，旧 `prototype=full-ui` 不作为验收入口。
+本次实现以 [polished 清单](../design/polished/README.md)及对应可编辑 Pen 为视觉基准。Skills 保留 cc-switch 式五列、64px 紧凑行和横排投放位置；共享目录是目录位置，不是第五种 Agent。浏览器和桌面均使用正式 `App` 与组件，旧 `prototype=full-ui` 已退役。Skills 使用矩阵的增量验证见[矩阵验收记录](skill-matrix-results.md)；本文的紧凑列表操作须先进入“目录与维护”。
 
 [本地测试结果与实际截图](./polished-ui-results.md)。
 
@@ -91,7 +91,7 @@ npm run accept:app
 
 在线流程使用 `ACM_ONLINE_ACCEPTANCE=1 npm run test:tauri` 单独开启，报告与离线结果分开。已有在线样例、系统选择器实操、截图和日志保存在[2026-09-27 验收结果](polished-ui-results.md)，不代表后续每次运行均通过。
 
-[Polished L2](../../tests/l2/polished.journey.test.ts) 输出 25 个页面状态、8 个弹窗及额外异常状态到 `/tmp/acm-polished-evidence`；布局、焦点和交互断言与人工对照共同用于验收，不以截图存在代替视觉核对。设计预览和验收截图来源分别标明，不修改 Pen 来掩盖实现差异。
+[Polished L2](../../tests/l2/polished.journey.test.ts) 将页面、弹窗及异常状态的本次运行截图输出到 `.artifacts/ui/latest/`；布局、焦点和交互断言与人工对照共同用于验收，不以截图存在代替视觉核对。设计预览和验收截图来源分别标明，不修改 Pen 来掩盖实现差异。
 
 
 ## 旧 Skill 数据兼容回归

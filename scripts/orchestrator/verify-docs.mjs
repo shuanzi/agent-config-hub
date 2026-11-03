@@ -3,22 +3,35 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
-const designRoot = 'docs/design/agent-config-manager-ui';
-const evidenceRoot = 'docs/acceptance/polished-ui-evidence';
+const designRoot = 'docs/design/polished';
+const evidenceRoot = 'docs/acceptance/evidence/2026-09-27-polished-ui';
 
 function markdownFiles(root) {
   const files = [];
   function walk(directory) {
     for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
       const full = path.join(directory, entry.name);
-      if (entry.isDirectory()) walk(full);
+      if (
+        entry.isDirectory() &&
+        ![
+          'node_modules',
+          'dist',
+          'dist-ssr',
+          'target',
+          '.artifacts',
+          '.git',
+          '.cache',
+          '.scratch',
+        ].includes(entry.name)
+      )
+        walk(full);
       else if (entry.isFile() && entry.name.endsWith('.md')) files.push(full);
     }
   }
   for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
     if (entry.isFile() && entry.name.endsWith('.md')) files.push(path.join(root, entry.name));
   }
-  for (const name of ['docs', 'src', 'tests', 'performance']) {
+  for (const name of ['docs', 'src', 'tests']) {
     const directory = path.join(root, name);
     if (fs.existsSync(directory)) walk(directory);
   }
@@ -50,10 +63,24 @@ function anchors(markdown) {
 
 /** 检查维护文档；不访问网络、不读取本地 Skills 或执行文档中的命令。 */
 export function verifyDocs(root) {
+  root = path.resolve(root);
   const errors = [];
   const files = markdownFiles(root);
-  const scripts =
-    JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).scripts ?? {};
+  const packages = new Map();
+  function scriptsFor(file) {
+    let directory = path.dirname(file);
+    while (directory !== path.dirname(root)) {
+      const manifest = path.join(directory, 'package.json');
+      if (fs.existsSync(manifest)) {
+        if (!packages.has(manifest))
+          packages.set(manifest, JSON.parse(fs.readFileSync(manifest, 'utf8')).scripts ?? {});
+        return packages.get(manifest);
+      }
+      if (directory === root) break;
+      directory = path.dirname(directory);
+    }
+    return {};
+  }
   const anchorCache = new Map();
   function fail(file, message) {
     errors.push(`${path.relative(root, file)}: ${message}`);
@@ -100,7 +127,7 @@ export function verifyDocs(root) {
         fail(file, `引用链接未定义：${match[2] || match[1]}`);
     }
     for (const match of markdown.matchAll(/\b(?:corepack\s+)?npm\s+run\s+([\w:-]+)/g)) {
-      if (!Object.hasOwn(scripts, match[1])) fail(file, `npm 命令不存在：${match[1]}`);
+      if (!Object.hasOwn(scriptsFor(file), match[1])) fail(file, `npm 命令不存在：${match[1]}`);
     }
   }
   function json(relative) {
@@ -117,16 +144,26 @@ export function verifyDocs(root) {
     return [data.readUInt32BE(16), data.readUInt32BE(20)];
   }
   try {
-    const manifestPath = `${designRoot}/polished/preview-manifest.tsv`;
+    const manifestPath = `${designRoot}/preview-manifest.tsv`;
     const lines = fs.readFileSync(path.join(root, manifestPath), 'utf8').trim().split(/\r?\n/);
     if (lines.shift() !== 'file\tnode_id\tlogical_width\tlogical_height')
       throw new Error('设计清单列名不匹配');
-    const nodes = new Map(
-      json(`${designRoot}/agent-config-manager-ui-polished.pen`).children.map((node) => [
-        node.id,
-        node,
-      ]),
-    );
+    const pen = json(`${designRoot}/design.pen`);
+    const nodes = new Map(pen.children.map((node) => [node.id, node]));
+    function checkAssets(value) {
+      if (!value || typeof value !== 'object') return;
+      for (const [key, entry] of Object.entries(value)) {
+        if (
+          key === 'url' &&
+          typeof entry === 'string' &&
+          !/^(?:[a-z][\w+.-]*:|\/\/)/i.test(entry)
+        ) {
+          if (!fs.existsSync(path.resolve(root, designRoot, entry)))
+            throw new Error(`Pen 本地资源不存在：${entry}`);
+        } else checkAssets(entry);
+      }
+    }
+    checkAssets(pen);
     const previews = new Map();
     const ids = new Set();
     for (const line of lines) {
@@ -135,12 +172,12 @@ export function verifyDocs(root) {
       const node = nodes.get(id);
       if (!node || node.width !== Number(width) || node.height !== Number(height))
         throw new Error(`Pen 节点或画板尺寸不匹配：${file}/${id}`);
-      pngSize(`${designRoot}/polished/previews/${file}`);
+      pngSize(`${designRoot}/previews/${file}`);
       previews.set(file, { id, width: Number(width), height: Number(height) });
       ids.add(id);
     }
     const pngs = fs
-      .readdirSync(path.join(root, designRoot, 'polished/previews'))
+      .readdirSync(path.join(root, designRoot, 'previews'))
       .filter((name) => name.endsWith('.png'));
     if (pngs.length !== previews.size || pngs.some((name) => !previews.has(name)))
       throw new Error('设计 PNG 与清单不完整对应');
@@ -169,6 +206,105 @@ export function verifyDocs(root) {
     }
   } catch (error) {
     errors.push(`设计／截图清单：${error.message}`);
+  }
+  function imageSize(relative) {
+    const data = fs.readFileSync(path.join(root, relative));
+    if (data.subarray(0, 8).toString('hex') === '89504e470d0a1a0a') {
+      if (!relative.endsWith('.png')) throw new Error(`图片编码与扩展名不一致：${relative}`);
+      return pngSize(relative);
+    }
+    if (data[0] !== 0xff || data[1] !== 0xd8) throw new Error(`图片编码无法识别：${relative}`);
+    if (!/\.jpe?g$/.test(relative)) throw new Error(`图片编码与扩展名不一致：${relative}`);
+    let offset = 2;
+    while (offset + 4 < data.length) {
+      if (data[offset++] !== 0xff) throw new Error(`无效 JPEG：${relative}`);
+      while (data[offset] === 0xff) offset++;
+      const marker = data[offset++];
+      if (marker === 0xda || marker === 0xd9) break;
+      const length = data.readUInt16BE(offset);
+      if (length < 2 || offset + length > data.length) throw new Error(`无效 JPEG：${relative}`);
+      if (
+        [0xc0, 0xc1, 0xc2, 0xc3, 0xc5, 0xc6, 0xc7, 0xc9, 0xca, 0xcb, 0xcd, 0xce, 0xcf].includes(
+          marker,
+        )
+      ) {
+        if (length < 8) throw new Error(`无效 JPEG：${relative}`);
+        return [data.readUInt16BE(offset + 5), data.readUInt16BE(offset + 3)];
+      }
+      offset += length;
+    }
+    throw new Error(`JPEG 缺少尺寸：${relative}`);
+  }
+  function matrixImages(base, manifest, prefix) {
+    const records = fs
+      .readFileSync(path.join(root, base, manifest), 'utf8')
+      .trim()
+      .split(/\r?\n/);
+    if (records.shift() !== 'file\twidth\theight\tevidence') throw new Error('矩阵清单表头无效');
+    const seen = new Set();
+    for (const row of records) {
+      const [file, width, height, evidence] = row.split('\t');
+      const filename = file?.startsWith(prefix) ? file.slice(prefix.length) : '';
+      if (!/^[^/]+\.(png|jpe?g)$/.test(filename) || seen.has(file) || !evidence)
+        throw new Error(`矩阵清单条目无效：${file}`);
+      seen.add(file);
+      const actual = imageSize(`${base}/${file}`);
+      if (
+        actual[0] !== Number(width) ||
+        actual[1] !== Number(height) ||
+        !Number(width) ||
+        !Number(height)
+      )
+        throw new Error(`矩阵实际尺寸不匹配：${file}`);
+    }
+    const images = fs
+      .readdirSync(path.join(root, base, prefix))
+      .filter((name) => /\.(png|jpe?g)$/.test(name));
+    if (
+      !seen.size ||
+      images.length !== seen.size ||
+      images.some((name) => !seen.has(`${prefix}${name}`))
+    )
+      throw new Error('矩阵预览与清单不完整对应');
+  }
+  const matrixRoot = 'docs/design/skill-matrix';
+  if (fs.existsSync(path.join(root, matrixRoot))) {
+    try {
+      matrixImages(matrixRoot, 'preview-manifest.tsv', 'previews/');
+      matrixImages(
+        'docs/acceptance/evidence/2026-10-14-skill-matrix',
+        'screenshot-manifest.tsv',
+        '',
+      );
+      for (const file of [
+        'package.json',
+        'package-lock.json',
+        'index.html',
+        'vite.config.mjs',
+        'src/App.jsx',
+        'src/main.jsx',
+        'src/model.js',
+        'src/styles.css',
+        'tests/model.test.mjs',
+        'tests/sites-worker.test.mjs',
+        'scripts/prepare-sites-build.mjs',
+        'worker/index.js',
+        '.openai/hosting.json',
+        'public/assets/InterVariable.woff2',
+        'public/assets/Inter-LICENSE.txt',
+        'public/assets/CC_SWITCH_NOTICE.md',
+        'public/assets/codex.svg',
+        'public/assets/claude-code.svg',
+        'public/assets/opencode.svg',
+        'public/assets/google-gemini.svg',
+      ]) {
+        const source = path.join(root, matrixRoot, 'prototype', file);
+        if (!fs.existsSync(source) || !fs.statSync(source).isFile() || !fs.statSync(source).size)
+          throw new Error(`矩阵原型源码缺失：${file}`);
+      }
+    } catch (error) {
+      errors.push(`矩阵设计清单：${error.message}`);
+    }
   }
   return { errors, documentCount: files.length };
 }

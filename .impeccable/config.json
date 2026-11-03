@@ -1,0 +1,14 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "overused-font",
+        "value": "inter",
+        "createdAt": "2026-10-17T05:47:16.303Z",
+        "reason": "Agent: docs/design/polished/README.md 明确保留既有 Inter；本次已批准范围要求保留设计意图且不改版 UI，据此登记既有字体例外。"
+      }
+    ]
+  }
+}

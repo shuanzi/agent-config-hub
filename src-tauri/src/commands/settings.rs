@@ -135,12 +135,18 @@ pub async fn set_setting_command(
     request: SetSettingRequest,
     state: tauri::State<'_, AppState>,
 ) -> Result<(), String> {
-    if request.key == "skill_placement_registry_v1" {
+    set_database_setting_guarded(&state.db, request)
+}
+
+fn set_database_setting_guarded(db: &Database, request: SetSettingRequest) -> Result<(), String> {
+    if request.key == "skill_placement_registry_v1"
+        || request
+            .key
+            .starts_with(crate::services::skill_policy::OPENCODE_EXCLUSION_PREFIX)
+    {
         return Err(format_skill_error("SKILL_REGISTRY_PROTECTED", &[], None));
     }
-    state
-        .db
-        .set_setting(&request.key, &request.value)
+    db.set_setting(&request.key, &request.value)
         .map_err(map_err)
 }
 
@@ -724,6 +730,36 @@ mod tests {
         }
     }
 
+    #[test]
+    fn generic_setting_updates_cannot_replace_opencode_permission_backups() {
+        let db = Database::memory().unwrap();
+        let key = format!(
+            "{}example",
+            crate::services::skill_policy::OPENCODE_EXCLUSION_PREFIX
+        );
+        db.set_setting(&key, r#"{"previous":"ask"}"#).unwrap();
+        let result = set_database_setting_guarded(
+            &db,
+            SetSettingRequest {
+                key: key.clone(),
+                value: "null".into(),
+            },
+        );
+        assert!(result.unwrap_err().contains("SKILL_REGISTRY_PROTECTED"));
+        assert_eq!(
+            db.get_setting(&key).unwrap().as_deref(),
+            Some(r#"{"previous":"ask"}"#)
+        );
+        set_database_setting_guarded(
+            &db,
+            SetSettingRequest {
+                key: "ordinary".into(),
+                value: "ok".into(),
+            },
+        )
+        .unwrap();
+        assert_eq!(db.get_setting("ordinary").unwrap().as_deref(), Some("ok"));
+    }
     #[test]
     fn map_err_passes_through_structured_errors() {
         let structured = format_skill_error(
